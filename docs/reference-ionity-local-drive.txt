@@ -1,0 +1,29 @@
+  ██╗ ██████╗ ███╗   ██╗██╗████████╗██╗   ██╗
+  ██║██╔═══██╗████╗  ██║██║╚══██╔══╝╚██╗ ██╔╝
+  ██║██║   ██║██╔██╗ ██║██║   ██║    ╚████╔╝
+  ██║██║   ██║██║╚██╗██║██║   ██║     ╚██╔╝
+  ██║╚██████╔╝██║ ╚████║██║   ██║      ██║
+  ╚═╝ ╚═════╝ ╚═╝  ╚═══╝╚═╝   ╚═╝      ╚═╝
+  LOCAL DRIVE - your Wi-Fi share, PasteZone & AI file hub          www.ionity.co.za
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  Friendly address : https://ionity.wifi.storage   (after hosts setup - see Setup tab)
+  mDNS address     : https://ionity.local
+  PHONE SETUP QR   : http://192.168.2.11:8080/api/system/bootstrap
+  Direct           : https://192.168.2.11  |  http://192.168.2.11:8080
+  Storage root     : C:\Users\DGMic\ionity-local-drive\src\IonityLocalDrive\bin\Release\net10.0\win-x64\IonityDrive
+  Replica          : off (set ReplicaRoot in ionity.config.json)
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  21:46:17 [Protocol] ionity:// protocol registered for the current user.
+  21:46:17 [MdnsService] mDNS responder active for ionity.local
+  21:46:17 [Lifetime] Now listening on: http://0.0.0.0:8080
+  21:46:17 [Lifetime] Now listening on: https://0.0.0.0:443
+  21:46:17 [Lifetime] Application started. Press Ctrl+C to shut down.
+  21:46:17 [Lifetime] Hosting environment: Production
+  21:46:17 [Lifetime] Content root path: C:\Users\DGMic\ionity-local-drive\src\IonityLocalDrive\bin\Release\net10.0\win
+
+
+
+
+
+
+  PAIRING CODE  683 282   valid 34s   ·   join: http://192.168.2.11:8080   ·   www.ionity.co.za

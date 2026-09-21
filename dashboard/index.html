@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ionity Fleet Monitor</title>
+<meta name="author" content="Johan Wilhelm van Antwerp">
+<meta name="copyright" content="(c) 2018-2026 Antwerp Designs | Ionity (Pty) Ltd">
+<meta name="description" content="Live monitoring for the Ionity ESP32-MCP edge fleet. Policy 986 AED.">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <span class="mark">◈</span>
+    <div>
+      <h1>IONITY FLEET MONITOR</h1>
+      <p class="tag">ESP32-MCP edge network · Building Tomorrow, Today.</p>
+    </div>
+  </div>
+  <div class="conn">
+    <span id="wsDot" class="dot"></span>
+    <span id="wsLabel">connecting…</span>
+    <span class="sep">|</span>
+    <span id="mqttLabel">mqtt —</span>
+  </div>
+</header>
+
+<section class="kpis" id="kpis">
+  <div class="kpi"><span class="k-val" id="kTotal">—</span><span class="k-lab">Devices</span></div>
+  <div class="kpi ok"><span class="k-val" id="kOnline">—</span><span class="k-lab">Online</span></div>
+  <div class="kpi warn"><span class="k-val" id="kStale">—</span><span class="k-lab">Stale</span></div>
+  <div class="kpi bad"><span class="k-val" id="kOffline">—</span><span class="k-lab">Offline</span></div>
+  <div class="kpi crit"><span class="k-val" id="kAlert">—</span><span class="k-lab">Alerting</span></div>
+  <div class="kpi"><span class="k-val" id="kRate">—</span><span class="k-lab">msg/sec in</span></div>
+  <div class="kpi"><span class="k-val" id="kQueue">—</span><span class="k-lab">Write queue</span></div>
+</section>
+
+<section class="panel chartrow">
+  <div class="chartbox">
+    <div class="chart-h"><span>Ingest rate</span><span id="rateNow" class="muted"></span></div>
+    <canvas id="rateChart" height="70"></canvas>
+  </div>
+  <div class="chartbox">
+    <div class="chart-h"><span>Fleet health</span><span id="healthNow" class="muted"></span></div>
+    <div class="healthbar" id="healthBar"></div>
+    <div class="legend">
+      <span><i class="sw ok"></i>online</span><span><i class="sw warn"></i>stale</span>
+      <span><i class="sw bad"></i>offline</span><span><i class="sw crit"></i>alerting</span>
+    </div>
+  </div>
+</section>
+
+<section class="panel">
+  <div class="toolbar">
+    <input id="search" type="search" placeholder="Search device id, label or IP…">
+    <select id="fHealth">
+      <option value="">All health</option>
+      <option value="online">Online</option>
+      <option value="stale">Stale</option>
+      <option value="offline">Offline</option>
+      <option value="alerting">Alerting</option>
+    </select>
+    <select id="fSite"><option value="">All sites</option></select>
+    <select id="fGroup"><option value="">All groups</option></select>
+    <span class="grow"></span>
+    <span id="shown" class="muted"></span>
+    <button id="btnBroadcast" class="btn ghost">Identify all</button>
+  </div>
+  <div id="grid" class="grid"></div>
+  <div id="truncNote" class="muted trunc"></div>
+</section>
+
+<section class="panel">
+  <div class="chart-h"><span>Open alerts</span><span id="alertCount" class="muted"></span></div>
+  <div id="alerts" class="alerts"></div>
+</section>
+
+<section class="panel">
+  <div class="chart-h"><span>MCP console</span><span class="muted">POST /api/v1/mcp/rpc</span></div>
+  <div class="mcpbar">
+    <select id="mcpTool"></select>
+    <input id="mcpArgs" value="{}" spellcheck="false">
+    <button id="mcpRun" class="btn">Call tool</button>
+  </div>
+  <pre id="mcpOut" class="out">Pick a tool and call it. This is the exact surface Claude / AEDi sees.</pre>
+</section>
+
+<div id="drawer" class="drawer">
+  <div class="drawer-h">
+    <strong id="dTitle">device</strong>
+    <button id="dClose" class="btn ghost sm">close</button>
+  </div>
+  <div id="dBody" class="drawer-b"></div>
+</div>
+
+<footer class="foot">
+  DOC-2026-09-ESP32MCP-DASH · Policy 986 AED · © 2018-2026 Antwerp Designs | Ionity (Pty) Ltd
+  · <a href="https://www.ionity.today">ionity.today</a>
+</footer>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

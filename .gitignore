@@ -1,0 +1,39 @@
+# --- secrets -----------------------------------------------------------
+.env
+firmware/include/secrets.h
+infra/mosquitto/config/passwd
+
+# --- python ------------------------------------------------------------
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+
+# --- data --------------------------------------------------------------
+data/
+*.db
+*.db-wal
+*.db-shm
+
+# --- platformio --------------------------------------------------------
+firmware/.pio/
+firmware/.vscode/
+*.bin
+*.elf
+
+# --- editors / os ------------------------------------------------------
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini
+.DS_Store
+
+# --- reference import (kept locally, not pushed) -----------------------
+# Remove this line if you want the RouterProject reference in the repo.
+_reference/
+
+# --- local run logs ---
+*.log
+logs_*.txt
+sim_*.txt

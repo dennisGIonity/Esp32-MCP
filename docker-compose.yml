@@ -1,0 +1,40 @@
+# AEDI - IONITY GLOBAL | ESP32-MCP stack
+# docker compose up -d   ->   broker on 1883/9001, fleet server on 8099
+# Policy 986 AED | (c) 2018-2026 Antwerp Designs | Ionity (Pty) Ltd
+
+services:
+  mosquitto:
+    image: eclipse-mosquitto:2
+    container_name: ionity-mosquitto
+    restart: unless-stopped
+    ports:
+      - "1883:1883"
+      - "9001:9001"
+    volumes:
+      - ./infra/mosquitto/config:/mosquitto/config
+      - mosquitto-data:/mosquitto/data
+      - mosquitto-log:/mosquitto/log
+
+  fleet-server:
+    build:
+      context: .
+      dockerfile: infra/Dockerfile
+    container_name: ionity-fleet-server
+    restart: unless-stopped
+    depends_on:
+      - mosquitto
+    ports:
+      - "8099:8099"
+    environment:
+      IONITY_MQTT_HOST: mosquitto
+      IONITY_MQTT_PORT: "1883"
+      IONITY_SQLITE_PATH: /data/fleet.db
+      IONITY_FLEET_TOKEN: ${IONITY_FLEET_TOKEN:-dev-fleet-token-change-me}
+      IONITY_REQUIRE_TOKEN: ${IONITY_REQUIRE_TOKEN:-false}
+    volumes:
+      - fleet-data:/data
+
+volumes:
+  mosquitto-data:
+  mosquitto-log:
+  fleet-data:

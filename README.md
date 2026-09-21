@@ -1,0 +1,180 @@
+<!--
+========================================================================================
+AEDI - IONITY GLOBAL - ESP32-MCP FLEET PLATFORM
+Author: Johan Wilhelm van Antwerp | Ionity (Pty) Ltd | AEDI
+Document ID: DOC-2026-09-ESP32MCP-001 | Version: 1.0.0 | Updated: 2026-09-21 SAST
+Governance: Policy 986 AED | License: AED 900 | CC BY-NC-SA 4.0 where stated
+(c) 2018-2026 Antwerp Designs | Ionity (Pty) Ltd - All Rights Reserved - TM2
+Web: https://www.ionity.today | https://www.ionity.world | Ref: https://www.ionity.co.za
+Classification: PUBLIC | Building Tomorrow, Today. | Anything is Possible with God.
+========================================================================================
+-->
+
+# Ionity ESP32-MCP — Fleet Telemetry & Model Context Protocol Gateway
+
+One binary on the device. One server for the fleet. One MCP endpoint for the AI.
+
+Scales from the first board on your desk to **1000+ ESP32 nodes** reporting into
+the Ionity Local Drive host at `192.168.2.11`, with a live dashboard and a
+Model Context Protocol surface so Claude / AEDi can query and command the whole
+fleet as a single system.
+
+---
+
+## What this is
+
+| Layer | What it does |
+|---|---|
+| **Firmware** (`firmware/`) | PlatformIO / Arduino. MQTT primary, HTTP fallback, MAC-derived device id, NVS provisioning, LWT, offline ring buffer, OTA. |
+| **Fleet server** (`server/`) | FastAPI. MQTT bridge + HTTP ingest → in-memory registry → batched SQLite writes. Alert engine, WebSocket broadcaster. |
+| **MCP gateway** (`server/app/mcp/`) | JSON-RPC 2.0, over HTTP *and* stdio. Seven tools covering the whole fleet. |
+| **Dashboard** (`dashboard/`) | Live fleet monitor: KPIs, ingest rate, health bar, device grid, drill-down, alerts, MCP console. |
+| **Simulator** (`scripts/`) | Fakes N devices so you can prove the stack before flashing hardware. |
+| **Reference** (`_reference/`) | `E:\.RouterProject` imported verbatim. See [`docs/REUSE-AUDIT.md`](docs/REUSE-AUDIT.md). |
+
+---
+
+## Quick start — no hardware needed
+
+```powershell
+cd E:\.ESP32-MCP
+
+# 1. Python deps
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -r server\requirements.txt
+
+# 2. Start the fleet server (dashboard + API + MCP on :8099)
+python server\run.py
+
+# 3. In a second terminal: pretend to be 250 ESP32s
+.\.venv\Scripts\Activate.ps1
+python scripts\fleet_simulator.py --devices 250 --interval 10
+```
+
+Open **http://192.168.2.11:8099/** (or `http://localhost:8099/`).
+
+MQTT is optional for the simulator's HTTP mode — the server logs
+`MQTT disconnected … devices will fall back to HTTP ingest` and keeps working.
+
+### With the broker (the real path)
+
+```powershell
+docker compose up -d          # mosquitto :1883 / :9001 + fleet server :8099
+python scripts\fleet_simulator.py --devices 1000 --transport mqtt
+```
+
+---
+
+## Flashing a real device
+
+```powershell
+cd E:\.ESP32-MCP\firmware
+copy include\secrets.h.example include\secrets.h   # then edit WiFi + tokens
+pio run -e esp32s3 -t upload -t monitor
+```
+
+The same binary flashes every unit — `device_id` comes from the eFuse MAC.
+Re-tag a device's site/group/label afterwards without reflashing:
+
+```bash
+curl -X POST http://192.168.2.11:8099/api/v1/devices/esp32-a1b2c3d4e5f6/cmd \
+  -H "Content-Type: application/json" \
+  -d '{"action":"set_meta","site":"kelvin-drive","group":"power","label":"GF riser"}'
+```
+
+See [`docs/DEVICE-PROVISIONING.md`](docs/DEVICE-PROVISIONING.md) for the 1000-unit workflow.
+
+---
+
+## Wiring the MCP server to Claude
+
+**Over HTTP** — point any MCP-over-HTTP client at:
+
+```
+POST http://192.168.2.11:8099/api/v1/mcp/rpc
+```
+
+**Over stdio** — in `claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "ionity-esp32-fleet": {
+      "command": "E:\\.ESP32-MCP\\.venv\\Scripts\\python.exe",
+      "args": ["-m", "app.mcp.server"],
+      "cwd": "E:\\.ESP32-MCP\\server"
+    }
+  }
+}
+```
+
+### Tools exposed
+
+| Tool | Use it for |
+|---|---|
+| `fleet_summary` | Whole-fleet health in one call. Start here. |
+| `list_devices` | Filter by site / group / health / free text, paged. |
+| `get_device` | One device plus recent history. |
+| `query_telemetry` | Raw time-series for a metric over a window. |
+| `aggregate_metric` | Mean/min/max/count + top-10 devices for a metric. |
+| `get_alerts` | Open or historical alerts. |
+| `send_command` | reboot / identify / ping / set_meta — one device or `broadcast`. |
+
+Resources: `ionity://fleet/summary`, `ionity://fleet/devices`, `ionity://fleet/schema`.
+
+---
+
+## REST surface
+
+```
+POST /api/v1/telemetry              single reading or array (max 500)
+POST /api/v1/devices/register       first-boot handshake
+GET  /api/v1/fleet/summary
+GET  /api/v1/devices?site=&group=&health=&search=&limit=&offset=
+GET  /api/v1/devices/{id}?history=100
+POST /api/v1/devices/{id}/cmd       {"action":"identify"}   ({id} may be "broadcast")
+GET  /api/v1/telemetry/query?metric=temp_c&minutes=60
+GET  /api/v1/telemetry/aggregate?metric=rssi_dbm&minutes=60
+GET  /api/v1/alerts?open_only=true
+POST /api/v1/mcp/rpc                MCP JSON-RPC 2.0
+GET  /api/v1/health
+WS   /ws/fleet                      live dashboard frames
+```
+
+Interactive docs: **http://192.168.2.11:8099/docs**
+
+---
+
+## Scale notes
+
+| Fleet size | Interval | Load | Verdict |
+|---|---|---|---|
+| 100 | 10 s | 10 msg/s | trivial |
+| 1 000 | 10 s | 100 msg/s | comfortable on the local box |
+| 1 000 | 3 s | 333 msg/s | fine over MQTT; **do not** attempt over HTTP |
+| 5 000 | 15 s | 333 msg/s | move storage to TimescaleDB (`docs/ARCHITECTURE.md`) |
+
+Ingest is O(1) per message: the registry updates RAM immediately and a single
+writer task drains a queue in batches of 200, so the database commits ~1×/sec
+regardless of fleet size.
+
+---
+
+## Layout
+
+```
+E:\.ESP32-MCP
+├── firmware/          PlatformIO project (esp32s3 | esp32dev | esp32c3 | OTA env)
+├── server/            FastAPI fleet server + MCP gateway
+│   └── app/{api,ingest,storage,fleet,mcp}
+├── dashboard/         static SPA served at /
+├── infra/             Dockerfile + mosquitto.conf
+├── scripts/           fleet_simulator.py
+├── docs/              architecture, reuse audit, schema, provisioning, roadmap
+└── _reference/        E:\.RouterProject imported (git-ignored)
+```
+
+---
+
+*Governance: Policy 986 AED · Licence AED 900 · © 2018-2026 Antwerp Designs | Ionity (Pty) Ltd · TM2*
