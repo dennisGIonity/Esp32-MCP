@@ -19,6 +19,7 @@ from app.config import settings, ROOT
 from app.storage.sqlite_store import SQLiteStore
 from app.fleet.registry import FleetRegistry
 from app.ingest.mqtt_bridge import MqttBridge
+from app.ingest.dns_resolver import DnsService
 from app.mcp.server import FleetMCPServer
 from app.api.routes import router, ws_clients
 
@@ -63,13 +64,20 @@ async def lifespan(app: FastAPI):
 
     app.state.store = store
     app.state.registry = registry
-    app.state.mcp = FleetMCPServer(registry, store)
     app.state.mqtt = None
+    app.state.dns = None
 
     if settings.mqtt_enabled:
         bridge = MqttBridge(registry)
         await bridge.start()
         app.state.mqtt = bridge
+
+    if settings.dns_enabled:
+        dns = DnsService(store, settings)
+        await dns.start()
+        app.state.dns = dns
+
+    app.state.mcp = FleetMCPServer(registry, store, dns=app.state.dns)
 
     bcast = asyncio.create_task(broadcaster(app))
 
@@ -81,11 +89,19 @@ async def lifespan(app: FastAPI):
     log.info(" MQTT      %s:%s (enabled=%s)", settings.mqtt_host,
              settings.mqtt_port, settings.mqtt_enabled)
     log.info(" Storage   %s -> %s", settings.storage_driver, settings.sqlite_path)
+    if app.state.dns:
+        st = app.state.dns.stats()
+        log.info(" LAN DNS   %s (running=%s) upstreams %s",
+                 st["bind"], st["running"], ",".join(st["upstreams"]))
+        if not st["running"]:
+            log.warning(" LAN DNS   bind failed: %s", st["bind_error"])
     log.info("=" * 66)
 
     yield
 
     bcast.cancel()
+    if app.state.dns:
+        await app.state.dns.stop()
     if app.state.mqtt:
         await app.state.mqtt.stop()
     await registry.stop()

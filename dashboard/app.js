@@ -291,3 +291,103 @@ pollHealth();
 setInterval(refreshAlerts, 10000);
 setInterval(pollHealth, 10000);
 window.addEventListener("resize", () => drawSpark($("rateChart"), RATE));
+
+/* ----------------------------------------------------------------- */
+/* LAN DNS panel                                                      */
+/* ----------------------------------------------------------------- */
+let DNS_WINDOW = 1440;
+let DNS_QUERY = "";
+
+function devName(d) {
+  return d.label || d.hostname || d.vendor || "unidentified";
+}
+
+async function refreshDns() {
+  try {
+    const [sum, devs, feed] = await Promise.all([
+      fetch(`${API}/api/v1/dns/summary?minutes=${DNS_WINDOW}`).then((r) => r.json()),
+      fetch(`${API}/api/v1/dns/devices?minutes=${DNS_WINDOW}&limit=40`).then((r) => r.json()),
+      fetch(`${API}/api/v1/dns/recent?limit=120`).then((r) => r.json()),
+    ]);
+
+    const res = sum.resolver || {};
+    if (res.running) {
+      $("dnsState").textContent =
+        `resolver up on ${res.bind} → ${(res.upstreams || []).join(", ")}`;
+    } else if (res.bind_error) {
+      $("dnsState").textContent = `resolver DOWN — ${res.bind_error}`;
+    } else {
+      $("dnsState").textContent = "resolver disabled";
+    }
+
+    $("dQueries").textContent = sum.queries ?? 0;
+    $("dDomains").textContent = sum.domains ?? 0;
+    $("dDevices").textContent = sum.devices ?? 0;
+    $("dCache").textContent = res.cache_hit_rate != null
+      ? `${(res.cache_hit_rate * 100).toFixed(0)}%` : "—";
+    $("dLatency").textContent = sum.avg_latency_ms != null
+      ? sum.avg_latency_ms.toFixed(0) : "—";
+
+    // devices with their top domains
+    const list = devs.devices || [];
+    $("dnsDevices").innerHTML = list.map((d) => `
+      <div class="dnsdev">
+        <div class="dnsdev-h">
+          <span class="dnsdev-ip">${d.client_ip}</span>
+          <span class="dnsdev-name">${devName(d)}</span>
+          <span class="dnsdev-meta">${d.queries} queries · ${d.distinct_domains} domains</span>
+        </div>
+        <div class="dnsdev-doms">
+          ${(d.top_domains || []).map((t) =>
+            `<span class="dom">${t.qname}<b>${t.hits}</b></span>`).join("")}
+        </div>
+      </div>`).join("") || `<div class="muted">
+        No DNS queries logged yet. The resolver is listening, but devices are still
+        using the router's DNS — point the router's DHCP at 192.168.2.11 to route
+        the whole LAN through it.</div>`;
+
+    // live feed
+    const qs = feed.queries || [];
+    $("dnsFeedCount").textContent = `${qs.length} most recent`;
+    $("dnsFeed").innerHTML = qs.map((q) => {
+      const t = new Date(q.ts * 1000).toLocaleTimeString([], { hour12: false });
+      const who = q.label || q.hostname || q.client_ip;
+      const mark = q.cached ? '<span class="q-c">·cached</span>' : "";
+      return `<div class="q"><span class="q-t">${t}</span>
+        <span class="q-ip">${who}</span>
+        <span class="q-n">${q.qname} <span class="muted">${q.qtype}</span></span>${mark}</div>`;
+    }).join("") || '<div class="muted">waiting for queries…</div>';
+  } catch {
+    $("dnsState").textContent = "resolver unreachable";
+  }
+}
+
+async function runDnsSearch() {
+  if (!DNS_QUERY) { $("dnsHint").textContent = ""; refreshDns(); return; }
+  const r = await fetch(
+    `${API}/api/v1/dns/search?pattern=${encodeURIComponent(DNS_QUERY)}&minutes=${DNS_WINDOW}&limit=200`
+  ).then((x) => x.json());
+  $("dnsHint").textContent = `${r.matches} matches for "${r.pattern}"`;
+  $("dnsFeedCount").textContent = "search results";
+  $("dnsFeed").innerHTML = (r.rows || []).map((q) => {
+    const t = new Date(q.ts * 1000).toLocaleString([], { hour12: false });
+    const who = q.label || q.hostname || q.client_ip;
+    return `<div class="q"><span class="q-t">${t.split(", ")[1] || t}</span>
+      <span class="q-ip">${who}</span>
+      <span class="q-n">${q.qname} <span class="muted">${q.qtype}</span></span></div>`;
+  }).join("") || '<div class="muted">nothing on the LAN has resolved that</div>';
+}
+
+let dnsSearchTimer = null;
+$("dnsSearch").oninput = (e) => {
+  DNS_QUERY = e.target.value.trim();
+  clearTimeout(dnsSearchTimer);
+  dnsSearchTimer = setTimeout(runDnsSearch, 350);
+};
+$("dnsWindow").onchange = (e) => {
+  DNS_WINDOW = parseInt(e.target.value, 10);
+  DNS_QUERY ? runDnsSearch() : refreshDns();
+};
+
+refreshDns();
+setInterval(() => { if (!DNS_QUERY) refreshDns(); }, 5000);

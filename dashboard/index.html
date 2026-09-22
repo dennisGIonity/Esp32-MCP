@@ -78,6 +78,44 @@
 </section>
 
 <section class="panel">
+  <div class="chart-h">
+    <span>LAN DNS — what's going to what device</span>
+    <span id="dnsState" class="muted">resolver —</span>
+  </div>
+
+  <div class="kpis dnskpis">
+    <div class="kpi"><span class="k-val" id="dQueries">—</span><span class="k-lab">Queries / hr</span></div>
+    <div class="kpi"><span class="k-val" id="dDomains">—</span><span class="k-lab">Domains</span></div>
+    <div class="kpi"><span class="k-val" id="dDevices">—</span><span class="k-lab">Devices asking</span></div>
+    <div class="kpi ok"><span class="k-val" id="dCache">—</span><span class="k-lab">Cache hit</span></div>
+    <div class="kpi"><span class="k-val" id="dLatency">—</span><span class="k-lab">Avg ms</span></div>
+  </div>
+
+  <div class="toolbar">
+    <input id="dnsSearch" type="search" placeholder="Search domains across the LAN… (e.g. tiktok)">
+    <select id="dnsWindow">
+      <option value="60">Last hour</option>
+      <option value="360">Last 6 hours</option>
+      <option value="1440" selected>Last 24 hours</option>
+      <option value="10080">Last 7 days</option>
+    </select>
+    <span class="grow"></span>
+    <span id="dnsHint" class="muted"></span>
+  </div>
+
+  <div class="dnsgrid">
+    <div>
+      <div class="chart-h"><span>By device</span><span class="muted">top domains each</span></div>
+      <div id="dnsDevices" class="dnsdevs"></div>
+    </div>
+    <div>
+      <div class="chart-h"><span>Live queries</span><span id="dnsFeedCount" class="muted"></span></div>
+      <div id="dnsFeed" class="dnsfeed"></div>
+    </div>
+  </div>
+</section>
+
+<section class="panel">
   <div class="chart-h"><span>MCP console</span><span class="muted">POST /api/v1/mcp/rpc</span></div>
   <div class="mcpbar">
     <select id="mcpTool"></select>

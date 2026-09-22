@@ -123,6 +123,92 @@ MCP_TOOLS: list[dict[str, Any]] = [
     },
 ]
 
+MCP_TOOLS += [
+    {
+        "name": "dns_summary",
+        "description": (
+            "LAN DNS overview for a window: total queries, distinct domains, "
+            "how many devices are asking, cache hit count and average latency. "
+            "Start here for any 'what is my network doing' question."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {"minutes": {"type": "integer", "default": 60}},
+        },
+    },
+    {
+        "name": "dns_by_device",
+        "description": (
+            "THE 'what is going to what device' tool. Per device on the LAN: "
+            "IP, MAC, vendor, hostname, how many DNS queries it made, how many "
+            "distinct domains, and its top 5 domains. Use this to see which "
+            "machine is talking to what."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "minutes": {"type": "integer", "default": 60},
+                "limit": {"type": "integer", "default": 25, "maximum": 500},
+            },
+        },
+    },
+    {
+        "name": "dns_top_domains",
+        "description": (
+            "Most-requested domains across the LAN, with hit count and how many "
+            "distinct devices asked. Pass client_ip to scope it to one device."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "minutes": {"type": "integer", "default": 60},
+                "limit": {"type": "integer", "default": 25, "maximum": 500},
+                "client_ip": {"type": "string"},
+            },
+        },
+    },
+    {
+        "name": "dns_search",
+        "description": (
+            "Find every DNS query matching a substring, and which device made "
+            "it. Use for questions like 'has anything on my network resolved "
+            "tiktok' or 'who is talking to this domain'."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "pattern": {"type": "string"},
+                "minutes": {"type": "integer", "default": 1440},
+                "limit": {"type": "integer", "default": 100, "maximum": 2000},
+            },
+            "required": ["pattern"],
+        },
+    },
+    {
+        "name": "dns_recent",
+        "description": "Live tail of the most recent DNS queries with the asking device.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "limit": {"type": "integer", "default": 50, "maximum": 1000},
+                "client_ip": {"type": "string"},
+            },
+        },
+    },
+    {
+        "name": "list_lan_devices",
+        "description": (
+            "Inventory of every device seen on the LAN: IP, MAC, vendor guessed "
+            "from the OUI, reverse-DNS hostname, first/last seen and query count. "
+            "This is the 'who is on my network' map."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {"limit": {"type": "integer", "default": 100, "maximum": 1000}},
+        },
+    },
+]
+
 MCP_RESOURCES: list[dict[str, Any]] = [
     {
         "uri": "ionity://fleet/summary",
@@ -145,8 +231,36 @@ MCP_RESOURCES: list[dict[str, Any]] = [
 ]
 
 
-async def execute(name: str, args: dict, registry, store) -> Any:
+async def execute(name: str, args: dict, registry, store, dns=None) -> Any:
     """Dispatch an MCP tool call against the live fleet."""
+    # ---- LAN DNS visibility ---------------------------------------------
+    if name.startswith("dns_") or name == "list_lan_devices":
+        mins = int(args.get("minutes", 60))
+        since = time.time() - mins * 60
+
+        if name == "dns_summary":
+            out = await store.dns_summary(since)
+            out["minutes"] = mins
+            out["resolver"] = dns.stats() if dns else {"running": False}
+            return out
+        if name == "dns_by_device":
+            return {"minutes": mins,
+                    "devices": await store.dns_by_device(since, int(args.get("limit", 25)))}
+        if name == "dns_top_domains":
+            return {"minutes": mins,
+                    "domains": await store.dns_top_domains(
+                        since, int(args.get("limit", 25)), args.get("client_ip"))}
+        if name == "dns_search":
+            since = time.time() - int(args.get("minutes", 1440)) * 60
+            rows = await store.dns_search(args["pattern"], since,
+                                          int(args.get("limit", 100)))
+            return {"pattern": args["pattern"], "matches": len(rows), "rows": rows}
+        if name == "dns_recent":
+            return {"queries": await store.dns_recent(
+                int(args.get("limit", 50)), args.get("client_ip"))}
+        if name == "list_lan_devices":
+            return {"devices": await store.list_lan_devices(int(args.get("limit", 100)))}
+
     if name == "fleet_summary":
         return registry.summary().model_dump()
 

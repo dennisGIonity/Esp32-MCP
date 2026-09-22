@@ -144,6 +144,52 @@ async def alerts(request: Request, device_id: str | None = None,
 
 
 # --------------------------------------------------------------------------
+# LAN DNS visibility
+# --------------------------------------------------------------------------
+@router.get("/api/v1/dns/summary")
+async def dns_summary(request: Request, minutes: int = 60):
+    store = request.app.state.store
+    dns = getattr(request.app.state, "dns", None)
+    out = await store.dns_summary(time.time() - minutes * 60)
+    out["minutes"] = minutes
+    out["resolver"] = dns.stats() if dns else {"running": False, "enabled": False}
+    return out
+
+
+@router.get("/api/v1/dns/devices")
+async def dns_devices(request: Request, minutes: int = 60,
+                      limit: int = Query(25, le=500)):
+    return {"minutes": minutes, "devices": await request.app.state.store.dns_by_device(
+        time.time() - minutes * 60, limit)}
+
+
+@router.get("/api/v1/dns/domains")
+async def dns_domains(request: Request, minutes: int = 60,
+                      limit: int = Query(25, le=500), client_ip: str | None = None):
+    return {"minutes": minutes, "domains": await request.app.state.store.dns_top_domains(
+        time.time() - minutes * 60, limit, client_ip)}
+
+
+@router.get("/api/v1/dns/recent")
+async def dns_recent(request: Request, limit: int = Query(50, le=1000),
+                     client_ip: str | None = None):
+    return {"queries": await request.app.state.store.dns_recent(limit, client_ip)}
+
+
+@router.get("/api/v1/dns/search")
+async def dns_search(request: Request, pattern: str, minutes: int = 1440,
+                     limit: int = Query(100, le=2000)):
+    rows = await request.app.state.store.dns_search(
+        pattern, time.time() - minutes * 60, limit)
+    return {"pattern": pattern, "matches": len(rows), "rows": rows}
+
+
+@router.get("/api/v1/lan/devices")
+async def lan_devices(request: Request, limit: int = Query(100, le=1000)):
+    return {"devices": await request.app.state.store.list_lan_devices(limit)}
+
+
+# --------------------------------------------------------------------------
 # MCP over HTTP
 # --------------------------------------------------------------------------
 @router.post("/api/v1/mcp/rpc")
@@ -174,6 +220,8 @@ async def health(request: Request):
         "dropped_writes": reg.dropped,
         "storage": settings.storage_driver,
         "mqtt": bridge.stats() if bridge else {"connected": False, "enabled": False},
+        "dns": (getattr(app.state, "dns", None).stats()
+                if getattr(app.state, "dns", None) else {"running": False, "enabled": False}),
         "ws_clients": len(ws_clients),
     }
 

@@ -51,6 +51,17 @@ class Settings(BaseSettings):
     alert_temp_c: float = 80.0
     alert_free_heap_bytes: int = 20000
 
+    # --- LAN DNS visibility ----------------------------------------------
+    # An ESP32 WiFi client cannot see other devices' DNS (per-client WPA keys
+    # + switched unicast). So the resolver runs here instead: point the
+    # router's DHCP at this host as LAN DNS and every query arrives by design.
+    dns_enabled: bool = True
+    dns_bind: str = "0.0.0.0"
+    dns_port: int = 53                   # 5353 is handy for testing unprivileged
+    dns_upstreams: str = "1.1.1.1,8.8.8.8"
+    dns_timeout_s: float = 3.0
+    dns_retention_days: int = 14
+
     # --- Dashboard broadcast ---------------------------------------------
     ws_broadcast_interval_s: float = 2.0
 

@@ -31,9 +31,10 @@ def _err(msg_id, code, message):
 
 
 class FleetMCPServer:
-    def __init__(self, registry, store):
+    def __init__(self, registry, store, dns=None):
         self.registry = registry
         self.store = store
+        self.dns = dns
 
     async def handle(self, req: dict[str, Any]) -> dict[str, Any] | None:
         msg_id = req.get("id")
@@ -66,7 +67,8 @@ class FleetMCPServer:
             name = params.get("name")
             args = params.get("arguments") or {}
             try:
-                result = await mcp_tools.execute(name, args, self.registry, self.store)
+                result = await mcp_tools.execute(name, args, self.registry,
+                                                 self.store, dns=self.dns)
                 return _ok(msg_id, {
                     "content": [{"type": "text", "text": json.dumps(result, indent=2, default=str)}],
                     "isError": False,

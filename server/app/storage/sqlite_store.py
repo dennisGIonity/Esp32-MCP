@@ -19,6 +19,7 @@ import aiosqlite
 
 from app.models import TelemetryIn, StatusIn, Alert
 from app.storage.base import Store
+from app.storage.dns_mixin import DnsStoreMixin
 
 SCHEMA = """
 PRAGMA journal_mode=WAL;
@@ -93,7 +94,7 @@ def _numeric(v: Any) -> float | None:
     return None
 
 
-class SQLiteStore(Store):
+class SQLiteStore(DnsStoreMixin, Store):
     def __init__(self, path: str):
         self.path = path
         self.db: aiosqlite.Connection | None = None
@@ -103,6 +104,7 @@ class SQLiteStore(Store):
         self.db = await aiosqlite.connect(self.path)
         self.db.row_factory = aiosqlite.Row
         await self.db.executescript(SCHEMA)
+        await self.db.executescript(self.DNS_SCHEMA)
         await self.db.commit()
 
     async def close(self) -> None:
