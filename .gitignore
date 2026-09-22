@@ -42,3 +42,11 @@ sim_*.txt
 firmware-arduino/.build-*/
 firmware-arduino/*.log
 firmware-arduino/Esp32_MCP_Node/secrets.h
+firmware-arduino/Pico_MCP_Node/secrets.h
+**/secrets.h
+
+# --- lab runtime ---
+.venv-broker/
+broker_*.txt
+bridge_*.txt
+server_boot.log

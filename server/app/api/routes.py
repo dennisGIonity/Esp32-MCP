@@ -51,7 +51,11 @@ async def ingest(request: Request, x_fleet_token: str | None = Header(default=No
             t = TelemetryIn(**raw)
         except Exception as e:
             raise HTTPException(status_code=422, detail=str(e))
-        t.net.transport = "http"
+        # It arrived over HTTP, whatever the device believed - EXCEPT readings a
+        # bridge forwarded on a device's behalf ("serial"), or the simulator's.
+        # Overwriting those would hide how the reading actually travelled.
+        if t.net.transport not in ("serial", "sim"):
+            t.net.transport = "http"
         registry.ingest(t)
         accepted += 1
 

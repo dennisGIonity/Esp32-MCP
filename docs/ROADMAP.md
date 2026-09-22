@@ -24,7 +24,7 @@ AEDI - IONITY GLOBAL | DOC-2026-09-ESP32MCP-006 | v1.0.0 | Policy 986 AED
 | Dashboard behind Ionity Local Drive auth | Currently open on the LAN |
 | Signed OTA images | Password-only OTA lets anyone on the LAN push firmware |
 | `pytest` coverage on registry + storage + MCP dispatch | Only smoke tests today |
-| Windows service wrapper (NSSM) for the server | Must survive a reboot of 192.168.2.11 |
+| Windows service wrapper (NSSM) for the server | Must survive a reboot of 192.168.0.3 |
 
 ## Phase 2 — scale
 

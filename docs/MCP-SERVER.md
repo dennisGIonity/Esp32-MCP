@@ -12,7 +12,7 @@ about every device as a single system, however many boards there are.
 
 | Transport | Address | Use for |
 |---|---|---|
-| **HTTP** | `POST http://192.168.2.11:8099/api/v1/mcp/rpc` | AEDi, dashboards, curl, anything on the LAN |
+| **HTTP** | `POST http://192.168.0.3:8099/api/v1/mcp/rpc` | AEDi, dashboards, curl, anything on the LAN |
 | **stdio** | `E:\.ESP32-MCP\.venv\Scripts\python.exe E:\.ESP32-MCP\server\mcp_stdio_proxy.py` | Claude Desktop, Claude Code — clients that spawn a subprocess |
 
 Server identity: `ionity-esp32-fleet-mcp` v1.0.0, protocol `2024-11-05`.
@@ -101,13 +101,13 @@ schtasks /create /tn "Ionity Fleet Server" /sc onlogon /rl highest ^
 ```
 
 Worth doing before you rely on the DNS resolver — once the router points the
-LAN at `192.168.2.11` for DNS, this host going down stops name resolution for
+LAN at `192.168.0.3` for DNS, this host going down stops name resolution for
 every device pointed at it.
 
 ## Quick check without any client
 
 ```powershell
-curl -X POST http://192.168.2.11:8099/api/v1/mcp/rpc ^
+curl -X POST http://192.168.0.3:8099/api/v1/mcp/rpc ^
   -H "Content-Type: application/json" ^
   -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/list\"}"
 ```

@@ -19,6 +19,7 @@ import asyncio
 import json
 import math
 import random
+import sys
 import time
 
 SITES = ["ionity-local", "kelvin-drive", "centurion-hq", "warehouse-a"]
@@ -166,8 +167,13 @@ def main() -> None:
     print(f"[sim] simulating {args.devices} ESP32 nodes over {args.transport} "
           f"every {args.interval}s (fault rate {args.fault_rate:.0%})")
     runner = run_mqtt if args.transport == "mqtt" else run_http
+    # aiomqtt needs add_reader/add_writer, which Windows' default Proactor
+    # loop does not implement. A Selector loop is fine for this script.
+    kwargs = {}
+    if sys.platform == "win32" and args.transport == "mqtt":
+        kwargs["loop_factory"] = asyncio.SelectorEventLoop
     try:
-        asyncio.run(runner(devices, args))
+        asyncio.run(runner(devices, args), **kwargs)
     except KeyboardInterrupt:
         print("\n[sim] stopped")
 

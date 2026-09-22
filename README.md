@@ -15,9 +15,15 @@ Classification: PUBLIC | Building Tomorrow, Today. | Anything is Possible with G
 One binary on the device. One server for the fleet. One MCP endpoint for the AI.
 
 Scales from the first board on your desk to **1000+ ESP32 nodes** reporting into
-the Ionity Local Drive host at `192.168.2.11`, with a live dashboard and a
-Model Context Protocol surface so Claude / AEDi can query and command the whole
-fleet as a single system.
+the fleet host, with a live dashboard and a Model Context Protocol surface so
+Claude / AEDi can query and command the whole fleet as a single system.
+
+> **Live lab:** three real boards (2× ESP32-S3 over MQTT, 1× Pico 2 over the
+> serial bridge) report into `site=lab`. Start everything with
+> `scripts\start_lab.ps1` — it also runs at logon. See **[docs/LAB.md](docs/LAB.md)**.
+>
+> Boards find the server as **`ionity-fleet.local`** over mDNS, not by a fixed
+> IP — a router swap moved the LAN once already and the fleet followed.
 
 ---
 
@@ -52,17 +58,20 @@ python server\run.py
 python scripts\fleet_simulator.py --devices 250 --interval 10
 ```
 
-Open **http://192.168.2.11:8099/** (or `http://localhost:8099/`).
+Open **http://localhost:8099/** (or the host's LAN IP, e.g. `http://192.168.0.3:8099/`).
 
-MQTT is optional for the simulator's HTTP mode — the server logs
-`MQTT disconnected … devices will fall back to HTTP ingest` and keeps working.
+MQTT is optional for the simulator's HTTP mode — devices fall back to HTTP
+ingest and the server keeps working.
 
 ### With the broker (the real path)
 
 ```powershell
-docker compose up -d          # mosquitto :1883 / :9001 + fleet server :8099
+scripts\start_lab.ps1         # amqtt broker :1883 + fleet server :8099 + serial bridge
 python scripts\fleet_simulator.py --devices 1000 --transport mqtt
 ```
+
+`docker compose up -d mosquitto` is the production alternative (Mosquitto);
+the lab uses the pure-Python broker so it does not depend on Docker Desktop.
 
 ---
 
@@ -78,7 +87,7 @@ The same binary flashes every unit — `device_id` comes from the eFuse MAC.
 Re-tag a device's site/group/label afterwards without reflashing:
 
 ```bash
-curl -X POST http://192.168.2.11:8099/api/v1/devices/esp32-a1b2c3d4e5f6/cmd \
+curl -X POST http://192.168.0.3:8099/api/v1/devices/esp32-a1b2c3d4e5f6/cmd \
   -H "Content-Type: application/json" \
   -d '{"action":"set_meta","site":"kelvin-drive","group":"power","label":"GF riser"}'
 ```
@@ -92,7 +101,7 @@ See [`docs/DEVICE-PROVISIONING.md`](docs/DEVICE-PROVISIONING.md) for the 1000-un
 **Over HTTP** — point any MCP-over-HTTP client at:
 
 ```
-POST http://192.168.2.11:8099/api/v1/mcp/rpc
+POST http://192.168.0.3:8099/api/v1/mcp/rpc
 ```
 
 **Over stdio** — in `claude_desktop_config.json`:
@@ -142,7 +151,7 @@ GET  /api/v1/health
 WS   /ws/fleet                      live dashboard frames
 ```
 
-Interactive docs: **http://192.168.2.11:8099/docs**
+Interactive docs: **http://192.168.0.3:8099/docs**
 
 ---
 

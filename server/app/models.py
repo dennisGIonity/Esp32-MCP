@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field
 
 class NetInfo(BaseModel):
     ip: str | None = None
-    transport: Literal["mqtt", "http", "sim", "unknown"] = "unknown"
+    transport: Literal["mqtt", "http", "serial", "sim", "unknown"] = "unknown"
 
 
 class TelemetryIn(BaseModel):

@@ -86,20 +86,28 @@ def try_autostart() -> None:
     if backend_up():
         return
 
-    pyw = ROOT / ".venv" / "Scripts" / "pythonw.exe"
-    py = ROOT / ".venv" / "Scripts" / "python.exe"
-    exe = pyw if pyw.exists() else (py if py.exists() else None)
-    run = HERE / "run.py"
-    if not exe or not run.exists():
-        log("autostart skipped: venv or run.py not found")
-        return
-
+    flags = 0x00000008 | 0x08000000                # DETACHED | NO_WINDOW
+    lab = ROOT / "scripts" / "start_lab.ps1"
     try:
-        log("fleet server not running - starting it")
-        flags = 0x00000008 | 0x08000000            # DETACHED | NO_WINDOW
-        subprocess.Popen([str(exe), str(run)], cwd=str(ROOT),
-                         creationflags=flags,
-                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        if lab.exists():
+            # Bring up the whole lab (broker + server + serial bridge), not
+            # just the server - commands need the broker too.
+            log("fleet server not running - starting the lab stack")
+            subprocess.Popen(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass",
+                              "-WindowStyle", "Hidden", "-File", str(lab), "-Quiet"],
+                             cwd=str(ROOT), creationflags=flags,
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        else:
+            pyw = ROOT / ".venv" / "Scripts" / "pythonw.exe"
+            py = ROOT / ".venv" / "Scripts" / "python.exe"
+            exe = pyw if pyw.exists() else (py if py.exists() else None)
+            run = HERE / "run.py"
+            if not exe or not run.exists():
+                log("autostart skipped: venv or run.py not found")
+                return
+            log("fleet server not running - starting it")
+            subprocess.Popen([str(exe), str(run)], cwd=str(ROOT), creationflags=flags,
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     except Exception as e:                         # noqa: BLE001
         log(f"autostart failed: {e}")
         return

@@ -59,8 +59,8 @@ Each node self-registers on its first telemetry message. Nothing to do on the
 server. Watch them arrive:
 
 ```powershell
-curl http://192.168.2.11:8099/api/v1/fleet/summary
-curl "http://192.168.2.11:8099/api/v1/devices?limit=20"
+curl http://192.168.0.3:8099/api/v1/fleet/summary
+curl "http://192.168.0.3:8099/api/v1/devices?limit=20"
 ```
 
 A freshly flashed board shows as `site=ionity-local`, `group=default`,
@@ -73,7 +73,7 @@ installation. Press `Identify` in the dashboard until the right LED blinks,
 then tag:
 
 ```bash
-curl -X POST http://192.168.2.11:8099/api/v1/devices/esp32-a1b2c3d4e5f6/cmd \
+curl -X POST http://192.168.0.3:8099/api/v1/devices/esp32-a1b2c3d4e5f6/cmd \
   -H "Content-Type: application/json" \
   -d '{"action":"set_meta","site":"kelvin-drive","group":"power","label":"GF riser"}'
 ```
@@ -113,7 +113,7 @@ Find the IP from `GET /api/v1/devices/{id}`, or resolve the mDNS hostname
 
 | Symptom | Check |
 |---|---|
-| Device never appears | Serial monitor at 115200. WiFi joined? Broker reachable? `ping 192.168.2.11` from the same LAN. |
+| Device never appears | Serial monitor at 115200. WiFi joined? Broker reachable? `ping 192.168.0.3` from the same LAN. |
 | Appears then goes `offline` | Power supply. ESP32 WiFi TX draws ~300 mA peaks; a weak USB source browns it out. |
 | `transport: http` when broker is up | Node failed 3 MQTT connects. Check credentials and `allow_anonymous`. |
 | Everything `stale` at once | Server clock jumped, or the writer task is wedged — check `/api/v1/health` `queue_depth`. |

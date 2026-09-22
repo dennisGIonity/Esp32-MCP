@@ -94,7 +94,37 @@ if ($LASTEXITCODE -ne 0) { Say "COMPILE FAILED"; exit 1 }
 Say "uploading..."
 & $acli upload --fqbn $fqbn --port $Port --build-path $bp $sk 2>&1 |
   Select-String 'Connected to|Wrote|Hash of data|Hard resetting|error|failed'
-if ($LASTEXITCODE -ne 0) { Say "UPLOAD FAILED"; exit 1 }
+$uploaded = ($LASTEXITCODE -eq 0)
+
+if (-not $uploaded) {
+  # arduino-cli's upload recipe resets the chip with DTR/RTS (default-reset).
+  # That is right for CH340/CP210x bridge boards and WRONG for the ESP32-S3/C3
+  # built-in USB-Serial-JTAG (VID 303A): the device drops off USB mid-connect
+  # and pySerial reports PermissionError 13 / Windows error 31. esptool's
+  # usb-reset sequence is what that peripheral expects. Found on the lab's
+  # second S3: arduino-cli failed every time, this succeeded first try.
+  Say "arduino-cli upload failed - retrying with esptool usb-reset (native USB boards)"
+  $e5 = Get-ChildItem "$env:LOCALAPPDATA\Arduino15\packages\esp32\tools\esptool_py" -Recurse -Filter 'esptool.exe' |
+        Where-Object { $_.FullName -match '\\5\.' } | Select-Object -First 1 -ExpandProperty FullName
+  $b0 = Get-ChildItem "$env:LOCALAPPDATA\Arduino15\packages\esp32\hardware\esp32" -Recurse -Filter 'boot_app0.bin' |
+        Select-Object -First 1 -ExpandProperty FullName
+  $chipArg = ($chip.ToLower() -replace '[^a-z0-9]', '')
+  for ($t = 1; $t -le 3 -and -not $uploaded; $t++) {
+    $o = & $e5 --chip $chipArg --port $Port --baud 115200 --before usb-reset --after hard-reset `
+           write-flash -z --flash-mode keep --flash-freq keep --flash-size keep `
+           0x0     (Join-Path $bp 'Esp32_MCP_Node.ino.bootloader.bin') `
+           0x8000  (Join-Path $bp 'Esp32_MCP_Node.ino.partitions.bin') `
+           0xe000  $b0 `
+           0x10000 (Join-Path $bp 'Esp32_MCP_Node.ino.bin') 2>&1 | Out-String
+    $uploaded = ($LASTEXITCODE -eq 0 -and $o -match 'Hash of data verified')
+    if (-not $uploaded) { Say "  attempt $t failed"; Start-Sleep 4 }
+  }
+}
+if (-not $uploaded) {
+  Say "UPLOAD FAILED. Put the board in download mode by hand:"
+  Say "  hold BOOT, tap RESET, release BOOT - then run this again."
+  exit 1
+}
 Say "flashed."
 
 # --- 4. wait for it to register itself --------------------------------------

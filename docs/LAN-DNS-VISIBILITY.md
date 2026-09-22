@@ -48,7 +48,7 @@ dashboard's **LAN DNS** panel, and through MCP so Claude can answer
             │  UDP 53  (because DHCP told them to)
             ▼
   ┌───────────────────────────────────────┐
-  │ DnsService  192.168.2.11:53           │
+  │ DnsService  192.168.0.3:53           │
   │  · parse QNAME + qtype                │
   │  · cache hit?  answer immediately     │
   │  · else forward to 1.1.1.1 / 8.8.8.8  │
@@ -80,7 +80,7 @@ only traffic aimed at it explicitly gets logged.
 
 1. Log in to the router admin.
 2. Find **LAN → DHCP Server** (sometimes *Network → LAN*, or *Advanced → DHCP*).
-3. Set the **Primary DNS** handed to clients to **`192.168.2.11`**.
+3. Set the **Primary DNS** handed to clients to **`192.168.0.3`**.
 4. Leave Secondary DNS **blank** if you want complete visibility. If you set a
    secondary, devices will silently use it whenever it answers first and you
    will see only part of the picture.
@@ -89,7 +89,7 @@ only traffic aimed at it explicitly gets logged.
 Verify from any machine on the LAN:
 
 ```powershell
-nslookup ionity.today 192.168.2.11     # should answer
+nslookup ionity.today 192.168.0.3     # should answer
 Resolve-DnsName ionity.today            # then check it appears in the dashboard
 ```
 

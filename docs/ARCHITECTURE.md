@@ -6,7 +6,7 @@ AEDI - IONITY GLOBAL | DOC-2026-09-ESP32MCP-003 | v1.0.0 | Policy 986 AED
 # Architecture
 
 ```
-  1000x ESP32 nodes                    Ionity Local Drive host (192.168.2.11)
+  1000x ESP32 nodes                    Ionity Local Drive host (192.168.0.3)
  ┌────────────────────┐
  │ firmware/          │   MQTT 1883    ┌──────────────────────────────────────┐
  │  device_id = MAC   ├───────────────►│  Mosquitto                           │
