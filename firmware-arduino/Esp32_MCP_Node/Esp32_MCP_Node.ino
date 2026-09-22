@@ -117,7 +117,10 @@ void sampleSensors() {
   gLatest.ts_ms         = millis();
   gLatest.digital_state = (digitalRead(PIN_DIGITAL_SENSE) == HIGH);
   gLatest.analog_v      = (analogRead(PIN_ANALOG_SENSE) / 4095.0f) * 3.3f;
-  gLatest.rssi_dbm      = (WiFi.status() == WL_CONNECTED) ? WiFi.RSSI() : -127;
+  // Report RSSI only when actually associated. Emitting a sentinel like -127
+  // while disconnected reads as a real reading downstream and trips the
+  // low_rssi alert -- better to omit the metric entirely for that sample.
+  gLatest.rssi_dbm      = (WiFi.status() == WL_CONNECTED) ? WiFi.RSSI() : NAN;
   gLatest.free_heap     = ESP.getFreeHeap();
 
 #if defined(CONFIG_IDF_TARGET_ESP32)
@@ -155,7 +158,7 @@ String buildTelemetryJson(const Sample &s) {
   if (!isnan(s.temp_c))          m["temp_c"]          = round(s.temp_c * 10) / 10.0;
   m["analog_v"]        = round(s.analog_v * 1000) / 1000.0;
   m["digital_state"]   = s.digital_state ? 1 : 0;
-  m["rssi_dbm"]        = s.rssi_dbm;
+  if (!isnan(s.rssi_dbm))        m["rssi_dbm"]        = s.rssi_dbm;
   m["free_heap_bytes"] = s.free_heap;
   if (!isnan(s.latency_ms))      m["latency_ms"]      = round(s.latency_ms * 10) / 10.0;
   if (!isnan(s.packet_loss_pct)) m["packet_loss_pct"] = s.packet_loss_pct;
@@ -382,6 +385,13 @@ void setup() {
   pinMode(PIN_DIGITAL_SENSE, INPUT_PULLUP);
   digitalWrite(PIN_LED_HEARTBEAT, LOW);
   digitalWrite(PIN_LED_ALERT, LOW);
+
+  // The probe metrics are only produced by the PlatformIO build. Mark them
+  // NaN up front so a zero-initialised struct never reports a fabricated
+  // "0 ms latency / 0% loss" that looks like a genuine measurement.
+  gLatest.latency_ms      = NAN;
+  gLatest.packet_loss_pct = NAN;
+  gLatest.rssi_dbm        = NAN;
 
   loadIdentity();
   ensureWifi();
