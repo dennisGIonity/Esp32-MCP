@@ -37,3 +37,8 @@ _reference/
 *.log
 logs_*.txt
 sim_*.txt
+
+# --- arduino ide build output ---
+firmware-arduino/.build-*/
+firmware-arduino/*.log
+firmware-arduino/Esp32_MCP_Node/secrets.h
