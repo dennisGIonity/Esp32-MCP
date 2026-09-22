@@ -41,6 +41,11 @@ String gServerHost = SERVER_HOST_FALLBACK;
 String gServerVia  = "fallback";
 uint8_t gConsecutiveFails = 0;
 
+// Cleared by oledDetect() (Oled tab) when the display shares one of these pins.
+bool gUseHeartbeatLed = true;
+bool gUseAlertLed     = true;
+bool gUseDigitalSense = true;
+
 Preferences prefs;
 WiFiClient  netClient;
 PubSubClient mqtt(netClient);
@@ -154,7 +159,7 @@ void resolveServer() {
 // ---------------------------------------------------------------------------
 void sampleSensors() {
   gLatest.ts_ms         = millis();
-  gLatest.digital_state = (digitalRead(PIN_DIGITAL_SENSE) == HIGH);
+  gLatest.digital_state = gUseDigitalSense ? (digitalRead(PIN_DIGITAL_SENSE) == HIGH) : false;
   gLatest.analog_v      = (analogRead(PIN_ANALOG_SENSE) / 4095.0f) * 3.3f;
   // Report RSSI only when actually associated. Emitting a sentinel like -127
   // while disconnected reads as a real reading downstream and trips the
@@ -168,7 +173,7 @@ void sampleSensors() {
   gLatest.temp_c = temperatureRead();
 #endif
 
-  digitalWrite(PIN_LED_ALERT, gLatest.digital_state ? LOW : HIGH);
+  if (gUseAlertLed) digitalWrite(PIN_LED_ALERT, gLatest.digital_state ? LOW : HIGH);
 }
 
 void runProbe() {
@@ -196,8 +201,9 @@ String buildTelemetryJson(const Sample &s) {
   JsonObject m = doc["metrics"].to<JsonObject>();
   if (!isnan(s.temp_c))          m["temp_c"]          = round(s.temp_c * 10) / 10.0;
   m["analog_v"]        = round(s.analog_v * 1000) / 1000.0;
-  m["digital_state"]   = s.digital_state ? 1 : 0;
+  if (gUseDigitalSense)          m["digital_state"]   = s.digital_state ? 1 : 0;
   if (!isnan(s.rssi_dbm))        m["rssi_dbm"]        = s.rssi_dbm;
+  m["oled"]            = oledPresent() ? 1 : 0;
   m["free_heap_bytes"] = s.free_heap;
   if (!isnan(s.latency_ms))      m["latency_ms"]      = round(s.latency_ms * 10) / 10.0;
   if (!isnan(s.packet_loss_pct)) m["packet_loss_pct"] = s.packet_loss_pct;
@@ -226,6 +232,7 @@ String buildStatusJson(const char *state) {
   doc["tx_ok"]     = gTxOk;
   doc["tx_fail"]   = gTxFail;
   doc["transport"] = gUseHttp ? "http" : "mqtt";
+  doc["oled"]      = oledNote();
   String out;
   serializeJson(doc, out);
   return out;
@@ -257,11 +264,29 @@ void onMqttMessage(char *topic, byte *payload, unsigned int len) {
     delay(250);
     ESP.restart();
   } else if (action == "identify") {
-    for (int i = 0; i < 10; i++) {
-      digitalWrite(PIN_LED_HEARTBEAT, !digitalRead(PIN_LED_HEARTBEAT));
-      delay(120);
+    if (gUseHeartbeatLed) {
+      for (int i = 0; i < 10; i++) {
+        digitalWrite(PIN_LED_HEARTBEAT, !digitalRead(PIN_LED_HEARTBEAT));
+        delay(120);
+      }
     }
-    publishCmdResult(cmdId, true, "blinked");
+    oledIdentify();
+    publishCmdResult(cmdId, true, oledPresent() ? "blinked LED + flashed display" : "blinked");
+  } else if (action == "set_display") {
+    // {"driver":"ssd1306"|"sh1106"|"off"|"auto", "sda":N, "scl":N}
+    // "auto" clears pinned pins so the next boot scans again.
+    prefs.begin("ionity", false);
+    String drv = doc["driver"] | "";
+    if (drv == "auto") { prefs.remove("oled_sda"); prefs.remove("oled_scl"); prefs.putString("oled_drv", "ssd1306"); }
+    else if (drv.length()) prefs.putString("oled_drv", drv);
+    if (doc["sda"].is<int>() && doc["scl"].is<int>()) {
+      prefs.putInt("oled_sda", doc["sda"].as<int>());
+      prefs.putInt("oled_scl", doc["scl"].as<int>());
+    }
+    prefs.end();
+    publishCmdResult(cmdId, true, "display settings stored; rebooting");
+    delay(250);
+    ESP.restart();
   } else if (action == "set_meta") {
     if (doc["site"].is<const char*>())  { gSite  = doc["site"].as<String>();  persistIdentity("site", gSite); }
     if (doc["group"].is<const char*>()) { gGroup = doc["group"].as<String>(); persistIdentity("group", gGroup); }
@@ -394,8 +419,10 @@ void flushBuffer() {
 void pushTelemetry() {
   String json = buildTelemetryJson(gLatest);
   if (transmit(json)) {
-    digitalWrite(PIN_LED_HEARTBEAT, HIGH); delay(25);
-    digitalWrite(PIN_LED_HEARTBEAT, LOW);
+    if (gUseHeartbeatLed) {
+      digitalWrite(PIN_LED_HEARTBEAT, HIGH); delay(25);
+      digitalWrite(PIN_LED_HEARTBEAT, LOW);
+    }
     logln("TX ok via " + String(gUseHttp ? "HTTP" : "MQTT") +
           "  temp=" + String(gLatest.temp_c, 1) +
           "C rssi=" + String((int)gLatest.rssi_dbm) +
@@ -436,12 +463,6 @@ void setup() {
   logln(" Policy 986 AED | Building Tomorrow, Today.");
   logln("=========================================================");
 
-  pinMode(PIN_LED_HEARTBEAT, OUTPUT);
-  pinMode(PIN_LED_ALERT, OUTPUT);
-  pinMode(PIN_DIGITAL_SENSE, INPUT_PULLUP);
-  digitalWrite(PIN_LED_HEARTBEAT, LOW);
-  digitalWrite(PIN_LED_ALERT, LOW);
-
   // The probe metrics are only produced by the PlatformIO build. Mark them
   // NaN up front so a zero-initialised struct never reports a fabricated
   // "0 ms latency / 0% loss" that looks like a genuine measurement.
@@ -450,16 +471,24 @@ void setup() {
   gLatest.rssi_dbm        = NAN;
 
   loadIdentity();
+
+  // Find the display BEFORE claiming LED/sensor pins: if it shares one of
+  // them, oledDetect() switches that LED/sensor off so the bus isn't fought over.
+  oledDetect();
+  if (gUseHeartbeatLed) { pinMode(PIN_LED_HEARTBEAT, OUTPUT); digitalWrite(PIN_LED_HEARTBEAT, LOW); }
+  if (gUseAlertLed)     { pinMode(PIN_LED_ALERT, OUTPUT);     digitalWrite(PIN_LED_ALERT, LOW); }
+  if (gUseDigitalSense) pinMode(PIN_DIGITAL_SENSE, INPUT_PULLUP);
+
   ensureWifi();
 
   unsigned long t0 = millis();
   while (WiFi.status() != WL_CONNECTED && millis() - t0 < 20000) {
     delay(250);
     Serial.print(".");
-    digitalWrite(PIN_LED_HEARTBEAT, !digitalRead(PIN_LED_HEARTBEAT));
+    if (gUseHeartbeatLed) digitalWrite(PIN_LED_HEARTBEAT, !digitalRead(PIN_LED_HEARTBEAT));
   }
   Serial.println();
-  digitalWrite(PIN_LED_HEARTBEAT, LOW);
+  if (gUseHeartbeatLed) digitalWrite(PIN_LED_HEARTBEAT, LOW);
 
   if (WiFi.status() == WL_CONNECTED) {
     logln("WiFi OK   ip=" + WiFi.localIP().toString() +
@@ -472,7 +501,7 @@ void setup() {
 #endif
   } else {
     logln("WiFi FAILED - check SSID/password in secrets.h. Buffering locally.");
-    digitalWrite(PIN_LED_ALERT, HIGH);
+    if (gUseAlertLed) digitalWrite(PIN_LED_ALERT, HIGH);
   }
 
   resolveServer();
@@ -493,6 +522,7 @@ void loop() {
 #endif
 
   if (now - lastSample >= SENSOR_SAMPLE_MS) { lastSample = now; sampleSensors(); }
+  oledUpdate();
 
   if (now - lastTelemetry >= TELEMETRY_INTERVAL_MS) {
     lastTelemetry = now;

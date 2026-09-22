@@ -64,6 +64,36 @@ on the next reading, no restart.
 **Pico W / Pico 2 W:** same sketch, pick the W board. It posts over WiFi *and*
 emits serial, using `secrets.h` in the sketch folder.
 
+## On-board OLED (fw 1.1.0+)
+
+Firmware 1.0.0 never drove a display, so a board with an OLED stayed dark.
+1.1.0 finds the screen itself at boot: it scans the I²C pin pairs these
+boards use (SDA/SCL 5/6 - the RouterProject sentinel wiring - then 17/18
+Heltec/LilyGO, 8/9 Arduino default, and more) for a controller at 0x3C/0x3D.
+It never touches native-USB, flash/PSRAM, UART0 or strap pins. If the screen
+shares a pin with the node's LED or sensor, that LED/sensor is switched off.
+
+The screen shows label, IP, MQTT/HTTP, server and how it was found,
+temperature, RSSI, tx counts and uptime. Every reading carries `oled: 1|0`, and
+the retained status message says where it was found ("ssd1306 @0x3C on SDA 5 / SCL 6").
+
+If it lights up but looks shifted or garbled, it is a 1.3" SH1106:
+
+    send_command esp32-XXXX set_display {"driver": "sh1106"}
+
+Other options: `{"sda": 21, "scl": 22}` to pin the bus, `"off"`, or `"auto"`
+to forget pinned pins and scan again. Each reboots the node.
+
+## The Pi 5 screen
+
+`SETUP-PI-LAB.cmd` (double-click) pauses GateFlame and puts the live fleet
+dashboard on the screen attached to the Pi. It detects the display from EDID
+(an ASUS reports maker `AUS`), then uses an autostart entry on Pi OS desktop,
+or `cage` + Chromium as a kiosk service on Lite. The URL lives in
+`/etc/ionity-lab-display.conf`. A DisplayLink USB monitor needs Synaptics'
+licensed driver; the script stops and says so rather than accepting the
+licence for you. Undo with `sudo bash ~/lab-display-remove.sh` on the Pi.
+
 ## Commanding boards
 
 Over MQTT, from the dashboard or from Claude via MCP:

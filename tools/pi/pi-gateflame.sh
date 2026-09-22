@@ -38,6 +38,16 @@ status() {
 
 case "$ACTION" in
   status)  status ;;
+  lab-setup)
+    # Pause GateFlame, then put the fleet dashboard on the ASUS - one sudo.
+    scp "${SSH_OPTS[@]}" -q "$HERE/gateflame-pause.sh" "$HERE/gateflame-resume.sh" \
+        "$HERE/lab-display-setup.sh" "$HERE/lab-display-remove.sh" "wabapi@$HOST:~/" || exit 1
+    ssh -t "${SSH_OPTS[@]}" "wabapi@$HOST" \
+      "sudo bash -c 'bash ~/gateflame-pause.sh; echo; bash ~/lab-display-setup.sh' 2>&1 | tee ~/ionity-lab-setup.log"
+    mkdir -p /e/.ESP32-MCP/data
+    scp "${SSH_OPTS[@]}" -q "wabapi@$HOST:~/ionity-lab-setup.log" /e/.ESP32-MCP/data/pi-lab-setup.log \
+      && echo "log copied to E:\\.ESP32-MCP\\data\\pi-lab-setup.log"
+    echo; status ;;
   dry-run|pause|resume)
     scp "${SSH_OPTS[@]}" -q "$HERE/gateflame-pause.sh" "$HERE/gateflame-resume.sh" "wabapi@$HOST:~/" || exit 1
     case "$ACTION" in
@@ -46,5 +56,5 @@ case "$ACTION" in
       resume)  ssh -t "${SSH_OPTS[@]}" "wabapi@$HOST" "sudo bash ~/gateflame-resume.sh" ;;
     esac
     echo; status ;;
-  *) echo "usage: pi-gateflame.sh status|dry-run|pause|resume"; exit 2 ;;
+  *) echo "usage: pi-gateflame.sh status|dry-run|pause|resume|lab-setup"; exit 2 ;;
 esac

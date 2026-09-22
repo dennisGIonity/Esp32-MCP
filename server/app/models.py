@@ -75,10 +75,14 @@ class Alert(BaseModel):
 
 
 class CommandIn(BaseModel):
-    action: Literal["reboot", "identify", "ping", "set_meta"]
+    action: Literal["reboot", "identify", "ping", "set_meta", "set_display"]
     site: str | None = None
     group: str | None = None
     label: str | None = None
+    # set_display: driver = ssd1306 | sh1106 | off | auto; sda/scl pin the bus
+    driver: Literal["ssd1306", "sh1106", "off", "auto"] | None = None
+    sda: int | None = None
+    scl: int | None = None
 
 
 class FleetSummary(BaseModel):

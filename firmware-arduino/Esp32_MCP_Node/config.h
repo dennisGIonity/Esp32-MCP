@@ -12,7 +12,7 @@
 #include "secrets.h"
 
 // --- Firmware identity -----------------------------------------------------
-#define FW_VERSION            "1.0.0"
+#define FW_VERSION            "1.1.0"   // 1.1.0: OLED auto-detect + set_display
 #define FW_PRODUCT            "ionity-esp32-mcp-node"
 
 // --- Device identity -------------------------------------------------------

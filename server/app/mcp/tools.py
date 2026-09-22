@@ -106,17 +106,24 @@ MCP_TOOLS: list[dict[str, Any]] = [
         "name": "send_command",
         "description": (
             "Send a command to one device, or to every device with "
-            "device_id='broadcast'. Actions: reboot, identify (blink LED), ping, "
-            "set_meta (re-tag site/group/label without reflashing). Requires MQTT."
+            "device_id='broadcast'. Actions: reboot, identify (blink LED and "
+            "flash the OLED), ping, set_meta (re-tag site/group/label without "
+            "reflashing), set_display (OLED driver ssd1306|sh1106|off|auto and "
+            "optional sda/scl pins - use sh1106 if a 1.3\" screen looks garbled). "
+            "Requires MQTT."
         ),
         "inputSchema": {
             "type": "object",
             "properties": {
                 "device_id": {"type": "string"},
-                "action": {"type": "string", "enum": ["reboot", "identify", "ping", "set_meta"]},
+                "action": {"type": "string",
+                           "enum": ["reboot", "identify", "ping", "set_meta", "set_display"]},
                 "site": {"type": "string"},
                 "group": {"type": "string"},
                 "label": {"type": "string"},
+                "driver": {"type": "string", "enum": ["ssd1306", "sh1106", "off", "auto"]},
+                "sda": {"type": "integer"},
+                "scl": {"type": "integer"},
             },
             "required": ["device_id", "action"],
         },
@@ -306,7 +313,7 @@ async def execute(name: str, args: dict, registry, store, dns=None) -> Any:
 
     if name == "send_command":
         payload = {k: v for k, v in args.items()
-                   if k in ("site", "group", "label") and v is not None}
+                   if k in ("site", "group", "label", "driver", "sda", "scl") and v is not None}
         return await registry.send_command(args["device_id"], args["action"], payload)
 
     raise ValueError(f"Unknown tool '{name}'")
