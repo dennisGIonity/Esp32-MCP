@@ -3,5 +3,9 @@
     "label": "lab-node-03 (Pico 2 RP2350, serial)",
     "site": "lab",
     "group": "bench"
-  }
+  },
+  "88-a2-9e-27-a1-8f": { "label": "GateFlame Pi 5 (wlan0)" },
+  "88-a2-9e-27-a1-8d": { "label": "GateFlame Pi 5 (eth0)" },
+  "78-20-51-9f-1e-8b": { "label": "Afrihost home router" },
+  "34-ca-81-fe-be-ff": { "label": "Isolated lab router (JBFibre)" }
 }

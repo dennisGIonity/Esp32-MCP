@@ -1,0 +1,21 @@
+# ===========================================================================
+# AEDI - IONITY GLOBAL | Lab board identification for the Arduino IDE
+# Added 2026-09-22 by the ESP32-MCP lab setup. Delete this file to undo.
+# NOTE: lives inside the core folder, so a core upgrade removes it -
+#       a copy is kept at E:\.ESP32-MCP\tools\arduino\esp32.boards.local.txt
+# ---------------------------------------------------------------------------
+# Why: the IDE names a port by matching its USB VID/PID against boards.txt.
+#  * CH340 (1A86:7523) is a generic USB-serial chip with no identity at all,
+#    so the IDE showed "Unknown". On this bench it is always an ESP32-S3.
+#  * The S3's built-in USB-Serial-JTAG (303A:1001) is shared by every
+#    S3/C3/C6/H2, and matched "ESP32 Family Device" / "Ozobot DRVKit" first.
+# ===========================================================================
+
+esp32s3.upload_port.0.vid=0x1a86
+esp32s3.upload_port.0.pid=0x7523
+esp32s3.upload_port.1.vid=0x303a
+esp32s3.upload_port.1.pid=0x1001
+
+# Stop the two generic/unrelated boards claiming the S3's native port first.
+esp32_family.upload_port.0.vid=0xffff
+ozobot_drvkit.upload_port.0.vid=0xffff

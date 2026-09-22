@@ -1,0 +1,17 @@
+# AEDI - IONITY GLOBAL | Arduino IDE / CLI sketch profile (Pico node)
+# The IDE preselects this board and port when the sketch opens.
+# Lab unit: Raspberry Pi Pico 2 (RP2350), no radio -> reports over USB serial.
+
+default_fqbn: rp2040:rp2040:rpipico2
+default_port: COM11
+default_protocol: serial
+
+profiles:
+  pico2:
+    fqbn: rp2040:rp2040:rpipico2
+  pico2w:
+    fqbn: rp2040:rp2040:rpipico2w
+  pico:
+    fqbn: rp2040:rp2040:rpipico
+  picow:
+    fqbn: rp2040:rp2040:rpipicow

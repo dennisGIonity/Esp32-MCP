@@ -69,7 +69,7 @@ class DiscoveryService:
             return
 
         try:
-            self.ip = primary_lan_ip()
+            self.ip = self.s.mdns_advertise_ip.strip() or primary_lan_ip()
             self.zc = AsyncZeroconf()
             self.info = ServiceInfo(
                 SERVICE_TYPE,

@@ -365,6 +365,32 @@ class DnsService:
         except Exception:
             pass
 
+        # Name LAN devices the fleet already knows. An ESP32's device_id IS its
+        # MAC ("esp32-98a316e5d18c" <-> 98-a3-16-e5-d1-8c), so the network map
+        # and the fleet registry can cross-reference without any config.
+        fleet_names: dict[str, str] = {}
+        try:
+            for d in await self.store.list_devices():
+                did = d["device_id"]
+                if did.startswith("esp32-") and len(did) == 18:
+                    h = did[6:]
+                    mac_key = "-".join(h[i:i + 2] for i in range(0, 12, 2))
+                    fleet_names[mac_key] = d.get("label") or did
+        except Exception:
+            pass
+        # Anything else (the Pi, a printer) can be named by MAC in
+        # config/device_labels.json: {"88-a2-9e-27-a1-8f": {"label": "..."}}
+        manual: dict[str, str] = {}
+        try:
+            import json as _json
+            from pathlib import Path as _Path
+            cfg = _Path(__file__).resolve().parents[3] / "config" / "device_labels.json"
+            for k, v in _json.loads(cfg.read_text(encoding="utf-8")).items():
+                if re.fullmatch(r"[0-9a-fA-F]{2}([-:][0-9a-fA-F]{2}){5}", k) and v.get("label"):
+                    manual[k.lower().replace(":", "-")] = v["label"]
+        except Exception:
+            pass
+
         proc = await asyncio.create_subprocess_exec(
             "arp", "-a",
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
@@ -393,7 +419,12 @@ class DnsService:
             except Exception:
                 hostname = None
             await self.store.upsert_lan_device(
-                ip=ip, mac=mac, hostname=hostname, vendor=oui_vendor(mac))
+                ip=ip, mac=mac, hostname=hostname, vendor=oui_vendor(mac),
+                label=fleet_names.get(mac) or manual.get(mac))
+
+        n = await self.store.prune_lan(time.time() - 2 * 3600)
+        if n:
+            log.info("LAN map: dropped %d address(es) not seen for 2h", n)
 
     # -- stats -------------------------------------------------------------
     def stats(self) -> dict[str, Any]:
@@ -422,6 +453,9 @@ _OUI = {
     "44-65-0d": "Amazon", "fc-65-de": "Amazon", "ac-63-be": "Amazon",
     "b8-27-eb": "Raspberry Pi", "dc-a6-32": "Raspberry Pi",
     "e4-5f-01": "Raspberry Pi", "2c-cf-67": "Raspberry Pi",
+    "98-a3-16": "Espressif", "fc-01-2c": "Espressif", "f0-f5-bd": "Espressif",
+    "34-85-18": "Espressif", "dc-54-75": "Espressif", "e8-06-90": "Espressif",
+    "88-a2-9e": "Raspberry Pi", "d8-3a-dd": "Raspberry Pi", "28-cd-c1": "Raspberry Pi",
     "24-0a-c4": "Espressif", "30-ae-a4": "Espressif", "7c-9e-bd": "Espressif",
     "84-cc-a8": "Espressif", "a0-20-a6": "Espressif", "c4-4f-33": "Espressif",
     "d8-a0-1d": "Espressif", "ec-fa-bc": "Espressif", "f4-cf-a2": "Espressif",

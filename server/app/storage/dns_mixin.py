@@ -179,6 +179,16 @@ class DnsStoreMixin:
         ) as cur:
             return [dict(r) for r in await cur.fetchall()]
 
+    async def prune_lan(self, older_than_s: float) -> int:
+        """Drop LAN rows not seen recently. The table is keyed by IP, so after
+        a subnet change the old addresses would otherwise linger forever as
+        'unidentified' ghosts next to the real, renamed devices."""
+        cur = await self.db.execute(
+            "DELETE FROM lan_devices WHERE last_seen < ? AND ip <> '127.0.0.1'",
+            (older_than_s,))
+        await self.db.commit()
+        return cur.rowcount or 0
+
     async def prune_dns(self, older_than_s: float) -> int:
         cur = await self.db.execute("DELETE FROM dns_queries WHERE ts < ?", (older_than_s,))
         await self.db.commit()

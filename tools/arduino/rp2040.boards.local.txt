@@ -1,0 +1,36 @@
+# ===========================================================================
+# AEDI - IONITY GLOBAL | Lab board identification for the Arduino IDE
+# Added 2026-09-22 by the ESP32-MCP lab setup. Delete this file to undo.
+# Copy kept at E:\.ESP32-MCP\tools\arduino\rp2040.boards.local.txt
+# ---------------------------------------------------------------------------
+# arduino-pico's RP2350 USB ID (2E8A:000F) is claimed by four boards; the IDE
+# listed "Pimoroni Plasma2350W" first for the lab's plain Raspberry Pi Pico 2.
+# These three are not on this bench, so stop them matching.
+# ===========================================================================
+
+pimoroni_plasma2350w.upload_port.0.vid=0xffff
+pimoroni_plasma2350w.upload_port.1.vid=0xffff
+pimoroni_plasma2350w.upload_port.2.vid=0xffff
+pimoroni_plasma2350w.upload_port.3.vid=0xffff
+pimoroni_plasma2350w.upload_port.4.vid=0xffff
+pimoroni_plasma2350w.upload_port.5.vid=0xffff
+pimoroni_plasma2350w.upload_port.6.vid=0xffff
+pimoroni_plasma2350w.upload_port.7.vid=0xffff
+
+waveshare_rp2350_pizero.upload_port.0.vid=0xffff
+waveshare_rp2350_pizero.upload_port.1.vid=0xffff
+waveshare_rp2350_pizero.upload_port.2.vid=0xffff
+waveshare_rp2350_pizero.upload_port.3.vid=0xffff
+waveshare_rp2350_pizero.upload_port.4.vid=0xffff
+waveshare_rp2350_pizero.upload_port.5.vid=0xffff
+waveshare_rp2350_pizero.upload_port.6.vid=0xffff
+waveshare_rp2350_pizero.upload_port.7.vid=0xffff
+
+weact_rp2350b.upload_port.0.vid=0xffff
+weact_rp2350b.upload_port.1.vid=0xffff
+weact_rp2350b.upload_port.2.vid=0xffff
+weact_rp2350b.upload_port.3.vid=0xffff
+weact_rp2350b.upload_port.4.vid=0xffff
+weact_rp2350b.upload_port.5.vid=0xffff
+weact_rp2350b.upload_port.6.vid=0xffff
+weact_rp2350b.upload_port.7.vid=0xffff

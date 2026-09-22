@@ -55,6 +55,10 @@ class Settings(BaseSettings):
     # Boards resolve "ionity-fleet.local" rather than a compiled-in IP, so a
     # router or subnet change does not silently orphan the whole fleet.
     mdns_enabled: bool = True
+    # The address boards are told to use. Empty = auto (the interface the OS
+    # routes internet traffic through). On a multi-homed host that choice can
+    # flip when a cable is plugged in - set this explicitly for a lab.
+    mdns_advertise_ip: str = ""
 
     # --- LAN DNS visibility ----------------------------------------------
     # An ESP32 WiFi client cannot see other devices' DNS (per-client WPA keys
