@@ -51,6 +51,11 @@ class Settings(BaseSettings):
     alert_temp_c: float = 80.0
     alert_free_heap_bytes: int = 20000
 
+    # --- Discovery --------------------------------------------------------
+    # Boards resolve "ionity-fleet.local" rather than a compiled-in IP, so a
+    # router or subnet change does not silently orphan the whole fleet.
+    mdns_enabled: bool = True
+
     # --- LAN DNS visibility ----------------------------------------------
     # An ESP32 WiFi client cannot see other devices' DNS (per-client WPA keys
     # + switched unicast). So the resolver runs here instead: point the

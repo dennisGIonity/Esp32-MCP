@@ -222,6 +222,8 @@ async def health(request: Request):
         "mqtt": bridge.stats() if bridge else {"connected": False, "enabled": False},
         "dns": (getattr(app.state, "dns", None).stats()
                 if getattr(app.state, "dns", None) else {"running": False, "enabled": False}),
+        "discovery": (getattr(app.state, "discovery", None).stats()
+                      if getattr(app.state, "discovery", None) else {"enabled": False}),
         "ws_clients": len(ws_clients),
     }
 

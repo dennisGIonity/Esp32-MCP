@@ -18,16 +18,27 @@
 // --- Device identity -------------------------------------------------------
 // DEVICE_ID is derived at boot from the eFuse MAC as "esp32-aabbccddeeff".
 #define DEVICE_ID_PREFIX      "esp32"
-#define DEFAULT_SITE          "ionity-local"
-#define DEFAULT_GROUP         "default"
+#define DEFAULT_SITE          "lab"
+#define DEFAULT_GROUP         "bench"
 
-// --- Central server (Ionity Local Drive host) ------------------------------
-#define SERVER_HOST           "192.168.2.11"
+// --- Central server --------------------------------------------------------
+// Resolved at boot, in this order:
+//   1. NVS key "server_ip"   - per-unit override, set remotely, survives reflash
+//   2. mDNS SERVER_MDNS_HOST - follows the server across routers and subnets
+//   3. SERVER_HOST_FALLBACK  - last resort if mDNS is blocked on the network
+//
+// Do NOT go back to a single compiled-in IP. A router swap moved this LAN from
+// 192.168.2.x to 192.168.0.x and every board kept POSTing into the void --
+// silently, because a failed POST looks exactly like a quiet sensor.
+#define SERVER_MDNS_HOST      "ionity-fleet"
+#define SERVER_HOST_FALLBACK  "192.168.0.3"
 #define SERVER_HTTP_PORT      8099
 #define HTTP_INGEST_PATH      "/api/v1/telemetry"
+// Re-resolve after this many consecutive transmit failures (server moved?)
+#define RESOLVE_RETRY_AFTER   5
 
 // --- MQTT (primary transport) ----------------------------------------------
-#define MQTT_HOST             SERVER_HOST
+// Broker lives on the same host; uses the resolved address, not a fixed one.
 #define MQTT_PORT             1883
 #define MQTT_KEEPALIVE_S      60
 #define MQTT_ROOT             "ionity"

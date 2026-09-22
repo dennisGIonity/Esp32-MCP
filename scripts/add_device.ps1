@@ -55,12 +55,25 @@ $esptool = Get-ChildItem "$env:LOCALAPPDATA\Arduino15\packages\esp32\tools\espto
 $chipOut = & $esptool --port $Port --baud 115200 flash_id 2>&1 | Out-String
 $chip = [regex]::Match($chipOut, 'Chip is (ESP32[^\s(]*)').Groups[1].Value
 $mac  = [regex]::Match($chipOut, 'MAC:\s+([0-9a-f:]{17})').Groups[1].Value
-$fsz  = [regex]::Match($chipOut, 'Detected flash size:\s+(\d+)MB').Groups[1].Value
 if (-not $chip) { Say "could not identify the chip on $Port"; Write-Output $chipOut; exit 1 }
-Say "chip=$chip flash=${fsz}MB mac=$mac"
+
+# Flash size wording varies between esptool builds ("Detected flash size: 16MB"
+# vs "Flash size: 16MB"). If we cannot read it, OMIT the FlashSize option
+# entirely rather than emitting FlashSize=M, which is an invalid FQBN.
+$fsz = ''
+foreach ($rx in 'Detected flash size:\s*(\d+)\s*MB', 'Flash size:\s*(\d+)\s*MB', '(\d+)MB') {
+  $m = [regex]::Match($chipOut, $rx)
+  if ($m.Success) { $fsz = $m.Groups[1].Value; break }
+}
+if ($fsz) { Say "chip=$chip flash=${fsz}MB mac=$mac" }
+else      { Say "chip=$chip flash=unknown (using board default) mac=$mac" }
 
 switch -Regex ($chip) {
-  'ESP32-S3' { $fqbn = "esp32:esp32:esp32s3:FlashSize=${fsz}M,PartitionScheme=min_spiffs" }
+  'ESP32-S3' {
+    $opts = @('PartitionScheme=min_spiffs')
+    if ($fsz) { $opts = @("FlashSize=${fsz}M") + $opts }
+    $fqbn = "esp32:esp32:esp32s3:" + ($opts -join ',')
+  }
   'ESP32-C3' { $fqbn = "esp32:esp32:esp32c3" }
   'ESP32-S2' { $fqbn = "esp32:esp32:esp32s2" }
   default    { $fqbn = "esp32:esp32:esp32" }
@@ -86,12 +99,21 @@ Say "flashed."
 
 # --- 4. wait for it to register itself --------------------------------------
 Say "waiting for $expected to report in (boot + wifi + first telemetry)..."
+# A device row may already exist from a previous flash. Existence proves
+# nothing -- require a reading that arrived AFTER we reset the board, or we
+# report success while the board is actually dead.
+$flashedAt = Get-Date
 $found = $null
 for ($i = 0; $i -lt 25; $i++) {
   Start-Sleep 3
   try {
     $r = Invoke-RestMethod "$Server/api/v1/devices?search=$($mac -replace ':','')&limit=2" -TimeoutSec 6
-    if ($r.count -gt 0) { $found = $r.devices[0]; break }
+    if ($r.count -gt 0) {
+      $d = $r.devices[0]
+      $freshEnough = $d.last_seen_age_s -ne $null -and
+                     $d.last_seen_age_s -lt ((Get-Date) - $flashedAt).TotalSeconds
+      if ($freshEnough -and $d.health -ne 'offline') { $found = $d; break }
+    }
   } catch {}
   Write-Host -NoNewline "."
 }

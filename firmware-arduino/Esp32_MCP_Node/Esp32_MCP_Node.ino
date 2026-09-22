@@ -35,6 +35,12 @@
 String gDeviceId, gSite, gGroup, gLabel;
 String tTelemetry, tStatus, tEvent, tCmd, tCmdResult;
 
+// Resolved server address + how we found it (reported in telemetry so a
+// misrouted fleet is visible on the dashboard rather than silently dead).
+String gServerHost = SERVER_HOST_FALLBACK;
+String gServerVia  = "fallback";
+uint8_t gConsecutiveFails = 0;
+
 Preferences prefs;
 WiFiClient  netClient;
 PubSubClient mqtt(netClient);
@@ -105,7 +111,40 @@ void loadIdentity() {
   logln("device_id  = " + gDeviceId);
   logln("site/group = " + gSite + "/" + gGroup);
   logln("topic base = " + base);
-  logln("server     = http://" + String(SERVER_HOST) + ":" + String(SERVER_HTTP_PORT) + HTTP_INGEST_PATH);
+  logln("server     = resolved at boot (NVS -> mDNS " SERVER_MDNS_HOST ".local -> fallback)");
+}
+
+// ---------------------------------------------------------------------------
+// Server discovery
+// NVS override -> mDNS -> compiled fallback. Called at boot and again after a
+// run of failed transmissions, so the fleet recovers on its own if the server
+// moves rather than needing 1000 boards reflashed.
+// ---------------------------------------------------------------------------
+void resolveServer() {
+  prefs.begin("ionity", true);
+  String pinned = prefs.getString("server_ip", "");
+  prefs.end();
+  if (pinned.length() > 0) {
+    gServerHost = pinned;
+    gServerVia  = "nvs";
+    logln("server (pinned in NVS): " + gServerHost);
+    return;
+  }
+
+  if (WiFi.status() == WL_CONNECTED) {
+    IPAddress ip = MDNS.queryHost(SERVER_MDNS_HOST, 3000);
+    if (ip != IPAddress((uint32_t)0)) {
+      gServerHost = ip.toString();
+      gServerVia  = "mdns";
+      logln("server (mDNS " SERVER_MDNS_HOST ".local): " + gServerHost);
+      return;
+    }
+    logln("mDNS lookup for " SERVER_MDNS_HOST ".local found nothing");
+  }
+
+  gServerHost = SERVER_HOST_FALLBACK;
+  gServerVia  = "fallback";
+  logln("server (compiled fallback): " + gServerHost);
 }
 
 // ---------------------------------------------------------------------------
@@ -164,8 +203,10 @@ String buildTelemetryJson(const Sample &s) {
   if (!isnan(s.packet_loss_pct)) m["packet_loss_pct"] = s.packet_loss_pct;
 
   JsonObject n = doc["net"].to<JsonObject>();
-  n["ip"]        = WiFi.localIP().toString();
-  n["transport"] = gUseHttp ? "http" : "mqtt";
+  n["ip"]          = WiFi.localIP().toString();
+  n["transport"]   = gUseHttp ? "http" : "mqtt";
+  n["server"]      = gServerHost;   // makes a misrouted fleet visible,
+  n["resolved_by"] = gServerVia;    // instead of silently dead
 
   String out;
   serializeJson(doc, out);
@@ -256,7 +297,7 @@ bool ensureMqtt() {
   if (millis() - lastMqttTry < MQTT_RETRY_MS) return false;
   lastMqttTry = millis();
 
-  mqtt.setServer(MQTT_HOST, MQTT_PORT);
+  mqtt.setServer(gServerHost.c_str(), MQTT_PORT);
   mqtt.setKeepAlive(MQTT_KEEPALIVE_S);
   mqtt.setBufferSize(1024);
   mqtt.setCallback(onMqttMessage);
@@ -269,7 +310,7 @@ bool ensureMqtt() {
                    tStatus.c_str(), 1, true, willPayload.c_str());
 
   if (ok) {
-    logln("MQTT connected -> " MQTT_HOST);
+    logln("MQTT connected -> " + gServerHost);
     gMqttFails = 0; gUseHttp = false;
     mqtt.subscribe(tCmd.c_str(), 1);
     mqtt.subscribe((String(MQTT_ROOT) + "/broadcast/cmd").c_str(), 1);
@@ -294,7 +335,7 @@ bool ensureMqtt() {
 bool sendHttp(const String &json) {
   if (WiFi.status() != WL_CONNECTED) return false;
   HTTPClient http;
-  String url = "http://" + String(SERVER_HOST) + ":" + String(SERVER_HTTP_PORT) + HTTP_INGEST_PATH;
+  String url = "http://" + gServerHost + ":" + String(SERVER_HTTP_PORT) + HTTP_INGEST_PATH;
   http.setConnectTimeout(4000);
   http.setTimeout(6000);
   http.begin(url);
@@ -313,7 +354,22 @@ bool transmit(const String &json) {
 #if HTTP_FALLBACK_ENABLED
   if (!ok) ok = sendHttp(json);
 #endif
-  if (ok) gTxOk++; else gTxFail++;
+  if (ok) {
+    gTxOk++;
+    gConsecutiveFails = 0;
+  } else {
+    gTxFail++;
+    // A run of failures usually means the server moved (new router, new
+    // subnet, DHCP reshuffle). Re-resolve rather than hammering a dead IP.
+    if (++gConsecutiveFails >= RESOLVE_RETRY_AFTER) {
+      gConsecutiveFails = 0;
+      logln("repeated transmit failures - re-resolving server address");
+      resolveServer();
+      if (mqtt.connected()) mqtt.disconnect();
+      gUseHttp = false;
+      gMqttFails = 0;
+    }
+  }
   return ok;
 }
 
@@ -409,6 +465,8 @@ void setup() {
     logln("WiFi OK   ip=" + WiFi.localIP().toString() +
           "  gw=" + WiFi.gatewayIP().toString() +
           "  rssi=" + String(WiFi.RSSI()) + "dBm");
+    // mDNS responder must be up before we can query for the server.
+    MDNS.begin((String(OTA_HOSTNAME_PREFIX) + macSuffix()).c_str());
 #if OTA_ENABLED
     setupOta();
 #endif
@@ -417,9 +475,11 @@ void setup() {
     digitalWrite(PIN_LED_ALERT, HIGH);
   }
 
+  resolveServer();
   ensureMqtt();
   sampleSensors();
-  logln("Boot complete. Reporting every " + String(TELEMETRY_INTERVAL_MS / 1000) + "s.");
+  logln("Boot complete. Reporting to " + gServerHost + ":" + String(SERVER_HTTP_PORT) +
+        " (via " + gServerVia + ") every " + String(TELEMETRY_INTERVAL_MS / 1000) + "s.");
 }
 
 void loop() {

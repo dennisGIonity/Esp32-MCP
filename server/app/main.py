@@ -20,6 +20,7 @@ from app.storage.sqlite_store import SQLiteStore
 from app.fleet.registry import FleetRegistry
 from app.ingest.mqtt_bridge import MqttBridge
 from app.ingest.dns_resolver import DnsService
+from app.ingest.discovery import DiscoveryService, primary_lan_ip
 from app.mcp.server import FleetMCPServer
 from app.api.routes import router, ws_clients
 
@@ -77,6 +78,10 @@ async def lifespan(app: FastAPI):
         await dns.start()
         app.state.dns = dns
 
+    discovery = DiscoveryService(settings)
+    await discovery.start()
+    app.state.discovery = discovery
+
     app.state.mcp = FleetMCPServer(registry, store, dns=app.state.dns)
 
     bcast = asyncio.create_task(broadcaster(app))
@@ -89,6 +94,13 @@ async def lifespan(app: FastAPI):
     log.info(" MQTT      %s:%s (enabled=%s)", settings.mqtt_host,
              settings.mqtt_port, settings.mqtt_enabled)
     log.info(" Storage   %s -> %s", settings.storage_driver, settings.sqlite_path)
+    log.info(" LAN IP    %s   (boards reach us here)", primary_lan_ip())
+    ds = discovery.stats()
+    if ds["advertised_ip"]:
+        log.info(" mDNS      %s -> %s  (boards resolve this, not a fixed IP)",
+                 ds["hostname"], ds["advertised_ip"])
+    elif ds["enabled"]:
+        log.warning(" mDNS      unavailable: %s", ds["error"])
     if app.state.dns:
         st = app.state.dns.stats()
         log.info(" LAN DNS   %s (running=%s) upstreams %s",
@@ -100,6 +112,7 @@ async def lifespan(app: FastAPI):
     yield
 
     bcast.cancel()
+    await discovery.stop()
     if app.state.dns:
         await app.state.dns.stop()
     if app.state.mqtt:
