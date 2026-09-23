@@ -50,3 +50,6 @@ firmware-arduino/Pico_MCP_Node/secrets.h
 broker_*.txt
 bridge_*.txt
 server_boot.log
+
+# arduino-cli build folders (add_device.ps1 / compile)
+.build-*/
