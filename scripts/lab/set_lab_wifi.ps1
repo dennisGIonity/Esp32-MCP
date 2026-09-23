@@ -16,7 +16,8 @@ $cfgPath = Join-Path $root 'config\lab.json'
 $cfg = Get-Content $cfgPath -Raw | ConvertFrom-Json
 
 if (-not $Ssid) {
-  $def = if ($cfg.lab.wifi_ssid) { $cfg.lab.wifi_ssid } else { 'IONITY-LAB' }
+  $def = if ($cfg.lab.wifi_ssid) { $cfg.lab.wifi_ssid } else { 'IONITY-LAB-IOT' }
+  Write-Host "Boards join the lab's 2.4 GHz network (ESP32-S3 / Pico 2 W cannot use 5 GHz)."
   $Ssid = Read-Host "Lab WiFi name (2.4 GHz) [$def]"
   if (-not $Ssid) { $Ssid = $def }
 }
