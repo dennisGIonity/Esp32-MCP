@@ -1,0 +1,735 @@
+#line 1 "E:\\.ESP32-MCP\\firmware-arduino\\Esp32_MCP_Node\\Esp32_MCP_Node.ino"
+// ===========================================================================
+// AEDI - IONITY GLOBAL | ESP32-MCP Fleet Node  (Arduino IDE sketch)
+// Doc ID: DOC-2026-09-ESP32MCP-FW | Version 1.0.0 | Policy 986 AED
+// (c) 2018-2026 Antwerp Designs | Ionity (Pty) Ltd - All Rights Reserved
+// ---------------------------------------------------------------------------
+// ONE SKETCH, MANY DEVICES.
+//   * device_id from eFuse MAC        -> no per-unit edits
+//   * site/group/label from NVS       -> provision without reflashing
+//   * MQTT primary, HTTP POST fallback-> survives a broker outage
+//   * retained status + Last Will     -> server sees offline in ~90s
+//   * offline ring buffer             -> no data loss across short dropouts
+//
+// Board:    Tools > Board > esp32 > (ESP32S3 Dev Module | ESP32 Dev Module | ...)
+// Requires: PubSubClient, ArduinoJson (Library Manager)
+// ===========================================================================
+
+#include <Arduino.h>
+#include <WiFi.h>
+#include <HTTPClient.h>
+#include <PubSubClient.h>
+#include <ArduinoJson.h>
+#include <Preferences.h>
+#include <ESPmDNS.h>
+#include <ArduinoOTA.h>
+#include <esp_system.h>
+#if __has_include(<esp_mac.h>)
+  #include <esp_mac.h>
+#endif
+
+#include "config.h"
+
+// ---------------------------------------------------------------------------
+// Runtime identity (resolved once at boot)
+// ---------------------------------------------------------------------------
+String gDeviceId, gSite, gGroup, gLabel;
+String tTelemetry, tStatus, tEvent, tCmd, tCmdResult;
+
+// Resolved server address + how we found it (reported in telemetry so a
+// misrouted fleet is visible on the dashboard rather than silently dead).
+String gServerHost = SERVER_HOST_FALLBACK;
+String gServerVia  = "fallback";
+uint8_t gConsecutiveFails = 0;
+
+// Cleared by oledDetect() (Oled tab) when the display shares one of these pins.
+bool gUseHeartbeatLed = true;
+bool gUseAlertLed     = true;
+bool gUseDigitalSense = true;
+
+Preferences prefs;
+WiFiClient  netClient;
+PubSubClient mqtt(netClient);
+
+// ---------------------------------------------------------------------------
+// Sample + fleet state
+// ---------------------------------------------------------------------------
+struct Sample {
+  uint32_t ts_ms;
+  float    temp_c;
+  float    analog_v;
+  bool     digital_state;
+  float    rssi_dbm;
+  float    latency_ms;
+  float    packet_loss_pct;
+  uint32_t free_heap;
+};
+
+Sample  gLatest;
+Sample  gBuffer[OFFLINE_BUFFER_SLOTS];
+uint8_t gBufCount = 0;
+
+uint8_t  gMqttFails = 0;
+bool     gUseHttp   = false;
+uint32_t gTxOk = 0, gTxFail = 0;
+
+unsigned long lastSample = 0, lastTelemetry = 0, lastStatus = 0;
+unsigned long lastWifiTry = 0, lastMqttTry = 0, lastProbe = 0;
+
+void logln(const String &m) { Serial.println(String(LOG_PREFIX) + m); }
+
+// ---------------------------------------------------------------------------
+// Identity
+// ---------------------------------------------------------------------------
+String macSuffix() {
+  uint8_t mac[6];
+  esp_read_mac(mac, ESP_MAC_WIFI_STA);
+  char buf[13];
+  snprintf(buf, sizeof(buf), "%02x%02x%02x%02x%02x%02x",
+           mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+  return String(buf);
+}
+
+void persistIdentity(const char *key, const String &val) {
+  prefs.begin("ionity", false);
+  prefs.putString(key, val);
+  prefs.end();
+}
+
+void loadIdentity() {
+  prefs.begin("ionity", false);
+  gDeviceId = prefs.getString("device_id", "");
+  if (gDeviceId.length() == 0) {
+    gDeviceId = String(DEVICE_ID_PREFIX) + "-" + macSuffix();
+    prefs.putString("device_id", gDeviceId);
+  }
+  gSite  = prefs.getString("site",  DEFAULT_SITE);
+  gGroup = prefs.getString("group", DEFAULT_GROUP);
+  gLabel = prefs.getString("label", gDeviceId);
+  prefs.end();
+
+  String base = String(MQTT_ROOT) + "/" + gSite + "/" + gDeviceId + "/";
+  tTelemetry = base + MQTT_CH_TELEMETRY;
+  tStatus    = base + MQTT_CH_STATUS;
+  tCmd       = base + MQTT_CH_CMD;
+  tCmdResult = base + MQTT_CH_CMD_RESULT;
+
+  logln("device_id  = " + gDeviceId);
+  logln("site/group = " + gSite + "/" + gGroup);
+  logln("topic base = " + base);
+  logln("server     = resolved at boot (NVS -> mDNS " SERVER_MDNS_HOST ".local -> fallback)");
+}
+
+// ---------------------------------------------------------------------------
+// Server discovery
+// NVS override -> mDNS -> compiled fallback. Called at boot and again after a
+// run of failed transmissions, so the fleet recovers on its own if the server
+// moves rather than needing 1000 boards reflashed.
+// ---------------------------------------------------------------------------
+void resolveServer() {
+  prefs.begin("ionity", true);
+  String pinned = prefs.getString("server_ip", "");
+  prefs.end();
+  if (pinned.length() > 0) {
+    gServerHost = pinned;
+    gServerVia  = "nvs";
+    logln("server (pinned in NVS): " + gServerHost);
+    return;
+  }
+
+  if (WiFi.status() == WL_CONNECTED) {
+    IPAddress ip = MDNS.queryHost(SERVER_MDNS_HOST, 3000);
+    if (ip != IPAddress((uint32_t)0)) {
+      gServerHost = ip.toString();
+      gServerVia  = "mdns";
+      logln("server (mDNS " SERVER_MDNS_HOST ".local): " + gServerHost);
+      return;
+    }
+    logln("mDNS lookup for " SERVER_MDNS_HOST ".local found nothing");
+  }
+
+  gServerHost = SERVER_HOST_FALLBACK;
+  gServerVia  = "fallback";
+  logln("server (compiled fallback): " + gServerHost);
+}
+
+// ---------------------------------------------------------------------------
+// Sensors
+// Swap in your real transducers here. Anything you add under "metrics" in the
+// payload is stored, charted and MCP-queryable with NO server change.
+// ---------------------------------------------------------------------------
+void sampleSensors() {
+  gLatest.ts_ms         = millis();
+  gLatest.digital_state = gUseDigitalSense ? (digitalRead(PIN_DIGITAL_SENSE) == HIGH) : false;
+  gLatest.analog_v      = (analogRead(PIN_ANALOG_SENSE) / 4095.0f) * 3.3f;
+  // Report RSSI only when actually associated. Emitting a sentinel like -127
+  // while disconnected reads as a real reading downstream and trips the
+  // low_rssi alert -- better to omit the metric entirely for that sample.
+  gLatest.rssi_dbm      = (WiFi.status() == WL_CONNECTED) ? WiFi.RSSI() : NAN;
+  gLatest.free_heap     = ESP.getFreeHeap();
+
+#if defined(CONFIG_IDF_TARGET_ESP32)
+  gLatest.temp_c = NAN;              // classic ESP32 has no usable internal sensor
+#else
+  gLatest.temp_c = temperatureRead();
+#endif
+
+  if (gUseAlertLed) digitalWrite(PIN_LED_ALERT, gLatest.digital_state ? LOW : HIGH);
+}
+
+void runProbe() {
+#if PROBE_ENABLED
+  // See config.h -- enable via the PlatformIO build, which pins ESP32Ping.
+#endif
+  gLatest.latency_ms = NAN;
+  gLatest.packet_loss_pct = NAN;
+}
+
+// ---------------------------------------------------------------------------
+// Payload builders - one source of truth for MQTT and HTTP alike
+// ---------------------------------------------------------------------------
+String buildTelemetryJson(const Sample &s) {
+  JsonDocument doc;
+  doc["device_id"] = gDeviceId;
+  doc["site"]      = gSite;
+  doc["group"]     = gGroup;
+  doc["label"]     = gLabel;
+  doc["fw"]        = FW_VERSION;
+  doc["product"]   = FW_PRODUCT;
+  doc["uptime_s"]  = millis() / 1000;
+  doc["seq"]       = gTxOk + gTxFail;
+
+  JsonObject m = doc["metrics"].to<JsonObject>();
+  if (!isnan(s.temp_c))          m["temp_c"]          = round(s.temp_c * 10) / 10.0;
+  m["analog_v"]        = round(s.analog_v * 1000) / 1000.0;
+  if (gUseDigitalSense)          m["digital_state"]   = s.digital_state ? 1 : 0;
+  if (!isnan(s.rssi_dbm))        m["rssi_dbm"]        = s.rssi_dbm;
+  m["oled"]            = oledPresent() ? 1 : 0;
+  m["free_heap_bytes"] = s.free_heap;
+  if (!isnan(s.latency_ms))      m["latency_ms"]      = round(s.latency_ms * 10) / 10.0;
+  if (!isnan(s.packet_loss_pct)) m["packet_loss_pct"] = s.packet_loss_pct;
+
+  JsonObject n = doc["net"].to<JsonObject>();
+  n["ip"]          = WiFi.localIP().toString();
+  n["transport"]   = gUseHttp ? "http" : "mqtt";
+  n["server"]      = gServerHost;   // makes a misrouted fleet visible,
+  n["resolved_by"] = gServerVia;    // instead of silently dead
+
+  String out;
+  serializeJson(doc, out);
+  return out;
+}
+
+String buildStatusJson(const char *state) {
+  JsonDocument doc;
+  doc["device_id"] = gDeviceId;
+  doc["site"]      = gSite;
+  doc["group"]     = gGroup;
+  doc["label"]     = gLabel;
+  doc["fw"]        = FW_VERSION;
+  doc["state"]     = state;
+  doc["ip"]        = WiFi.localIP().toString();
+  doc["uptime_s"]  = millis() / 1000;
+  doc["tx_ok"]     = gTxOk;
+  doc["tx_fail"]   = gTxFail;
+  doc["transport"] = gUseHttp ? "http" : "mqtt";
+  doc["oled"]      = oledNote();
+  String out;
+  serializeJson(doc, out);
+  return out;
+}
+
+// ---------------------------------------------------------------------------
+// Inbound commands (server -> device) over MQTT
+// ---------------------------------------------------------------------------
+void publishCmdResult(const String &cmdId, bool ok, const String &detail) {
+  JsonDocument doc;
+  doc["device_id"] = gDeviceId;
+  doc["cmd_id"]    = cmdId;
+  doc["ok"]        = ok;
+  doc["detail"]    = detail;
+  String out; serializeJson(doc, out);
+  mqtt.publish(tCmdResult.c_str(), out.c_str(), false);
+}
+
+void onMqttMessage(char *topic, byte *payload, unsigned int len) {
+  JsonDocument doc;
+  if (deserializeJson(doc, payload, len)) return;
+
+  String action = doc["action"] | "";
+  String cmdId  = doc["cmd_id"] | "";
+  logln("cmd <- " + action);
+
+  if (action == "reboot") {
+    publishCmdResult(cmdId, true, "rebooting");
+    delay(250);
+    ESP.restart();
+  } else if (action == "identify") {
+    if (gUseHeartbeatLed) {
+      for (int i = 0; i < 10; i++) {
+        digitalWrite(PIN_LED_HEARTBEAT, !digitalRead(PIN_LED_HEARTBEAT));
+        delay(120);
+      }
+    }
+    oledIdentify();
+    publishCmdResult(cmdId, true, oledPresent() ? "blinked LED + flashed display" : "blinked");
+  } else if (action == "set_display") {
+    // {"driver":"ssd1306"|"sh1106"|"off"|"auto", "sda":N, "scl":N}
+    // "auto" clears pinned pins so the next boot scans again.
+    prefs.begin("ionity", false);
+    String drv = doc["driver"] | "";
+    if (drv == "auto") { prefs.remove("oled_sda"); prefs.remove("oled_scl"); prefs.putString("oled_drv", "ssd1306"); }
+    else if (drv.length()) prefs.putString("oled_drv", drv);
+    if (doc["sda"].is<int>() && doc["scl"].is<int>()) {
+      prefs.putInt("oled_sda", doc["sda"].as<int>());
+      prefs.putInt("oled_scl", doc["scl"].as<int>());
+    }
+    prefs.end();
+    publishCmdResult(cmdId, true, "display settings stored; rebooting");
+    delay(250);
+    ESP.restart();
+  } else if (action == "set_meta") {
+    if (doc["site"].is<const char*>())  { gSite  = doc["site"].as<String>();  persistIdentity("site", gSite); }
+    if (doc["group"].is<const char*>()) { gGroup = doc["group"].as<String>(); persistIdentity("group", gGroup); }
+    if (doc["label"].is<const char*>()) { gLabel = doc["label"].as<String>(); persistIdentity("label", gLabel); }
+    publishCmdResult(cmdId, true, "metadata stored; rebooting to re-topic");
+    delay(250);
+    ESP.restart();
+  } else if (action == "ping") {
+    publishCmdResult(cmdId, true, "pong");
+  } else {
+    publishCmdResult(cmdId, false, "unknown action");
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Connectivity
+// ---------------------------------------------------------------------------
+void ensureWifi() {
+  if (WiFi.status() == WL_CONNECTED) return;
+  if (millis() - lastWifiTry < WIFI_RETRY_MS) return;
+  lastWifiTry = millis();
+
+  logln("WiFi connecting to \"" WIFI_SSID "\" ...");
+  WiFi.mode(WIFI_STA);
+  WiFi.setHostname((String(OTA_HOSTNAME_PREFIX) + macSuffix()).c_str());
+  WiFi.setAutoReconnect(true);
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+}
+
+bool ensureMqtt() {
+  if (mqtt.connected()) { gMqttFails = 0; gUseHttp = false; return true; }
+  if (WiFi.status() != WL_CONNECTED) return false;
+  if (millis() - lastMqttTry < MQTT_RETRY_MS) return false;
+  lastMqttTry = millis();
+
+  mqtt.setServer(gServerHost.c_str(), MQTT_PORT);
+  mqtt.setKeepAlive(MQTT_KEEPALIVE_S);
+  mqtt.setBufferSize(1024);
+  mqtt.setCallback(onMqttMessage);
+
+  String willPayload = buildStatusJson("offline");
+  bool ok = (strlen(MQTT_USERNAME) > 0)
+    ? mqtt.connect(gDeviceId.c_str(), MQTT_USERNAME, MQTT_PASSWORD,
+                   tStatus.c_str(), 1, true, willPayload.c_str())
+    : mqtt.connect(gDeviceId.c_str(), NULL, NULL,
+                   tStatus.c_str(), 1, true, willPayload.c_str());
+
+  if (ok) {
+    logln("MQTT connected -> " + gServerHost);
+    gMqttFails = 0; gUseHttp = false;
+    mqtt.subscribe(tCmd.c_str(), 1);
+    mqtt.subscribe((String(MQTT_ROOT) + "/broadcast/cmd").c_str(), 1);
+    mqtt.publish(tStatus.c_str(), buildStatusJson("online").c_str(), true);
+    return true;
+  }
+
+  gMqttFails++;
+  logln("MQTT connect failed (" + String(gMqttFails) + "/" + String(MQTT_FAIL_THRESHOLD) + ")");
+#if HTTP_FALLBACK_ENABLED
+  if (gMqttFails >= MQTT_FAIL_THRESHOLD && !gUseHttp) {
+    gUseHttp = true;
+    logln("--> no broker; falling back to HTTP ingest (this is expected if mosquitto isn't running)");
+  }
+#endif
+  return false;
+}
+
+// ---------------------------------------------------------------------------
+// Transmit
+// ---------------------------------------------------------------------------
+bool sendHttp(const String &json) {
+  if (WiFi.status() != WL_CONNECTED) return false;
+  HTTPClient http;
+  String url = "http://" + gServerHost + ":" + String(SERVER_HTTP_PORT) + HTTP_INGEST_PATH;
+  http.setConnectTimeout(4000);
+  http.setTimeout(6000);
+  http.begin(url);
+  http.addHeader("Content-Type", "application/json");
+  http.addHeader("X-Fleet-Token", FLEET_TOKEN);
+  int code = http.POST(json);
+  if (code <= 0) logln("HTTP error: " + http.errorToString(code));
+  else if (code >= 300) logln("HTTP " + String(code) + ": " + http.getString().substring(0, 120));
+  http.end();
+  return (code >= 200 && code < 300);
+}
+
+bool transmit(const String &json) {
+  bool ok = false;
+  if (!gUseHttp && mqtt.connected()) ok = mqtt.publish(tTelemetry.c_str(), json.c_str(), false);
+#if HTTP_FALLBACK_ENABLED
+  if (!ok) ok = sendHttp(json);
+#endif
+  if (ok) {
+    gTxOk++;
+    gConsecutiveFails = 0;
+  } else {
+    gTxFail++;
+    // A run of failures usually means the server moved (new router, new
+    // subnet, DHCP reshuffle). Re-resolve rather than hammering a dead IP.
+    if (++gConsecutiveFails >= RESOLVE_RETRY_AFTER) {
+      gConsecutiveFails = 0;
+      logln("repeated transmit failures - re-resolving server address");
+      resolveServer();
+      if (mqtt.connected()) mqtt.disconnect();
+      gUseHttp = false;
+      gMqttFails = 0;
+    }
+  }
+  return ok;
+}
+
+void bufferSample(const Sample &s) {
+  if (gBufCount < OFFLINE_BUFFER_SLOTS) {
+    gBuffer[gBufCount++] = s;
+  } else {
+    memmove(&gBuffer[0], &gBuffer[1], sizeof(Sample) * (OFFLINE_BUFFER_SLOTS - 1));
+    gBuffer[OFFLINE_BUFFER_SLOTS - 1] = s;
+  }
+}
+
+void flushBuffer() {
+  while (gBufCount > 0) {
+    if (!transmit(buildTelemetryJson(gBuffer[0]))) return;
+    memmove(&gBuffer[0], &gBuffer[1], sizeof(Sample) * (gBufCount - 1));
+    gBufCount--;
+    delay(20);
+  }
+}
+
+void pushTelemetry() {
+  String json = buildTelemetryJson(gLatest);
+  if (transmit(json)) {
+    if (gUseHeartbeatLed) {
+      digitalWrite(PIN_LED_HEARTBEAT, HIGH); delay(25);
+      digitalWrite(PIN_LED_HEARTBEAT, LOW);
+    }
+    logln("TX ok via " + String(gUseHttp ? "HTTP" : "MQTT") +
+          "  temp=" + String(gLatest.temp_c, 1) +
+          "C rssi=" + String((int)gLatest.rssi_dbm) +
+          "dBm heap=" + String(gLatest.free_heap) +
+          "  (ok=" + String(gTxOk) + " fail=" + String(gTxFail) + ")");
+    flushBuffer();
+  } else {
+    bufferSample(gLatest);
+    logln("TX failed - buffered (" + String(gBufCount) + " queued)");
+  }
+}
+
+// ---------------------------------------------------------------------------
+// OTA
+// ---------------------------------------------------------------------------
+#if OTA_ENABLED
+void setupOta() {
+  ArduinoOTA.setHostname((String(OTA_HOSTNAME_PREFIX) + macSuffix()).c_str());
+  ArduinoOTA.setPassword(OTA_PASSWORD);
+  ArduinoOTA.onStart([]() { logln("OTA start"); });
+  ArduinoOTA.onEnd([]()   { logln("OTA done"); });
+  ArduinoOTA.onError([](ota_error_t e) { logln("OTA error " + String(e)); });
+  ArduinoOTA.begin();
+  logln("OTA ready as " + String(OTA_HOSTNAME_PREFIX) + macSuffix() + ".local");
+}
+#endif
+
+// ---------------------------------------------------------------------------
+// Setup / loop
+// ---------------------------------------------------------------------------
+void setup() {
+  Serial.begin(SERIAL_BAUD);
+  delay(1200);                      // let native-USB CDC enumerate
+  Serial.println();
+  logln("=========================================================");
+  logln(" IONITY ESP32-MCP FLEET NODE  |  fw " FW_VERSION);
+  logln(" (c) 2018-2026 Antwerp Designs | Ionity (Pty) Ltd");
+  logln(" Policy 986 AED | Building Tomorrow, Today.");
+  logln("=========================================================");
+
+  // The probe metrics are only produced by the PlatformIO build. Mark them
+  // NaN up front so a zero-initialised struct never reports a fabricated
+  // "0 ms latency / 0% loss" that looks like a genuine measurement.
+  gLatest.latency_ms      = NAN;
+  gLatest.packet_loss_pct = NAN;
+  gLatest.rssi_dbm        = NAN;
+
+  loadIdentity();
+
+  // Find the display BEFORE claiming LED/sensor pins: if it shares one of
+  // them, oledDetect() switches that LED/sensor off so the bus isn't fought over.
+  oledDetect();
+  if (gUseHeartbeatLed) { pinMode(PIN_LED_HEARTBEAT, OUTPUT); digitalWrite(PIN_LED_HEARTBEAT, LOW); }
+  if (gUseAlertLed)     { pinMode(PIN_LED_ALERT, OUTPUT);     digitalWrite(PIN_LED_ALERT, LOW); }
+  if (gUseDigitalSense) pinMode(PIN_DIGITAL_SENSE, INPUT_PULLUP);
+
+  ensureWifi();
+
+  unsigned long t0 = millis();
+  while (WiFi.status() != WL_CONNECTED && millis() - t0 < 20000) {
+    delay(250);
+    Serial.print(".");
+    if (gUseHeartbeatLed) digitalWrite(PIN_LED_HEARTBEAT, !digitalRead(PIN_LED_HEARTBEAT));
+  }
+  Serial.println();
+  if (gUseHeartbeatLed) digitalWrite(PIN_LED_HEARTBEAT, LOW);
+
+  if (WiFi.status() == WL_CONNECTED) {
+    logln("WiFi OK   ip=" + WiFi.localIP().toString() +
+          "  gw=" + WiFi.gatewayIP().toString() +
+          "  rssi=" + String(WiFi.RSSI()) + "dBm");
+    // mDNS responder must be up before we can query for the server.
+    MDNS.begin((String(OTA_HOSTNAME_PREFIX) + macSuffix()).c_str());
+#if OTA_ENABLED
+    setupOta();
+#endif
+  } else {
+    logln("WiFi FAILED - check SSID/password in secrets.h. Buffering locally.");
+    if (gUseAlertLed) digitalWrite(PIN_LED_ALERT, HIGH);
+  }
+
+  resolveServer();
+  ensureMqtt();
+  sampleSensors();
+  logln("Boot complete. Reporting to " + gServerHost + ":" + String(SERVER_HTTP_PORT) +
+        " (via " + gServerVia + ") every " + String(TELEMETRY_INTERVAL_MS / 1000) + "s.");
+}
+
+void loop() {
+  unsigned long now = millis();
+
+  ensureWifi();
+  ensureMqtt();
+  if (mqtt.connected()) mqtt.loop();
+#if OTA_ENABLED
+  ArduinoOTA.handle();
+#endif
+
+  if (now - lastSample >= SENSOR_SAMPLE_MS) { lastSample = now; sampleSensors(); }
+  oledUpdate();
+
+  if (now - lastTelemetry >= TELEMETRY_INTERVAL_MS) {
+    lastTelemetry = now;
+    pushTelemetry();
+  }
+
+  if (now - lastStatus >= HEARTBEAT_STATUS_MS) {
+    lastStatus = now;
+    if (mqtt.connected())
+      mqtt.publish(tStatus.c_str(), buildStatusJson("online").c_str(), true);
+  }
+
+  delay(10);
+}
+
+#line 1 "E:\\.ESP32-MCP\\firmware-arduino\\Esp32_MCP_Node\\Oled.ino"
+// ===========================================================================
+// AEDI - IONITY GLOBAL | On-board OLED status display (auto-detected)
+// Doc ID: DOC-2026-09-ESP32MCP-FW | Policy 986 AED
+// (c) 2018-2026 Antwerp Designs | Ionity (Pty) Ltd
+// ---------------------------------------------------------------------------
+// Why this exists: 1.0.0 never drove a display, so a board with an OLED sat
+// with a blank screen. Boards wire their OLEDs to different pins, so rather
+// than hard-code one board's layout, the firmware looks for it:
+//
+//   1. NVS "oled_sda"/"oled_scl"/"oled_drv"  (set remotely with set_display)
+//   2. otherwise scan the I2C pin pairs these boards commonly use, for a
+//      controller answering at 0x3C or 0x3D
+//
+// Pins that would break the board are never touched: native USB (19/20),
+// the flash/PSRAM bus, UART0 (43/44 = the CH340 console), strap pins.
+// If the display lands on a pin the node also uses as an LED or sensor, that
+// LED/sensor is switched off instead - the display wins.
+//
+// Driver: SSD1306 by default (most 0.96" modules). 1.3" modules are usually
+// SH1106 - if the screen lights up shifted/garbled, send
+//   set_display {"driver":"sh1106"}
+// ===========================================================================
+
+#include <Wire.h>
+#include <U8g2lib.h>
+
+U8G2   *gOled = nullptr;
+int8_t  gOledSda = -1, gOledScl = -1;
+uint8_t gOledAddr = 0;
+String  gOledDrv = "ssd1306";
+String  gOledNote = "not searched";
+unsigned long lastOled = 0;
+bool    gOledInvert = false;
+// gUseHeartbeatLed / gUseAlertLed / gUseDigitalSense live in the main tab:
+// Arduino appends this tab after it, so main cannot see globals declared here.
+
+bool   oledPresent() { return gOled != nullptr; }
+String oledNote()    { return gOledNote; }
+
+static bool i2cProbe(int sda, int scl, uint8_t &addrOut) {
+  if (!Wire.begin(sda, scl, 100000)) return false;
+  Wire.setTimeOut(10);
+  bool hit = false;
+  for (uint8_t a : {0x3C, 0x3D}) {
+    Wire.beginTransmission(a);
+    if (Wire.endTransmission() == 0) { addrOut = a; hit = true; break; }
+  }
+  if (!hit) Wire.end();
+  return hit;
+}
+
+static void heltecPower() {
+  // Heltec-style boards gate the OLED supply (Vext, GPIO36, active LOW) and
+  // need a reset pulse on GPIO21. GPIO36 is PSRAM on octal-PSRAM S3 modules,
+  // so only touch it when no large PSRAM is fitted.
+#if defined(CONFIG_IDF_TARGET_ESP32S3)
+  if (ESP.getPsramSize() < 4 * 1024 * 1024) {
+    pinMode(36, OUTPUT); digitalWrite(36, LOW);
+  }
+  pinMode(21, OUTPUT); digitalWrite(21, LOW); delay(20); digitalWrite(21, HIGH); delay(20);
+#endif
+}
+
+void oledDetect() {
+  prefs.begin("ionity", true);
+  gOledDrv = prefs.getString("oled_drv", "ssd1306");
+  int nvSda = prefs.getInt("oled_sda", -1);
+  int nvScl = prefs.getInt("oled_scl", -1);
+  prefs.end();
+
+  if (gOledDrv == "off") { gOledNote = "disabled (oled_drv=off)"; logln("OLED: disabled by NVS"); return; }
+
+  uint8_t addr = 0;
+  if (nvSda >= 0 && nvScl >= 0) {
+    if (i2cProbe(nvSda, nvScl, addr)) { gOledSda = nvSda; gOledScl = nvScl; gOledAddr = addr; }
+    else { gOledNote = "pinned pins " + String(nvSda) + "/" + String(nvScl) + " - no answer"; }
+  } else {
+#if defined(CONFIG_IDF_TARGET_ESP32S3)
+    // {SDA, SCL}. Order = most likely first. 5/6 is the RouterProject sentinel.
+    const int8_t pairs[][2] = {{5,6},{17,18},{8,9},{41,42},{1,2},{47,48},{4,5},
+                               {39,40},{15,16},{11,12},{13,14},{21,47},{38,39},{2,1},{6,5},{18,17},{9,8}};
+#elif defined(CONFIG_IDF_TARGET_ESP32C3)
+    const int8_t pairs[][2] = {{5,6},{8,9},{4,5},{2,3},{6,7}};
+#else
+    const int8_t pairs[][2] = {{21,22},{4,15},{5,4},{22,21},{16,17},{25,26},{13,14}};
+#endif
+    for (auto &p : pairs) {
+      if (p[0] == 17 && p[1] == 18) heltecPower();
+      if (i2cProbe(p[0], p[1], addr)) { gOledSda = p[0]; gOledScl = p[1]; gOledAddr = addr; break; }
+    }
+    if (gOledSda < 0) {
+      // Fallback: every safe GPIO pair (~1-2 s). Found pins are saved to NVS
+      // so the next boot goes straight to them.
+#if defined(CONFIG_IDF_TARGET_ESP32S3)
+      const int8_t pool[] = {1,2,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,21,38,39,40,41,42,45,46,47,48};
+#elif defined(CONFIG_IDF_TARGET_ESP32C3)
+      const int8_t pool[] = {1,2,3,4,5,6,7,8,10};
+#else
+      const int8_t pool[] = {4,5,13,14,15,16,17,18,19,21,22,23,25,26,27,32,33};
+#endif
+      logln("OLED: not on common pins - scanning all safe GPIO pairs...");
+      for (int8_t sda : pool) {
+        for (int8_t scl : pool) {
+          if (sda == scl) continue;
+          if (i2cProbe(sda, scl, addr)) { gOledSda = sda; gOledScl = scl; gOledAddr = addr; break; }
+        }
+        if (gOledSda >= 0) break;
+      }
+      if (gOledSda >= 0) {
+        prefs.begin("ionity", false);
+        prefs.putInt("oled_sda", gOledSda); prefs.putInt("oled_scl", gOledScl);
+        prefs.end();
+      } else {
+        char n[96];
+        snprintf(n, sizeof(n), "no I2C display on any GPIO pair (psram %uMB) - SPI/parallel screen?",
+                 (unsigned)(ESP.getPsramSize() >> 20));
+        gOledNote = n;
+      }
+    }
+  }
+
+  if (gOledSda < 0) { logln("OLED: " + gOledNote); return; }
+
+  // Display wins any pin clash with the node's LEDs / sensor.
+  auto clash = [](int p) { return p == gOledSda || p == gOledScl; };
+  if (clash(PIN_LED_HEARTBEAT)) gUseHeartbeatLed = false;
+  if (clash(PIN_LED_ALERT))     gUseAlertLed = false;
+  if (clash(PIN_DIGITAL_SENSE)) gUseDigitalSense = false;
+
+  if (gOledDrv == "sh1106") gOled = new U8G2_SH1106_128X64_NONAME_F_HW_I2C(U8G2_R0, U8X8_PIN_NONE, gOledScl, gOledSda);
+  else                      gOled = new U8G2_SSD1306_128X64_NONAME_F_HW_I2C(U8G2_R0, U8X8_PIN_NONE, gOledScl, gOledSda);
+  gOled->setI2CAddress(gOledAddr << 1);
+  gOled->begin();
+  gOled->setContrast(200);
+
+  char buf[80];
+  snprintf(buf, sizeof(buf), "%s @0x%02X on SDA %d / SCL %d", gOledDrv.c_str(), gOledAddr, gOledSda, gOledScl);
+  gOledNote = buf;
+  logln("OLED: found " + gOledNote);
+  oledSplash();
+}
+
+void oledSplash() {
+  if (!gOled) return;
+  gOled->clearBuffer();
+  gOled->setFont(u8g2_font_7x14B_tf);
+  gOled->drawStr(0, 14, "IONITY LAB");
+  gOled->setFont(u8g2_font_5x8_tf);
+  gOled->drawStr(0, 28, gDeviceId.c_str());
+  gOled->drawStr(0, 40, "fw " FW_VERSION "  booting...");
+  gOled->drawStr(0, 62, "Building Tomorrow, Today.");
+  gOled->sendBuffer();
+}
+
+void oledUpdate() {
+  if (!gOled || millis() - lastOled < 2000) return;
+  lastOled = millis();
+  char l[40];
+  gOled->clearBuffer();
+
+  gOled->setFont(u8g2_font_6x12_tf);
+  String name = gLabel.length() ? gLabel : gDeviceId;
+  if (name.length() > 21) name = name.substring(0, 21);
+  gOled->drawStr(0, 10, name.c_str());
+  gOled->drawHLine(0, 12, 128);
+
+  gOled->setFont(u8g2_font_5x8_tf);
+  bool up = (WiFi.status() == WL_CONNECTED);
+  snprintf(l, sizeof(l), "%s %s", up ? WiFi.localIP().toString().c_str() : "no wifi",
+           gUseHttp ? "HTTP" : (mqtt.connected() ? "MQTT" : "--"));
+  gOled->drawStr(0, 22, l);
+  snprintf(l, sizeof(l), "srv %s (%s)", gServerHost.c_str(), gServerVia.c_str());
+  gOled->drawStr(0, 31, l);
+
+  gOled->setFont(u8g2_font_7x14B_tf);
+  if (!isnan(gLatest.temp_c)) { snprintf(l, sizeof(l), "%.1fC", gLatest.temp_c); gOled->drawStr(0, 47, l); }
+  if (!isnan(gLatest.rssi_dbm)) { snprintf(l, sizeof(l), "%ddBm", (int)gLatest.rssi_dbm); gOled->drawStr(64, 47, l); }
+
+  gOled->setFont(u8g2_font_5x8_tf);
+  unsigned long s = millis() / 1000;
+  snprintf(l, sizeof(l), "tx %lu/%lu  up %luh%02lum", (unsigned long)gTxOk, (unsigned long)gTxFail,
+           s / 3600, (s / 60) % 60);
+  gOled->drawStr(0, 62, l);
+  gOled->sendBuffer();
+}
+
+// "identify" flashes the screen as well as (or instead of) the LED.
+void oledIdentify() {
+  if (!gOled) return;
+  for (int i = 0; i < 6; i++) { gOledInvert = !gOledInvert; gOled->sendF("c", gOledInvert ? 0xA7 : 0xA6); delay(150); }
+  gOled->sendF("c", 0xA6);
+}
+

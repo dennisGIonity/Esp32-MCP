@@ -49,6 +49,9 @@ cd E:\.ESP32-MCP
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -r server\requirements.txt
+# Windows Smart App Control blocks zeroconf's compiled DLLs (mDNS silently off).
+# Reinstall it as pure Python so ionity-fleet.local is advertised:
+$env:SKIP_CYTHON = '1'; pip install --force-reinstall --no-deps --no-binary zeroconf zeroconf
 
 # 2. Start the fleet server (dashboard + API + MCP on :8099)
 python server\run.py

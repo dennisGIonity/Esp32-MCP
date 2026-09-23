@@ -64,7 +64,7 @@ class DiscoveryService:
             from zeroconf import ServiceInfo
             from zeroconf.asyncio import AsyncZeroconf
         except ImportError:
-            self.error = "zeroconf not installed (pip install zeroconf)"
+            self.error = "zeroconf not importable (install it, or if Windows blocked its DLLs: set SKIP_CYTHON=1 and pip install --force-reinstall --no-binary zeroconf zeroconf)"
             log.warning("mDNS disabled: %s", self.error)
             return
 
