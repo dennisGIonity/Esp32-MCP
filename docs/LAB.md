@@ -6,8 +6,13 @@ AEDI - IONITY GLOBAL | DOC-2026-09-ESP32MCP-009 | v1.0.0 | Policy 986 AED
 # The test lab
 
 A live bench of real boards reporting to the fleet server, isolated from
-production by `site=lab`. GateFlame is deliberately **not** part of it and
-stays untouched on the Pi 5.
+production by `site=lab`.
+
+> **The lab itself is its own project now: [Ionity-Lab](https://github.com/dennisGIonity/Ionity-Lab)
+> (private) at `E:\.IONITY-LAB`.** It owns the network (household TP-Link on 2.4 GHz, H3C lab on
+> 5 GHz + a low-power 2.4 GHz board network), the laptop dual-network setup, the shared MQTT broker,
+> the Pi 5 tools (GateFlame pause/resume, screen kiosk), the Arduino bench files and the health
+> check. ESP32-MCP is registered in its `lab.json`. This page covers only what ESP32-MCP runs in it.
 
 ## What is in it
 
@@ -25,22 +30,24 @@ unit is ever compiled in.
 It starts itself at logon (Startup shortcut **Ionity Lab**). By hand:
 
 ```powershell
-E:\.ESP32-MCP\scripts\start_lab.ps1            # starts whatever isn't running
-E:\.ESP32-MCP\scripts\start_lab.ps1 -Restart   # restart all three
+E:\.IONITY-LAB\lab.ps1 start                    # the whole lab: broker + every registered project
+E:\.ESP32-MCP\scripts\start_lab.ps1            # just this project (asks the lab for the broker)
+E:\.ESP32-MCP\scripts\start_lab.ps1 -Restart   # restart this project's services
+E:\.IONITY-LAB\lab.ps1 status                   # health check - every line OK before a demo
 ```
 
 That brings up, in order:
 
-| # | Service | Port | Runs from |
+| # | Service | Port | Owned by |
 |---|---|---|---|
-| 1 | MQTT broker (amqtt) | 1883 | `infra\broker\run_broker.py` in `.venv-broker` |
-| 2 | Fleet server + dashboard + MCP + LAN DNS | 8099, 53/udp | `server\run.py` in `.venv` |
-| 3 | Serial bridge | — | `scripts\serial_bridge.py` in `.venv` |
+| 1 | MQTT broker (amqtt) | 1883 | **Ionity-Lab**: `broker\run_broker.py` in its `.venv` |
+| 2 | Fleet server + dashboard + MCP + LAN DNS | 8099, 53/udp | ESP32-MCP: `server\run.py` in `.venv` |
+| 3 | Serial bridge | — | ESP32-MCP: `scripts\serial_bridge.py` in `.venv` |
 
 The MCP bridge in Claude also runs `start_lab.ps1` if it finds the server down.
 
-Dashboard: **http://192.168.0.3:8099/** — or whatever `ionity-fleet.local`
-resolves to; the address is advertised over mDNS and boards follow it.
+Dashboard: whatever `ionity-fleet.local` resolves to (advertised over mDNS;
+boards follow it). In the lab layout that is **http://192.168.124.4:8099/**.
 
 ## Adding a board
 
@@ -86,8 +93,8 @@ to forget pinned pins and scan again. Each reboots the node.
 
 ## The Pi 5 screen
 
-`SETUP-PI-LAB.cmd` (double-click) pauses GateFlame and puts the live fleet
-dashboard on the screen attached to the Pi. It detects the display from EDID
+Lives in Ionity-Lab now: `E:\.IONITY-LAB\SETUP-PI-LAB.cmd` (double-click) pauses
+GateFlame and puts the live fleet dashboard on the screen attached to the Pi. It detects the display from EDID
 (an ASUS reports maker `AUS`), then uses an autostart entry on Pi OS desktop,
 or `cage` + Chromium as a kiosk service on Lite. The URL lives in
 `/etc/ionity-lab-display.conf`. A DisplayLink USB monitor needs Synaptics'

@@ -19,8 +19,11 @@ the fleet host, with a live dashboard and a Model Context Protocol surface so
 Claude / AEDi can query and command the whole fleet as a single system.
 
 > **Live lab:** three real boards (2× ESP32-S3 over MQTT, 1× Pico 2 over the
-> serial bridge) report into `site=lab`. Start everything with
-> `scripts\start_lab.ps1` — it also runs at logon. See **[docs/LAB.md](docs/LAB.md)**.
+> serial bridge) report into `site=lab`. The lab itself — isolated network, shared
+> MQTT broker, Pi 5 tools, health check — is its own project,
+> **[Ionity-Lab](https://github.com/dennisGIonity/Ionity-Lab)** (private, `E:\.IONITY-LAB`),
+> and ESP32-MCP is registered in it. Start everything with `E:\.IONITY-LAB\lab.ps1 start`
+> (or just this project with `scripts\start_lab.ps1`, which runs at logon). See **[docs/LAB.md](docs/LAB.md)**.
 >
 > Boards find the server as **`ionity-fleet.local`** over mDNS, not by a fixed
 > IP — a router swap moved the LAN once already and the fleet followed.

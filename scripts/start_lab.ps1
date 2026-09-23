@@ -1,21 +1,24 @@
 # ===========================================================================
-# AEDI - IONITY GLOBAL | Bring the whole lab up (idempotent)
+# AEDI - IONITY GLOBAL | Bring ESP32-MCP up inside the Ionity Lab (idempotent)
 # Policy 986 AED | (c) 2018-2026 Antwerp Designs | Ionity (Pty) Ltd
 # ---------------------------------------------------------------------------
-# Starts, only if not already running:
-#   1. MQTT broker      :1883   infra\broker\run_broker.py   (.venv-broker)
-#   2. Fleet server     :8099   server\run.py                (.venv)
-#   3. Serial bridge            scripts\serial_bridge.py     (.venv)
+# The lab itself (network, shared MQTT broker, Pi tools) is its own project:
+# Ionity-Lab, E:\.IONITY-LAB (override with IONITY_LAB_HOME). This script:
+#   1. asks the lab for its MQTT broker   :1883   (lab.ps1 broker)
+#   2. starts the fleet server             :8099   server\run.py            (.venv)
+#   3. starts the serial bridge                    scripts\serial_bridge.py (.venv)
 #
 # Order matters: broker first, so the fleet server's MQTT client connects on
 # its first attempt instead of after a back-off.
 #
-# Run at logon by the Startup shortcut, and by the MCP bridge if it finds the
-# server down. Safe to run any number of times.
+# Run at logon by the Startup shortcut, by the MCP bridge if it finds the
+# server down, and by the lab's own "lab.ps1 start". Safe to run repeatedly.
+# -Restart restarts this project's services only; the broker belongs to the lab.
 # ===========================================================================
 param([switch]$Restart, [switch]$Quiet)
 
 $root = 'E:\.ESP32-MCP'
+$labHome = if ($env:IONITY_LAB_HOME) { $env:IONITY_LAB_HOME } else { 'E:\.IONITY-LAB' }
 Set-Location $root
 function Say($m) { if (-not $Quiet) { Write-Host "[lab] $m" } }
 function Listening($port) { [bool](Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue) }
@@ -26,18 +29,19 @@ function ProcLike($pattern) {
 function Stop-Like($pattern) { ProcLike $pattern | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue } }
 
 if ($Restart) {
-  Say 'restarting everything'
-  Stop-Like '*serial_bridge.py*'; Stop-Like '*server\run.py*'; Stop-Like '*run_broker.py*'
+  Say 'restarting ESP32-MCP services (fleet server + serial bridge)'
+  Stop-Like '*serial_bridge.py*'; Stop-Like '*server\run.py*'
   Start-Sleep 3
 }
 
-# 1. broker
-if (Listening 1883) { Say 'broker        already up on :1883' }
+# 1. broker - owned by the Ionity Lab
+if (Listening 1883) { Say 'broker        already up on :1883 (Ionity Lab)' }
+elseif (Test-Path "$labHome\lab.ps1") {
+  & "$labHome\lab.ps1" broker -Quiet:$Quiet
+}
 else {
-  Say 'broker        starting'
-  Start-Process -FilePath "$root\.venv-broker\Scripts\pythonw.exe" -ArgumentList "$root\infra\broker\run_broker.py" `
-    -WorkingDirectory $root -RedirectStandardError "$root\broker_err.txt" -WindowStyle Hidden
-  for ($i = 0; $i -lt 15 -and -not (Listening 1883); $i++) { Start-Sleep 1 }
+  Say "broker        DOWN and Ionity Lab not found at $labHome - clone github.com/dennisGIonity/Ionity-Lab there"
+  Say '              (the fleet server still runs; devices fall back to HTTP until the broker is up)'
 }
 
 # 2. fleet server
