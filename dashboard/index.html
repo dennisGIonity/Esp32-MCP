@@ -7,9 +7,11 @@
 <meta name="author" content="Johan Wilhelm van Antwerp">
 <meta name="copyright" content="(c) 2018-2026 Antwerp Designs | Ionity (Pty) Ltd">
 <meta name="description" content="Live monitoring for the Ionity ESP32-MCP edge fleet. Policy 986 AED.">
-<link rel="stylesheet" href="/static/style.css">
+<meta name="color-scheme" content="dark">
+<link rel="stylesheet" href="/static/style.css?v=2">
 </head>
 <body>
+<div class="wrap">
 
 <header class="topbar">
   <div class="brand">
@@ -20,10 +22,10 @@
     </div>
   </div>
   <div class="conn">
-    <span id="wsDot" class="dot"></span>
-    <span id="wsLabel">connecting…</span>
-    <span class="sep">|</span>
-    <span id="mqttLabel">mqtt —</span>
+    <span class="pill" id="wsPill"><span id="wsDot" class="dot"></span><span id="wsLabel">connecting…</span></span>
+    <span class="pill" id="mqttPill"><span id="mqttLabel">mqtt —</span></span>
+    <span class="pill" id="mdnsPill"><span id="mdnsLabel">mdns —</span></span>
+    <span class="pill clock" id="clock">--:--:--</span>
   </div>
 </header>
 
@@ -33,26 +35,32 @@
   <div class="kpi warn"><span class="k-val" id="kStale">—</span><span class="k-lab">Stale</span></div>
   <div class="kpi bad"><span class="k-val" id="kOffline">—</span><span class="k-lab">Offline</span></div>
   <div class="kpi crit"><span class="k-val" id="kAlert">—</span><span class="k-lab">Alerting</span></div>
-  <div class="kpi"><span class="k-val" id="kRate">—</span><span class="k-lab">msg/sec in</span></div>
-  <div class="kpi"><span class="k-val" id="kQueue">—</span><span class="k-lab">Write queue</span></div>
+  <div class="kpi vio"><span class="k-val" id="kRate">—</span><span class="k-lab">Msg / sec in</span></div>
+  <div class="kpi vio"><span class="k-val" id="kQueue">—</span><span class="k-lab">Write queue</span></div>
 </section>
 
 <section class="panel chartrow">
   <div class="chartbox">
     <div class="chart-h"><span>Ingest rate</span><span id="rateNow" class="muted"></span></div>
-    <canvas id="rateChart" height="70"></canvas>
+    <canvas id="rateChart" height="96"></canvas>
   </div>
   <div class="chartbox">
     <div class="chart-h"><span>Fleet health</span><span id="healthNow" class="muted"></span></div>
     <div class="healthbar" id="healthBar"></div>
     <div class="legend">
-      <span><i class="sw ok"></i>online</span><span><i class="sw warn"></i>stale</span>
-      <span><i class="sw bad"></i>offline</span><span><i class="sw crit"></i>alerting</span>
+      <div class="lg"><span><i class="sw ok"></i>Online</span><b id="lgOk">0</b></div>
+      <div class="lg"><span><i class="sw warn"></i>Stale</span><b id="lgWarn">0</b></div>
+      <div class="lg"><span><i class="sw bad"></i>Offline</span><b id="lgBad">0</b></div>
+      <div class="lg"><span><i class="sw crit"></i>Alerting</span><b id="lgCrit">0</b></div>
     </div>
   </div>
 </section>
 
 <section class="panel">
+  <div class="p-head">
+    <div class="p-title"><i></i>Devices</div>
+    <span id="shown" class="muted"></span>
+  </div>
   <div class="toolbar">
     <input id="search" type="search" placeholder="Search device id, label or IP…">
     <select id="fHealth">
@@ -64,8 +72,6 @@
     </select>
     <select id="fSite"><option value="">All sites</option></select>
     <select id="fGroup"><option value="">All groups</option></select>
-    <span class="grow"></span>
-    <span id="shown" class="muted"></span>
     <button id="btnBroadcast" class="btn ghost">Identify all</button>
   </div>
   <div id="grid" class="grid"></div>
@@ -73,22 +79,25 @@
 </section>
 
 <section class="panel">
-  <div class="chart-h"><span>Open alerts</span><span id="alertCount" class="muted"></span></div>
+  <div class="p-head">
+    <div class="p-title"><i style="background:var(--crit)"></i>Open alerts</div>
+    <span id="alertCount" class="muted"></span>
+  </div>
   <div id="alerts" class="alerts"></div>
 </section>
 
 <section class="panel">
-  <div class="chart-h">
-    <span>LAN DNS — what's going to what device</span>
+  <div class="p-head">
+    <div class="p-title"><i style="background:var(--accent2)"></i>LAN DNS — what's going to what device</div>
     <span id="dnsState" class="muted">resolver —</span>
   </div>
 
   <div class="kpis dnskpis">
-    <div class="kpi"><span class="k-val" id="dQueries">—</span><span class="k-lab">Queries / hr</span></div>
+    <div class="kpi"><span class="k-val" id="dQueries">—</span><span class="k-lab">Queries</span></div>
     <div class="kpi"><span class="k-val" id="dDomains">—</span><span class="k-lab">Domains</span></div>
     <div class="kpi"><span class="k-val" id="dDevices">—</span><span class="k-lab">Devices asking</span></div>
     <div class="kpi ok"><span class="k-val" id="dCache">—</span><span class="k-lab">Cache hit</span></div>
-    <div class="kpi"><span class="k-val" id="dLatency">—</span><span class="k-lab">Avg ms</span></div>
+    <div class="kpi vio"><span class="k-val" id="dLatency">—</span><span class="k-lab">Avg ms</span></div>
   </div>
 
   <div class="toolbar">
@@ -99,24 +108,29 @@
       <option value="1440" selected>Last 24 hours</option>
       <option value="10080">Last 7 days</option>
     </select>
-    <span class="grow"></span>
     <span id="dnsHint" class="muted"></span>
   </div>
 
   <div class="dnsgrid">
-    <div>
+    <div class="dnscol">
       <div class="chart-h"><span>By device</span><span class="muted">top domains each</span></div>
       <div id="dnsDevices" class="dnsdevs"></div>
     </div>
-    <div>
+    <div class="dnscol">
       <div class="chart-h"><span>Live queries</span><span id="dnsFeedCount" class="muted"></span></div>
-      <div id="dnsFeed" class="dnsfeed"></div>
+      <div class="feed">
+        <div class="feed-h"><span>Time</span><span>Device</span><span>Domain</span><span class="h-ty">Type</span><span class="h-s q-s">Status</span></div>
+        <div id="dnsFeed" class="dnsfeed"></div>
+      </div>
     </div>
   </div>
 </section>
 
 <section class="panel">
-  <div class="chart-h"><span>MCP console</span><span class="muted">POST /api/v1/mcp/rpc</span></div>
+  <div class="p-head">
+    <div class="p-title"><i></i>MCP console</div>
+    <span class="muted"><code>POST /api/v1/mcp/rpc</code></span>
+  </div>
   <div class="mcpbar">
     <select id="mcpTool"></select>
     <input id="mcpArgs" value="{}" spellcheck="false">
@@ -125,19 +139,21 @@
   <pre id="mcpOut" class="out">Pick a tool and call it. This is the exact surface Claude / AEDi sees.</pre>
 </section>
 
-<div id="drawer" class="drawer">
+<footer class="foot">
+  DOC-2026-09-ESP32MCP-DASH · Policy 986 AED · © 2018-2026 Antwerp Designs | Ionity (Pty) Ltd
+  · <a href="https://www.ionity.today" target="_blank" rel="noopener">ionity.today</a>
+</footer>
+</div>
+
+<div id="scrim" class="scrim"></div>
+<div id="drawer" class="drawer" role="dialog" aria-label="Device details">
   <div class="drawer-h">
     <strong id="dTitle">device</strong>
-    <button id="dClose" class="btn ghost sm">close</button>
+    <button id="dClose" class="btn ghost sm">Close</button>
   </div>
   <div id="dBody" class="drawer-b"></div>
 </div>
 
-<footer class="foot">
-  DOC-2026-09-ESP32MCP-DASH · Policy 986 AED · © 2018-2026 Antwerp Designs | Ionity (Pty) Ltd
-  · <a href="https://www.ionity.today">ionity.today</a>
-</footer>
-
-<script src="/static/app.js"></script>
+<script src="/static/app.js?v=2"></script>
 </body>
 </html>

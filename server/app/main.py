@@ -142,6 +142,16 @@ app.add_middleware(
 
 app.include_router(router)
 
+@app.middleware("http")
+async def dashboard_no_cache(request, call_next):
+    """Browsers must revalidate the dashboard, or they keep showing an old UI
+    after an update (cheap: unchanged files come back as 304)."""
+    response = await call_next(request)
+    if request.url.path == "/" or request.url.path.startswith("/static/"):
+        response.headers["Cache-Control"] = "no-cache"
+    return response
+
+
 if DASHBOARD_DIR.exists():
     app.mount("/static", StaticFiles(directory=str(DASHBOARD_DIR)), name="static")
 
