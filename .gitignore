@@ -56,3 +56,5 @@ server_boot.log
 
 # merge scratch
 _merge/
+# IDE
+.theia/
