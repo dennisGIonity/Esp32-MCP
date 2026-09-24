@@ -5,9 +5,12 @@ AEDI - IONITY GLOBAL | DOC-2026-09-ESP32MCP-002 | v1.0.0 | Policy 986 AED
 
 # RouterProject reuse audit
 
-`E:\.RouterProject` was imported verbatim to `_reference/router-project/`
-(minus `.git` and `__pycache__`). This is the line-by-line verdict on what
-carried over.
+`E:\.RouterProject` (= repo `Ionity-ESP32-Reporter`) was first imported to a local, git-ignored
+`_reference/router-project/`. This is the line-by-line verdict on what carried over into the fleet design.
+
+> **Update 2026-09-25:** the whole project is now merged into this repo, unchanged apart from
+> removed credentials: service in `modules/network-sentinel/`, firmware in
+> `firmware-arduino/Esp32_Network_Sentinel/`. `_reference/` and `E:\.RouterProject` are gone.
 
 The one-sentence summary: **RouterProject is an excellent single-site network
 sentinel. Its shape is right and its MCP layer is reusable; everything that

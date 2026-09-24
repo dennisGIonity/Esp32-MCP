@@ -180,15 +180,25 @@ regardless of fleet size.
 
 ```
 E:\.ESP32-MCP
-├── firmware/          PlatformIO project (esp32s3 | esp32dev | esp32c3 | OTA env)
-├── server/            FastAPI fleet server + MCP gateway
+├── firmware/                PlatformIO project (esp32s3 | esp32dev | esp32c3 | OTA env)
+├── firmware-arduino/
+│   ├── Esp32_MCP_Node/      fleet node (Arduino IDE) - the one in the lab
+│   ├── Pico_MCP_Node/       Pico / Pico 2 (serial or WiFi)
+│   └── Esp32_Network_Sentinel/  single-site link/power sentinel with OLED clock (from Ionity-ESP32-Reporter)
+├── server/                  FastAPI fleet server + MCP gateway (:8099)
 │   └── app/{api,ingest,storage,fleet,mcp}
-├── dashboard/         static SPA served at /
-├── infra/             Dockerfile + mosquitto.conf
-├── scripts/           fleet_simulator.py
-├── docs/              architecture, reuse audit, schema, provisioning, roadmap
-└── _reference/        E:\.RouterProject imported (git-ignored)
+├── modules/
+│   └── network-sentinel/    Kelvin Drive network sentinel service (:8000): MikroTik, load-shedding,
+│                            probes, speedtest, security + traffic analysis, its own MCP + dashboard
+├── dashboard/               fleet dashboard served at /
+├── infra/                   Dockerfile + mosquitto.conf
+├── scripts/                 start_lab, add_device, serial bridge, simulator
+└── docs/                    architecture, reuse audit, schema, provisioning, lab, roadmap
 ```
+
+> **One repo.** `Ionity-ESP32-Reporter` (formerly `E:\.RouterProject`) was merged in on 2026-09-25:
+> its service lives in `modules/network-sentinel`, its firmware in `firmware-arduino/Esp32_Network_Sentinel`.
+> The lab (network, broker, Pi tools) is separate: `github.com/dennisGIonity/Ionity-2nd-Router-Test-Lab`.
 
 ---
 

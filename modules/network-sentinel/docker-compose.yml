@@ -1,0 +1,23 @@
+version: '3.8'
+
+services:
+  sentinel:
+    build: .
+    container_name: kelvin-drive-sentinel
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - SENTINEL_PORT=8000
+      - SENTINEL_HOST=0.0.0.0
+      - ESKOM_API_KEY=${ESKOM_API_KEY:-}
+      - MIKROTIK_HOST=10.53.20.1
+      - MIKROTIK_USER=sentinel_readonly
+      - MIKROTIK_PASSWORD=CHANGE_ME_in_env
+    volumes:
+      - ./config:/app/config:ro
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/telemetry/stability"]
+      interval: 10s
+      timeout: 5s
+      retries: 3

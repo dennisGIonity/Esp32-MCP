@@ -53,3 +53,6 @@ server_boot.log
 
 # arduino-cli build folders (add_device.ps1 / compile)
 .build-*/
+
+# merge scratch
+_merge/

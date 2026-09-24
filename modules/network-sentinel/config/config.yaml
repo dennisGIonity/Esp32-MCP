@@ -1,0 +1,142 @@
+site:
+  id: "ionity-esp-reporter-kelvin-01"
+  name: "Ionity_ESP_Reporter (Kelvin Drive HQ)"
+  organization: "Antwerp Ecosystem Designs Ionity (AEDI)"
+  hostname: "Dynamic@KelvinDrive"
+  router_model: "MikroTik CRS326-24G-2S+"
+  location:
+    city: "Sandton, Johannesburg"
+    country: "South Africa"
+    coordinates:
+      latitude: -26.0850
+      longitude: 28.0567
+    eskom_area_id: "city-of-johannesburg-block-3"
+    eskom_area_name: "Sandton / Kelvin Drive Substation"
+
+network:
+  wan_interfaces:
+    - id: "wan1"
+      name: "Liquid Fibre ISP 1"
+      type: "fibre"
+      vlan_id: 11
+      interface: "vlan11"
+      ip_pool: "102.33.102.218/29"
+      gateway_ip: "102.33.102.217"
+      dns_servers: ["8.8.8.8", "1.1.1.1"]
+      allocated_ips: ["102.33.102.216", "102.33.102.220", "102.33.102.221", "102.33.102.222"]
+      committed_bandwidth_mbps: 200
+      priority: 1
+    - id: "wan2"
+      name: "Liquid Fibre ISP 2"
+      type: "fibre"
+      interface: "ether9"
+      ip_pool: "41.169.150.194/29"
+      gateway_ip: "41.169.150.193"
+      dns_servers: ["8.8.8.8", "1.1.1.1"]
+      allocated_ips: ["41.169.150.192", "41.169.150.195", "41.169.150.196"]
+      committed_bandwidth_mbps: 200
+      priority: 2
+
+  lan_bonding:
+    name: "LAN Bonding Group"
+    interfaces: ["ether2", "ether3", "ether4", "ether5"]
+    capacity_gbps: 4
+
+  special_interfaces:
+    unused_wan: "ether1"
+    pbx_uplink: "ether10"
+    management_vlan: "vlan200"
+
+  floors:
+    - id: "ground_floor"
+      name: "Ground Floor (GF)"
+      vlans:
+        - name: "GF Offices 1-19"
+          subnet_range: "10.53.61.0/24 - 10.53.79.0/24"
+        - name: "Co-Working"
+          vlan_id: 610
+          subnet: "10.53.61.0/24"
+    - id: "first_floor"
+      name: "First Floor (FF)"
+      vlans:
+        - name: "FF Offices 1-27"
+          subnet_range: "10.53.81.0/24 - 10.53.107.0/24"
+        - name: "FF Office 22"
+          static_ip: "10.53.102.27"
+        - name: "Printers"
+          vlan_id: 400
+          ip_range: "10.53.40.20-10.53.40.24"
+    - id: "lower_ground"
+      name: "Lower Ground (LG)"
+      vlans:
+        - name: "LG Offices 1-10"
+          subnet_range: "10.53.111.0/24 - 10.53.120.0/24"
+        - name: "LG Office 10 Printer"
+          static_ip: "10.53.120.251"
+    - id: "management_and_infra"
+      name: "Management & Infrastructure"
+      vlans:
+        - name: "Management VLAN"
+          vlan_id: 200
+          subnet: "10.53.20.0/24"
+        - name: "HQ Printers"
+          vlan_id: 401
+          subnet: "10.53.41.0/24"
+        - name: "PPTP Server Pool"
+          subnet: "192.168.10.10-192.168.10.30"
+        - name: "PBX Forwarding"
+          source_net: "169.239.8.0/24"
+          target_ip: "192.168.243.250"
+
+security:
+  blocked_ports:
+    - port: 23
+      service: "Telnet"
+      protocol: "TCP"
+      action: "DROP_AND_FLAG"
+    - port: 21
+      service: "FTP"
+      protocol: "TCP"
+      action: "DROP_AND_FLAG"
+    - port: 80
+      service: "WWW (Insecure HTTP)"
+      protocol: "TCP"
+      action: "DROP_AND_FLAG"
+    - port: 22
+      service: "SSH"
+      protocol: "TCP"
+      action: "DROP_AND_FLAG"
+    - port: 8728
+      service: "MikroTik API"
+      protocol: "TCP"
+      action: "DROP_AND_FLAG"
+
+sentinel:
+  mode: "ALONGSIDE_PASSIVE"
+  polling_interval_seconds: 2
+  passive_ping_interval_seconds: 5
+  active_speedtest_interval_minutes: 60
+  ping_targets:
+    - name: "Google DNS"
+      ip: "8.8.8.8"
+    - name: "Cloudflare DNS"
+      ip: "1.1.1.1"
+    - name: "Liquid ISP Gateway 1"
+      ip: "102.33.102.217"
+    - name: "Liquid ISP Gateway 2"
+      ip: "41.169.150.193"
+
+mikrotik_connection:
+  api_host: "10.53.20.1"
+  api_port: 8728
+  api_user: "sentinel_readonly"
+  api_password: "CHANGE_ME_in_env"
+  snmp_host: "10.53.20.1"
+  snmp_community: "public"
+  snmp_version: "2c"
+  simulate_if_offline: true
+
+loadshedding:
+  eskom_api_url: "https://developer.sepush.co.za/business/2.0"
+  cache_ttl_seconds: 900
+  mock_if_no_key: true
