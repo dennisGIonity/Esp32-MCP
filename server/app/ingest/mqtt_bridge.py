@@ -125,6 +125,7 @@ class MqttBridge:
                 self.registry.ingest_status(StatusIn(**data))
             elif topic.endswith("/cmd/result"):
                 self.cmd_results += 1
+                self.registry.record_cmd_result(data)
                 log.info("cmd result from %s: %s (ok=%s)",
                          data.get("device_id"), data.get("detail"), data.get("ok"))
         except Exception:

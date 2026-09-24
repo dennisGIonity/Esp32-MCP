@@ -48,8 +48,12 @@ else {
 if (Listening 8099) { Say 'fleet server  already up on :8099' }
 else {
   Say 'fleet server  starting'
-  Start-Process -FilePath "$root\.venv\Scripts\pythonw.exe" -ArgumentList "$root\server\run.py" `
-    -WorkingDirectory $root -RedirectStandardError "$root\logs_err.txt" -WindowStyle Hidden
+  # python.exe with BOTH streams redirected, not pythonw: under pythonw sys.stdout is
+  # None and uvicorn's log formatter dies at startup ("Unable to configure formatter
+  # 'default'") - the server then never listens and the MCP tools go dark.
+  Start-Process -FilePath "$root\.venv\Scripts\python.exe" -ArgumentList "$root\server\run.py" `
+    -WorkingDirectory $root -RedirectStandardOutput "$root\logs_out.txt" `
+    -RedirectStandardError "$root\logs_err.txt" -WindowStyle Hidden
   for ($i = 0; $i -lt 40 -and -not (Listening 8099); $i++) { Start-Sleep 1 }
 }
 

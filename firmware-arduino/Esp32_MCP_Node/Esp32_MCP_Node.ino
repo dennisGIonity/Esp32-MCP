@@ -239,6 +239,76 @@ String buildStatusJson(const char *state) {
 }
 
 // ---------------------------------------------------------------------------
+// DNS probe: one raw A query over UDP to ONE resolver. No system resolver, no
+// cache, no fallback server - so the answer is exactly what that resolver (the
+// Gate^Flame box) said, which is the whole point of the test.
+// Returns a dotted address, "0.0.0.0" when a blocker answers with the null
+// address, or NXDOMAIN / SERVFAIL / REFUSED / NOANSWER / TIMEOUT / BADNAME.
+// ---------------------------------------------------------------------------
+#include <WiFiUdp.h>
+String dnsProbe(const IPAddress &server, const String &name, uint32_t &elapsedMs) {
+  uint8_t q[300];
+  uint16_t id = (uint16_t)esp_random();
+  size_t len = 0;
+  q[len++] = id >> 8; q[len++] = id & 0xff;
+  q[len++] = 0x01; q[len++] = 0x00;            // RD
+  q[len++] = 0; q[len++] = 1;                  // QDCOUNT 1
+  for (int i = 0; i < 6; i++) q[len++] = 0;    // AN/NS/AR = 0
+  int start = 0;
+  while (start <= (int)name.length()) {
+    int dot = name.indexOf('.', start);
+    if (dot < 0) dot = name.length();
+    int lab = dot - start;
+    if (lab <= 0 || lab > 63 || len + lab + 6 > sizeof(q)) return "BADNAME";
+    q[len++] = lab;
+    for (int i = start; i < dot; i++) q[len++] = name[i];
+    start = dot + 1;
+  }
+  q[len++] = 0;
+  q[len++] = 0; q[len++] = 1;                  // QTYPE A
+  q[len++] = 0; q[len++] = 1;                  // QCLASS IN
+
+  WiFiUDP udp;
+  udp.begin(0);
+  uint32_t t0 = millis();
+  udp.beginPacket(server, 53); udp.write(q, len); udp.endPacket();
+  uint8_t r[512];
+  int got = 0;
+  while (millis() - t0 < DNS_PROBE_TIMEOUT_MS) {
+    if (udp.parsePacket() > 0) {
+      got = udp.read(r, sizeof(r));
+      if (got >= 12 && r[0] == q[0] && r[1] == q[1]) break;
+      got = 0;
+    }
+    delay(2);
+  }
+  elapsedMs = millis() - t0;
+  udp.stop();
+  if (got < 12) return "TIMEOUT";
+
+  uint8_t rcode = r[3] & 0x0f;
+  if (rcode == 3) return "NXDOMAIN";
+  if (rcode == 2) return "SERVFAIL";
+  if (rcode == 5) return "REFUSED";
+  if (rcode != 0) return "RCODE" + String(rcode);
+  uint16_t an = (r[6] << 8) | r[7];
+  // skip the question section
+  int p = 12;
+  while (p < got && r[p] != 0) { if ((r[p] & 0xc0) == 0xc0) { p += 1; break; } p += r[p] + 1; }
+  p += 1 + 4;
+  for (uint16_t i = 0; i < an && p + 10 < got; i++) {
+    if ((r[p] & 0xc0) == 0xc0) p += 2; else { while (p < got && r[p] != 0) p += r[p] + 1; p += 1; }
+    uint16_t type = (r[p] << 8) | r[p + 1];
+    uint16_t rdlen = (r[p + 8] << 8) | r[p + 9];
+    p += 10;
+    if (type == 1 && rdlen == 4 && p + 4 <= got)
+      return String(r[p]) + "." + String(r[p + 1]) + "." + String(r[p + 2]) + "." + String(r[p + 3]);
+    p += rdlen;                                 // CNAME etc. - keep walking
+  }
+  return "NOANSWER";
+}
+
+// ---------------------------------------------------------------------------
 // Inbound commands (server -> device) over MQTT
 // ---------------------------------------------------------------------------
 void publishCmdResult(const String &cmdId, bool ok, const String &detail) {
@@ -296,6 +366,39 @@ void onMqttMessage(char *topic, byte *payload, unsigned int len) {
     ESP.restart();
   } else if (action == "ping") {
     publishCmdResult(cmdId, true, "pong");
+  } else if (action == "dns_probe") {
+    // {"names":["doubleclick.net","ionity.today"], "dns_server":"192.168.124.3"}
+    String server = doc["dns_server"] | "";
+    if (server.length() == 0) {
+      prefs.begin("ionity", true);
+      server = prefs.getString("gf_dns", GF_DNS_DEFAULT);
+      prefs.end();
+    } else if (doc["remember"] | false) {
+      prefs.begin("ionity", false); prefs.putString("gf_dns", server); prefs.end();
+    }
+    IPAddress srv;
+    if (!srv.fromString(server)) { publishCmdResult(cmdId, false, "dns_server is not an IPv4 address"); return; }
+    if (WiFi.status() != WL_CONNECTED) { publishCmdResult(cmdId, false, "WiFi not connected"); return; }
+
+    JsonDocument res;
+    res["server"] = server;
+    res["from"]   = WiFi.localIP().toString();
+    JsonArray arr = res["answers"].to<JsonArray>();
+    int blocked = 0, resolved = 0, n = 0;
+    for (JsonVariant v : doc["names"].as<JsonArray>()) {
+      if (n++ >= DNS_PROBE_MAX_NAMES) break;
+      String name = v.as<String>();
+      uint32_t ms = 0;
+      String ans = dnsProbe(srv, name, ms);
+      JsonObject o = arr.add<JsonObject>();
+      o["n"] = name; o["a"] = ans; o["ms"] = ms;
+      if (ans == "0.0.0.0" || ans == "::") blocked++;
+      else if (ans[0] >= '0' && ans[0] <= '9') resolved++;
+      logln("dns_probe " + name + " @" + server + " -> " + ans + " (" + String(ms) + "ms)");
+    }
+    res["blocked"] = blocked; res["resolved"] = resolved; res["asked"] = arr.size();
+    String out; serializeJson(res, out);
+    publishCmdResult(cmdId, true, out);
   } else {
     publishCmdResult(cmdId, false, "unknown action");
   }
@@ -324,7 +427,7 @@ bool ensureMqtt() {
 
   mqtt.setServer(gServerHost.c_str(), MQTT_PORT);
   mqtt.setKeepAlive(MQTT_KEEPALIVE_S);
-  mqtt.setBufferSize(1024);
+  mqtt.setBufferSize(2048);   // a 12-name dns_probe reply is ~1.2 KB once escaped
   mqtt.setCallback(onMqttMessage);
 
   String willPayload = buildStatusJson("offline");

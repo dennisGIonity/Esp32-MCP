@@ -67,6 +67,153 @@ def post(server: str, payload: dict) -> bool:
         return False
 
 
+# --------------------------------------------------------------------------
+# Inbound commands (1.1.0): MQTT cmd topic -> "CMD {json}" on the board's serial,
+# "RES {json}" from the board -> MQTT cmd/result. A board with no radio can
+# then be commanded exactly like a networked one.
+# --------------------------------------------------------------------------
+PORT_OF: dict[str, "serial.Serial"] = {}      # device_id -> open serial handle
+SITE_OF: dict[str, str] = {}
+WRITE_LOCK = threading.Lock()
+MQTT = None
+MQTT_ROOT = "ionity"
+
+
+def dns_query(server: str, name: str, timeout: float = 1.5) -> tuple[str, int]:
+    """One raw A query to ONE resolver - same semantics as the ESP32's dnsProbe."""
+    import random
+    import socket
+    import struct
+    tid = random.randint(0, 0xFFFF)
+    q = struct.pack(">HHHHHH", tid, 0x0100, 1, 0, 0, 0)
+    for part in name.strip(".").split("."):
+        if not part or len(part) > 63:
+            return "BADNAME", 0
+        q += bytes([len(part)]) + part.encode("idna")
+    q += b"\x00" + struct.pack(">HH", 1, 1)
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    s.settimeout(timeout)
+    t0 = time.monotonic()
+    try:
+        s.sendto(q, (server, 53))
+        while True:
+            d, _ = s.recvfrom(512)
+            if len(d) >= 12 and d[:2] == q[:2]:
+                break
+    except OSError:
+        return "TIMEOUT", int((time.monotonic() - t0) * 1000)
+    finally:
+        s.close()
+    ms = int((time.monotonic() - t0) * 1000)
+    rcode = d[3] & 0x0F
+    if rcode:
+        return {3: "NXDOMAIN", 2: "SERVFAIL", 5: "REFUSED"}.get(rcode, f"RCODE{rcode}"), ms
+    an = struct.unpack(">H", d[6:8])[0]
+    p = 12
+    while d[p] != 0:
+        if d[p] & 0xC0 == 0xC0:
+            p += 1
+            break
+        p += d[p] + 1
+    p += 5
+    for _ in range(an):
+        if d[p] & 0xC0 == 0xC0:
+            p += 2
+        else:
+            while d[p] != 0:
+                p += d[p] + 1
+            p += 1
+        rtype, _, _, rdlen = struct.unpack(">HHIH", d[p:p + 10])
+        p += 10
+        if rtype == 1 and rdlen == 4:
+            return ".".join(str(b) for b in d[p:p + 4]), ms
+        p += rdlen
+    return "NOANSWER", ms
+
+
+def lab_source_ip(server: str) -> str:
+    import socket
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        s.connect((server, 53))
+        return s.getsockname()[0]
+    except OSError:
+        return ""
+    finally:
+        s.close()
+
+
+def serial_write(device_id: str, line: str) -> bool:
+    s = PORT_OF.get(device_id)
+    if not s:
+        return False
+    with WRITE_LOCK:
+        s.write((line + "\n").encode())
+        s.flush()
+    return True
+
+
+def publish_result(result: dict) -> None:
+    did = result.get("device_id", "")
+    topic = f"{MQTT_ROOT}/{SITE_OF.get(did, 'lab')}/{did}/cmd/result"
+    if MQTT:
+        MQTT.publish(topic, json.dumps(result), qos=1)
+    log(f"result {did} {result.get('cmd_id')}: ok={result.get('ok')}")
+
+
+def start_mqtt(host: str, port: int) -> None:
+    global MQTT
+    try:
+        import paho.mqtt.client as paho
+    except ImportError:
+        log("paho-mqtt not installed - serial boards will report but cannot be commanded")
+        return
+    try:
+        c = paho.Client(callback_api_version=paho.CallbackAPIVersion.VERSION2,
+                        client_id="ionity-serial-bridge", clean_session=True)
+    except AttributeError:
+        c = paho.Client(client_id="ionity-serial-bridge", clean_session=True)
+
+    def on_connect(client, *_a, **_k):
+        client.subscribe(f"{MQTT_ROOT}/+/+/cmd", qos=1)
+        client.subscribe(f"{MQTT_ROOT}/broadcast/cmd", qos=1)
+        log(f"MQTT connected {host}:{port} - relaying commands to serial boards")
+
+    def on_message(_client, _ud, msg):
+        parts = msg.topic.split("/")
+        try:
+            body = json.loads(msg.payload.decode("utf-8", "replace"))
+        except json.JSONDecodeError:
+            return
+        targets = list(PORT_OF) if parts[1] == "broadcast" else [parts[2]]
+        for did in targets:
+            if did in PORT_OF and serial_write(did, "CMD " + json.dumps(body)):
+                log(f"cmd -> {did} over serial: {body.get('action')}")
+
+    c.on_connect = on_connect
+    c.on_message = on_message
+    c.reconnect_delay_set(min_delay=1, max_delay=30)
+    c.connect_async(host, port, keepalive=60)
+    c.loop_start()
+    MQTT = c
+
+
+def handle_dnsq(device_id: str, line: str) -> None:
+    try:
+        q = json.loads(line[5:])
+    except json.JSONDecodeError:
+        return
+    server = q.get("server") or "192.168.124.3"
+    answers = []
+    for name in (q.get("names") or [])[:12]:
+        a, ms = dns_query(server, str(name))
+        answers.append({"n": name, "a": a, "ms": ms})
+        log(f"dns_probe for {device_id}: {name} @{server} -> {a} ({ms}ms)")
+    serial_write(device_id, "DNSA " + json.dumps({
+        "cmd_id": q.get("cmd_id"), "server": server,
+        "from": lab_source_ip(server), "answers": answers}))
+
+
 def pump(port: str, baud: int, server: str) -> None:
     sent = 0
     while True:
@@ -78,6 +225,16 @@ def pump(port: str, baud: int, server: str) -> None:
                     if not raw:
                         continue
                     line = raw.decode("utf-8", "replace").strip()
+                    if line.startswith("RES "):
+                        try:
+                            publish_result(json.loads(line[4:]))
+                        except json.JSONDecodeError:
+                            pass
+                        continue
+                    if line.startswith("DNSQ "):
+                        did = next((d for d, h in PORT_OF.items() if h is s), "")
+                        threading.Thread(target=handle_dnsq, args=(did, line), daemon=True).start()
+                        continue
                     if not line.startswith("TLM "):
                         continue
                     try:
@@ -93,6 +250,10 @@ def pump(port: str, baud: int, server: str) -> None:
                     for k in ("label", "site", "group"):
                         if meta.get(k):
                             payload[k] = meta[k]
+                    did = payload.get("device_id", "")
+                    if did:
+                        PORT_OF[did] = s
+                        SITE_OF[did] = payload.get("site", "lab")
                     if post(server, payload):
                         sent += 1
                         if sent == 1 or sent % 30 == 0:
@@ -115,10 +276,13 @@ def main() -> None:
     ap.add_argument("--port", action="append", default=[])
     ap.add_argument("--baud", type=int, default=115200)
     ap.add_argument("--server", default="http://127.0.0.1:8099")
+    ap.add_argument("--mqtt-host", default="127.0.0.1")
+    ap.add_argument("--mqtt-port", type=int, default=1883)
     a = ap.parse_args()
 
     started: set[str] = set()
     log(f"forwarding to {a.server}")
+    start_mqtt(a.mqtt_host, a.mqtt_port)
     while True:
         ports = a.port or discover()
         for p in ports:

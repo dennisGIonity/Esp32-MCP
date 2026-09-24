@@ -119,6 +119,13 @@ async def device_command(request: Request, device_id: str, cmd: CommandIn,
     return await request.app.state.registry.send_command(device_id, cmd.action, payload)
 
 
+@router.get("/api/v1/commands/results")
+async def command_results(request: Request, device_id: str | None = None,
+                          cmd_id: str | None = None, limit: int = Query(20, le=200)):
+    return {"results": request.app.state.registry.list_cmd_results(
+        device_id=device_id, cmd_id=cmd_id, limit=limit)}
+
+
 @router.get("/api/v1/telemetry/query")
 async def query_telemetry(
     request: Request, metric: str | None = None, device_id: str | None = None,

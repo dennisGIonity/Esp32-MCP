@@ -12,7 +12,12 @@
 #include "secrets.h"
 
 // --- Firmware identity -----------------------------------------------------
-#define FW_VERSION            "1.1.0"   // 1.1.0: OLED auto-detect + set_display
+#define FW_VERSION            "1.2.0"   // 1.2.0: dns_probe against Gate^Flame; 1.1.0: OLED auto-detect + set_display
+// Gate^Flame box the dns_probe command asks by default (lab Pi, eth0). Overridable
+// per unit without reflashing: the command's "dns_server" field, or NVS key "gf_dns".
+#define GF_DNS_DEFAULT        "192.168.124.3"
+#define DNS_PROBE_TIMEOUT_MS  1500
+#define DNS_PROBE_MAX_NAMES   12
 #define FW_PRODUCT            "ionity-esp32-mcp-node"
 
 // --- Device identity -------------------------------------------------------
@@ -31,7 +36,7 @@
 // 192.168.2.x to 192.168.0.x and every board kept POSTing into the void --
 // silently, because a failed POST looks exactly like a quiet sensor.
 #define SERVER_MDNS_HOST      "ionity-fleet"
-#define SERVER_HOST_FALLBACK  "192.168.0.3"
+#define SERVER_HOST_FALLBACK  "192.168.124.4"
 #define SERVER_HTTP_PORT      8099
 #define HTTP_INGEST_PATH      "/api/v1/telemetry"
 // Re-resolve after this many consecutive transmit failures (server moved?)

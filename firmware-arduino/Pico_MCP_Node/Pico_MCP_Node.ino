@@ -29,7 +29,8 @@
   #define HAS_WIFI 0
 #endif
 
-#define FW_VERSION          "1.0.0"
+#define FW_VERSION          "1.1.0"   // 1.1.0: commands over USB serial (CMD/RES), dns_probe via the host bridge
+#define GF_DNS_DEFAULT      "192.168.124.3"
 #define FW_PRODUCT          "ionity-pico-mcp-node"
 #define DEFAULT_SITE        "lab"
 #define DEFAULT_GROUP       "bench"
@@ -122,6 +123,98 @@ String buildJson() {
   return out;
 }
 
+// ---------------------------------------------------------------------------
+// Commands over USB serial (1.1.0)
+//
+// A board with no radio still takes commands: scripts/serial_bridge.py
+// subscribes to this device's MQTT cmd topic and writes one line per command:
+//     CMD {"action":"ping","cmd_id":"c123"}
+// and the board answers on one line, which the bridge publishes to cmd/result:
+//     RES {"device_id":..,"cmd_id":..,"ok":true,"detail":..}
+//
+// dns_probe: this board has no network interface of its own, so it cannot ask
+// Gate^Flame itself. It hands the question to the host with
+//     DNSQ {"cmd_id":..,"server":..,"names":[..]}
+// the bridge asks that resolver from the laptop's lab address and answers
+//     DNSA {"cmd_id":..,"answers":[{"n":..,"a":..,"ms":..}], "from":..}
+// and the board tallies it, blinks once per blocked name, and replies with
+// via:"host-bridge" - so nobody mistakes a relayed lookup for the board's own.
+// ---------------------------------------------------------------------------
+String gLine;
+
+void sendRes(const String &cmdId, bool ok, JsonVariantConst detail) {
+  JsonDocument r;
+  r["device_id"] = gDeviceId;
+  r["cmd_id"]    = cmdId;
+  r["ok"]        = ok;
+  r["detail"]    = detail;
+  Serial.print("RES ");
+  serializeJson(r, Serial);
+  Serial.println();
+}
+
+void sendResText(const String &cmdId, bool ok, const char *text) {
+  JsonDocument d; d.set(text);
+  sendRes(cmdId, ok, d.as<JsonVariantConst>());
+}
+
+void handleLine(const String &line) {
+  if (line.startsWith("CMD ")) {
+    JsonDocument doc;
+    if (deserializeJson(doc, line.substring(4))) return;
+    String action = doc["action"] | "";
+    String cmdId  = doc["cmd_id"] | "";
+    if (action == "ping") {
+      sendResText(cmdId, true, "pong");
+    } else if (action == "identify") {
+      for (int i = 0; i < 10; i++) { digitalWrite(NODE_LED, !digitalRead(NODE_LED)); delay(120); }
+      digitalWrite(NODE_LED, LOW);
+      sendResText(cmdId, true, "blinked");
+    } else if (action == "reboot") {
+      sendResText(cmdId, true, "rebooting");
+      Serial.flush(); delay(200);
+      rp2040.reboot();
+    } else if (action == "dns_probe") {
+      JsonDocument q;
+      q["cmd_id"] = cmdId;
+      q["server"] = doc["dns_server"] | GF_DNS_DEFAULT;
+      q["names"]  = doc["names"];
+      Serial.print("DNSQ ");
+      serializeJson(q, Serial);
+      Serial.println();
+    } else {
+      sendResText(cmdId, false, "unknown action");
+    }
+  } else if (line.startsWith("DNSA ")) {
+    JsonDocument a;
+    if (deserializeJson(a, line.substring(5))) return;
+    String cmdId = a["cmd_id"] | "";
+    int blocked = 0, resolved = 0;
+    for (JsonObject o : a["answers"].as<JsonArray>()) {
+      String ans = o["a"] | "";
+      if (ans == "0.0.0.0") { blocked++; digitalWrite(NODE_LED, HIGH); delay(150); digitalWrite(NODE_LED, LOW); delay(150); }
+      else if (ans.length() && ans[0] >= '0' && ans[0] <= '9') resolved++;
+    }
+    JsonDocument d;
+    d["server"]   = a["server"];
+    d["from"]     = a["from"];
+    d["via"]      = "host-bridge";
+    d["answers"]  = a["answers"];
+    d["blocked"]  = blocked;
+    d["resolved"] = resolved;
+    d["asked"]    = a["answers"].size();
+    sendRes(cmdId, true, d.as<JsonVariantConst>());
+  }
+}
+
+void pollSerial() {
+  while (Serial.available()) {
+    char c = (char)Serial.read();
+    if (c == '\n') { gLine.trim(); if (gLine.length()) handleLine(gLine); gLine = ""; }
+    else if (c != '\r' && gLine.length() < 2048) gLine += c;
+  }
+}
+
 void setup() {
   Serial.begin(115200);
   pinMode(NODE_LED, OUTPUT);
@@ -142,6 +235,7 @@ void setup() {
 }
 
 void loop() {
+  pollSerial();
 #if HAS_WIFI
   ensureWifi();
 #endif

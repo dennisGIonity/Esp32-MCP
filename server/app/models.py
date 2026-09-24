@@ -75,7 +75,12 @@ class Alert(BaseModel):
 
 
 class CommandIn(BaseModel):
-    action: Literal["reboot", "identify", "ping", "set_meta", "set_display"]
+    action: Literal["reboot", "identify", "ping", "set_meta", "set_display", "dns_probe"]
+    # dns_probe: ask a resolver (default: Gate^Flame at the node's configured
+    # gf_dns, 192.168.124.3 in the lab) for each name; the device reports what
+    # came back - an address, 0.0.0.0 (blocked), NXDOMAIN, SERVFAIL or TIMEOUT.
+    dns_server: str | None = None
+    names: list[str] | None = Field(default=None, max_length=12)
     site: str | None = None
     group: str | None = None
     label: str | None = None

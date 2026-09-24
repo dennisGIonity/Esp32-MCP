@@ -109,15 +109,22 @@ MCP_TOOLS: list[dict[str, Any]] = [
             "device_id='broadcast'. Actions: reboot, identify (blink LED and "
             "flash the OLED), ping, set_meta (re-tag site/group/label without "
             "reflashing), set_display (OLED driver ssd1306|sh1106|off|auto and "
-            "optional sda/scl pins - use sh1106 if a 1.3\" screen looks garbled). "
-            "Requires MQTT."
+            "optional sda/scl pins - use sh1106 if a 1.3\" screen looks garbled), "
+            "dns_probe (the device asks a DNS resolver - Gate^Flame by default - "
+            "for each of up to 12 'names' and reports the answer: an address, "
+            "0.0.0.0 = blocked, NXDOMAIN, SERVFAIL or TIMEOUT; read the reply "
+            "with get_command_results). Requires MQTT."
         ),
         "inputSchema": {
             "type": "object",
             "properties": {
                 "device_id": {"type": "string"},
                 "action": {"type": "string",
-                           "enum": ["reboot", "identify", "ping", "set_meta", "set_display"]},
+                           "enum": ["reboot", "identify", "ping", "set_meta", "set_display",
+                                    "dns_probe"]},
+                "dns_server": {"type": "string",
+                               "description": "resolver IPv4 for dns_probe (default: the node's gf_dns)"},
+                "names": {"type": "array", "items": {"type": "string"}, "maxItems": 12},
                 "site": {"type": "string"},
                 "group": {"type": "string"},
                 "label": {"type": "string"},
@@ -126,6 +133,22 @@ MCP_TOOLS: list[dict[str, Any]] = [
                 "scl": {"type": "integer"},
             },
             "required": ["device_id", "action"],
+        },
+    },
+    {
+        "name": "get_command_results",
+        "description": (
+            "Replies devices sent back to commands (most recent first) - e.g. the "
+            "per-name answers of a dns_probe. Filter by device_id and/or the cmd_id "
+            "returned by send_command."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "device_id": {"type": "string"},
+                "cmd_id": {"type": "string"},
+                "limit": {"type": "integer", "default": 20, "maximum": 200},
+            },
         },
     },
 ]
@@ -313,8 +336,18 @@ async def execute(name: str, args: dict, registry, store, dns=None) -> Any:
 
     if name == "send_command":
         payload = {k: v for k, v in args.items()
-                   if k in ("site", "group", "label", "driver", "sda", "scl") and v is not None}
+                   if k in ("site", "group", "label", "driver", "sda", "scl",
+                            "dns_server", "names") and v is not None}
+        if args.get("action") == "dns_probe":
+            names = payload.get("names") or []
+            if not names or len(names) > 12:
+                raise ValueError("dns_probe needs 1-12 names")
         return await registry.send_command(args["device_id"], args["action"], payload)
+
+    if name == "get_command_results":
+        return {"results": registry.list_cmd_results(
+            device_id=args.get("device_id"), cmd_id=args.get("cmd_id"),
+            limit=min(int(args.get("limit", 20)), 200))}
 
     raise ValueError(f"Unknown tool '{name}'")
 

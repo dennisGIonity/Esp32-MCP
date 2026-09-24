@@ -34,6 +34,10 @@ class FleetRegistry:
         self.command_publisher: Callable[[str, str, dict], Awaitable[bool]] | None = None
         self.started_at = time.time()
         self.dropped = 0
+        # Replies devices send on .../cmd/result. Previously only logged, so a
+        # command's outcome (e.g. what Gate^Flame answered to a dns_probe) was
+        # invisible to MCP. Kept in memory: recent, bounded, never invented.
+        self.cmd_results: deque[dict[str, Any]] = deque(maxlen=500)
 
     # -- lifecycle ---------------------------------------------------------
     async def start(self) -> None:
@@ -276,6 +280,29 @@ class FleetRegistry:
             "queue_depth": self.queue.qsize(),
             "dropped_writes": self.dropped,
         }
+
+    # -- command results ---------------------------------------------------
+    def record_cmd_result(self, data: dict[str, Any]) -> None:
+        detail = data.get("detail")
+        if isinstance(detail, str) and detail[:1] in "{[":
+            try:
+                detail = json.loads(detail)
+            except json.JSONDecodeError:
+                pass
+        self.cmd_results.append({
+            "received_at": time.time(),
+            "device_id": data.get("device_id"),
+            "cmd_id": data.get("cmd_id"),
+            "ok": data.get("ok"),
+            "detail": detail,
+        })
+
+    def list_cmd_results(self, device_id: str | None = None, cmd_id: str | None = None,
+                         limit: int = 20) -> list[dict[str, Any]]:
+        out = [r for r in reversed(self.cmd_results)
+               if (not device_id or r["device_id"] == device_id)
+               and (not cmd_id or r["cmd_id"] == cmd_id)]
+        return out[:limit]
 
     # -- outbound commands -------------------------------------------------
     async def send_command(self, device_id: str, action: str, payload: dict) -> dict:
