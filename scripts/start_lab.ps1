@@ -40,7 +40,7 @@ elseif (Test-Path "$labHome\lab.ps1") {
   & "$labHome\lab.ps1" broker -Quiet:$Quiet
 }
 else {
-  Say "broker        DOWN and Ionity Lab not found at $labHome - clone github.com/dennisGIonity/Ionity-Lab there"
+  Say "broker        DOWN and Ionity Lab not found at $labHome - clone github.com/dennisGIonity/Ionity-2nd-Router-Test-Lab there"
   Say '              (the fleet server still runs; devices fall back to HTTP until the broker is up)'
 }
 

@@ -8,7 +8,7 @@ AEDI - IONITY GLOBAL | DOC-2026-09-ESP32MCP-009 | v1.0.0 | Policy 986 AED
 A live bench of real boards reporting to the fleet server, isolated from
 production by `site=lab`.
 
-> **The lab itself is its own project now: [Ionity-Lab](https://github.com/dennisGIonity/Ionity-Lab)
+> **The lab itself is its own project now: [Ionity-2nd-Router-Test-Lab](https://github.com/dennisGIonity/Ionity-2nd-Router-Test-Lab)
 > (private) at `E:\.IONITY-LAB`.** It owns the network (household TP-Link on 2.4 GHz, H3C lab on
 > 5 GHz + a low-power 2.4 GHz board network), the laptop dual-network setup, the shared MQTT broker,
 > the Pi 5 tools (GateFlame pause/resume, screen kiosk), the Arduino bench files and the health
