@@ -29,3 +29,9 @@ Policy 986 AED | (c) 2018-2026 Antwerp Designs | Ionity (Pty) Ltd | www.ionity.t
 4. Get H3C WiFi SSID/password -> reflash ESPs (secrets.h) so the lab boards join the H3C.
 5. Move Pi 5 to H3C; run `E:\.IONITY-LAB\SETUP-PI-LAB.cmd`; read `E:\.IONITY-LAB\data\pi-lab-setup.log`.
 6. OLED: identify the OLED board (name/photo), get it on USB, flash with add_device.ps1.
+
+## 2026-09-24: lab switched OFF (checkpoint)
+- All work committed and pushed (ESP32-MCP `575b394`, lab repo `6530ac9`).
+- Stopped: lab broker, fleet server + dashboard, serial bridge, MCP bridge. Nothing listens on 1883/8099/53.
+- Restarts at logon (Startup shortcut) or when an ionity-esp32-fleet MCP tool is called. By hand: `E:\.IONITY-LAB\START-LAB.cmd`.
+- Full status and open items: https://github.com/dennisGIonity/Ionity-2nd-Router-Test-Lab/blob/main/docs/STATUS.md
