@@ -1,0 +1,24 @@
+# /etc/ionity-agent.conf - Ionity fleet agent (Raspberry Pi Zero / Linux)
+# Every key is optional. Env overrides: IONITY_AGENT_<KEY> (e.g. IONITY_AGENT_SITE=lab).
+[agent]
+site = lab
+group = bench
+label =
+# Fleet server. Empty = look up mdns_host (needs avahi / libnss-mdns, default on Pi OS),
+# then server_fallback. Set an IP here to pin it.
+server =
+mdns_host = ionity-fleet.local
+server_fallback = 192.168.124.4
+mqtt_port = 1883
+http_port = 8099
+mqtt_root = ionity
+mqtt_username =
+mqtt_password =
+# Must match IONITY_FLEET_TOKEN on the server once IONITY_REQUIRE_TOKEN=true.
+fleet_token = dev-fleet-token-change-me
+interval_s = 10
+# Default resolver for the dns_probe command (Gate^Flame in the lab).
+gf_dns = 192.168.124.3
+state_file = /var/lib/ionity-agent/state.json
+# LED used by "identify". Empty = auto (ACT, led0).
+led =

@@ -1,0 +1,23 @@
+[Unit]
+Description=Ionity fleet agent (reports this Pi to the Ionity ESP32-MCP fleet server)
+Documentation=https://github.com/dennisGIonity/Esp32-MCP/tree/main/devices/pi-agent
+Wants=network-online.target avahi-daemon.service
+After=network-online.target avahi-daemon.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /opt/ionity-agent/ionity_agent.py --config /etc/ionity-agent.conf
+Restart=always
+RestartSec=10
+# Root is needed for reboot and the ACT LED; nothing else is touched.
+User=root
+StateDirectory=ionity-agent
+# Keep a tiny footprint on a Pi Zero (512 MB RAM).
+MemoryMax=64M
+Nice=5
+NoNewPrivileges=true
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
