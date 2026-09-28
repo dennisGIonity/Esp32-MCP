@@ -1,0 +1,7 @@
+# Files that run on Linux / Raspberry Pi must keep LF endings, even when the
+# repo is checked out on Windows (core.autocrlf) and then copied to a Pi.
+*.sh                  text eol=lf
+*.service             text eol=lf
+devices/**            text eol=lf
+*.ps1                 text eol=crlf
+*.cmd                 text eol=crlf
