@@ -15,21 +15,36 @@ REST + WebSocket surface.
 from __future__ import annotations
 
 import asyncio
+import hmac
 import time
 from typing import Any
 
 from fastapi import APIRouter, Request, HTTPException, Header, WebSocket, WebSocketDisconnect, Query
+from fastapi.responses import Response
 
 from app.config import settings
 from app.models import TelemetryIn, CommandIn
+from app.mcp import protocol as mcp_protocol
+from app.mcp.tools import MCP_TOOLS
 
 router = APIRouter()
 ws_clients: set[WebSocket] = set()
 
 
 def _check_token(token: str | None) -> None:
-    if settings.require_token and token != settings.fleet_token:
+    if settings.require_token and not hmac.compare_digest(token or "", settings.fleet_token):
         raise HTTPException(status_code=401, detail="invalid or missing X-Fleet-Token")
+
+
+def _is_admin(request: Request) -> bool:
+    """True when no admin token is configured, or the caller presented it as
+    'Authorization: Bearer <t>' or 'X-Ionity-Token: <t>'."""
+    want = settings.admin_token
+    if not want:
+        return True
+    auth = request.headers.get("authorization", "")
+    got = auth[7:].strip() if auth.lower().startswith("bearer ") else request.headers.get("x-ionity-token", "")
+    return hmac.compare_digest(got or "", want)
 
 
 # --------------------------------------------------------------------------
@@ -113,7 +128,8 @@ async def get_device(request: Request, device_id: str, history: int = Query(100,
 @router.post("/api/v1/devices/{device_id}/cmd")
 async def device_command(request: Request, device_id: str, cmd: CommandIn,
                          x_fleet_token: str | None = Header(default=None)):
-    _check_token(x_fleet_token)
+    if not _is_admin(request):
+        raise HTTPException(status_code=401, detail="admin token required (Authorization: Bearer ...)")
     payload = {k: v for k, v in cmd.model_dump().items()
                if k != "action" and v is not None}
     return await request.app.state.registry.send_command(device_id, cmd.action, payload)
@@ -205,13 +221,20 @@ async def lan_devices(request: Request, limit: int = Query(100, le=1000)):
 # --------------------------------------------------------------------------
 @router.post("/api/v1/mcp/rpc")
 async def mcp_rpc(request: Request) -> Any:
-    body = await request.json()
+    try:
+        body = await request.json()
+    except Exception:
+        return {"jsonrpc": "2.0", "id": None, "error": {"code": -32700, "message": "Parse error"}}
     server = request.app.state.mcp
+    admin = _is_admin(request)
     if isinstance(body, list):
-        out = [r for r in [await server.handle(b) for b in body] if r is not None]
-        return out
-    resp = await server.handle(body)
-    return resp if resp is not None else {"jsonrpc": "2.0", "result": {}}
+        if not body:
+            return {"jsonrpc": "2.0", "id": None, "error": {"code": -32600, "message": "empty batch"}}
+        out = [r for r in [await server.handle(b, authorized=admin) for b in body] if r is not None]
+        return out if out else Response(status_code=202)
+    resp = await server.handle(body, authorized=admin)
+    # A notification gets no JSON-RPC response: 202 Accepted, empty body.
+    return resp if resp is not None else Response(status_code=202)
 
 
 # --------------------------------------------------------------------------
@@ -236,6 +259,9 @@ async def health(request: Request):
         "discovery": (getattr(app.state, "discovery", None).stats()
                       if getattr(app.state, "discovery", None) else {"enabled": False}),
         "ws_clients": len(ws_clients),
+        "admin_token_required": bool(settings.admin_token),
+        "mcp": {"protocol": mcp_protocol.LATEST_VERSION, "server": mcp_protocol.SERVER_VERSION,
+                "tools": len(MCP_TOOLS)},
     }
 
 

@@ -43,11 +43,38 @@ URL = os.environ.get("IONITY_MCP_URL", "http://127.0.0.1:8099/api/v1/mcp/rpc")
 TIMEOUT = float(os.environ.get("IONITY_MCP_TIMEOUT", "30"))
 AUTOSTART = os.environ.get("IONITY_AUTOSTART", "1") != "0"
 
-PROTOCOL_VERSION = "2024-11-05"
-SERVER_NAME = "ionity-esp32-fleet-mcp"
-SERVER_VERSION = "1.0.0"
+try:                                              # one source of truth for the handshake
+    from app.mcp import protocol as _protocol
+except Exception:                                 # noqa: BLE001
+    _protocol = None
+
+
+def _read_env_file() -> dict[str, str]:
+    """Minimal .env reader (the proxy must not need pydantic to start)."""
+    out: dict[str, str] = {}
+    try:
+        for line in (ROOT / ".env").read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if line and not line.startswith("#") and "=" in line:
+                k, v = line.split("=", 1)
+                out[k.strip()] = v.strip().strip('"').strip("'")
+    except OSError:
+        pass
+    return out
+
+
+ADMIN_TOKEN = os.environ.get("IONITY_ADMIN_TOKEN") or _read_env_file().get("IONITY_ADMIN_TOKEN", "")
 
 _autostart_tried = False
+
+
+def initialize_result(params: dict | None) -> dict:
+    if _protocol:
+        return _protocol.initialize_result(params)
+    return {"protocolVersion": (params or {}).get("protocolVersion") or "2025-06-18",
+            "capabilities": {"tools": {"listChanged": False},
+                             "resources": {"subscribe": False, "listChanged": False}},
+            "serverInfo": {"name": "ionity-esp32-fleet-mcp", "version": "1.3.0"}}
 
 
 def log(msg: str) -> None:
@@ -133,8 +160,10 @@ def err(msg_id, code: int, message: str):
 
 def forward(payload: dict) -> dict | None:
     body = json.dumps(payload).encode("utf-8")
-    req = urllib.request.Request(
-        URL, body, {"Content-Type": "application/json"}, method="POST")
+    headers = {"Content-Type": "application/json"}
+    if ADMIN_TOKEN:
+        headers["Authorization"] = f"Bearer {ADMIN_TOKEN}"
+    req = urllib.request.Request(URL, body, headers, method="POST")
     with urllib.request.urlopen(req, timeout=TIMEOUT) as r:
         raw = r.read()
     return json.loads(raw) if raw else None
@@ -153,25 +182,15 @@ def handle(req: dict) -> dict | None:
     # --- answered locally: these must never depend on the backend ---------
     if method == "initialize":
         try_autostart()
-        return ok(msg_id, {
-            "protocolVersion": PROTOCOL_VERSION,
-            "capabilities": {
-                "tools": {"listChanged": False},
-                "resources": {"subscribe": False, "listChanged": False},
-            },
-            "serverInfo": {"name": SERVER_NAME, "version": SERVER_VERSION},
-        })
+        return ok(msg_id, initialize_result(req.get("params")))
 
-    if method in ("notifications/initialized", "initialized"):
+    if (method or "").startswith("notifications/") or method == "initialized" or "id" not in req:
         return None
 
     if method == "ping":
         return ok(msg_id, {})
 
-    if method == "prompts/list":
-        return ok(msg_id, {"prompts": []})
-
-    if method in ("tools/list", "resources/list"):
+    if method in ("tools/list", "resources/list", "prompts/list"):
         # Prefer the backend (authoritative), fall back to local definitions
         # so the client still registers every tool while the server is down.
         try:
@@ -184,12 +203,20 @@ def handle(req: dict) -> dict | None:
         if method == "tools/list":
             log("backend down - serving the local tool manifest")
             return ok(msg_id, {"tools": tools})
+        if method == "prompts/list":
+            try:
+                from app.mcp.server import PROMPTS
+            except Exception:                      # noqa: BLE001
+                PROMPTS = []
+            return ok(msg_id, {"prompts": PROMPTS})
         return ok(msg_id, {"resources": resources})
 
     # --- everything else genuinely needs live data ------------------------
     try:
         return forward(req)
-    except urllib.error.URLError:
+    except (urllib.error.URLError, OSError, TimeoutError):
+        # URLError = refused / DNS; plain OSError / TimeoutError = the backend
+        # accepted nothing within TIMEOUT. All mean "server not available".
         try_autostart()
         try:
             return forward(req)                    # one retry after autostart

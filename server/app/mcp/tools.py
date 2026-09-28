@@ -239,6 +239,88 @@ MCP_TOOLS += [
     },
 ]
 
+# ---------------------------------------------------------------------------
+# Tool annotations (MCP 2025-03-26+): tell the client which tools only read
+# and which change the real world, so it can ask the user before the latter.
+# ---------------------------------------------------------------------------
+_TITLES = {
+    "fleet_summary": "Fleet summary", "list_devices": "List devices",
+    "get_device": "Device detail", "query_telemetry": "Query telemetry",
+    "aggregate_metric": "Aggregate a metric", "get_alerts": "Alerts",
+    "send_command": "Send a device command", "get_command_results": "Command replies",
+    "dns_summary": "LAN DNS summary", "dns_by_device": "DNS by device",
+    "dns_top_domains": "Top domains", "dns_search": "Search DNS",
+    "dns_recent": "Recent DNS queries", "list_lan_devices": "LAN devices",
+}
+for _t in MCP_TOOLS:
+    _write = _t["name"] == "send_command"
+    _t["title"] = _TITLES.get(_t["name"], _t["name"])
+    _t["annotations"] = {
+        "title": _t["title"],
+        "readOnlyHint": not _write,
+        "destructiveHint": _write,       # reboot / set_meta restart the node
+        "idempotentHint": not _write,
+        "openWorldHint": _write,         # reaches physical devices
+    }
+
+TOOL_INDEX: dict[str, dict[str, Any]] = {t["name"]: t for t in MCP_TOOLS}
+WRITE_TOOLS = {"send_command"}
+
+
+class ToolArgError(ValueError):
+    """Bad arguments - reported to the model as a tool error it can fix."""
+
+
+def validate_args(name: str, args: Any) -> dict[str, Any]:
+    """Check arguments against the tool's inputSchema: required keys, enums,
+    types, and integer maxima (clamped rather than rejected, so an agent that
+    asks for limit=100000 gets the maximum instead of an error)."""
+    tool = TOOL_INDEX.get(name)
+    if tool is None:
+        raise ToolArgError(f"Unknown tool '{name}'. Available: {', '.join(TOOL_INDEX)}")
+    if args is None:
+        args = {}
+    if not isinstance(args, dict):
+        raise ToolArgError("arguments must be a JSON object")
+    schema = tool.get("inputSchema", {})
+    props = schema.get("properties", {})
+    missing = [k for k in schema.get("required", []) if args.get(k) in (None, "")]
+    if missing:
+        raise ToolArgError(f"{name}: missing required argument(s): {', '.join(missing)}")
+    out: dict[str, Any] = {}
+    for key, val in args.items():
+        spec = props.get(key)
+        if spec is None or val is None:
+            continue                      # ignore unknown keys quietly
+        typ = spec.get("type")
+        if typ == "integer":
+            try:
+                val = int(val)
+            except (TypeError, ValueError):
+                raise ToolArgError(f"{name}: '{key}' must be an integer") from None
+            if "maximum" in spec:
+                val = min(val, spec["maximum"])
+            val = max(val, 0) if key in ("limit", "offset", "minutes", "history_points") else val
+        elif typ == "boolean":
+            if isinstance(val, str):
+                val = val.strip().lower() in ("1", "true", "yes", "on")
+            else:
+                val = bool(val)
+        elif typ == "string":
+            val = str(val)
+            if "enum" in spec and val not in spec["enum"]:
+                raise ToolArgError(f"{name}: '{key}' must be one of {spec['enum']}, got '{val}'")
+        elif typ == "array":
+            if isinstance(val, str):
+                val = [v.strip() for v in val.split(",") if v.strip()]
+            if not isinstance(val, list):
+                raise ToolArgError(f"{name}: '{key}' must be a list")
+            if "maxItems" in spec and len(val) > spec["maxItems"]:
+                raise ToolArgError(f"{name}: '{key}' allows at most {spec['maxItems']} items")
+        out[key] = val
+    return out
+
+
 MCP_RESOURCES: list[dict[str, Any]] = [
     {
         "uri": "ionity://fleet/summary",
@@ -263,6 +345,7 @@ MCP_RESOURCES: list[dict[str, Any]] = [
 
 async def execute(name: str, args: dict, registry, store, dns=None) -> Any:
     """Dispatch an MCP tool call against the live fleet."""
+    args = validate_args(name, args)
     # ---- LAN DNS visibility ---------------------------------------------
     if name.startswith("dns_") or name == "list_lan_devices":
         mins = int(args.get("minutes", 60))
@@ -341,7 +424,9 @@ async def execute(name: str, args: dict, registry, store, dns=None) -> Any:
         if args.get("action") == "dns_probe":
             names = payload.get("names") or []
             if not names or len(names) > 12:
-                raise ValueError("dns_probe needs 1-12 names")
+                raise ToolArgError("dns_probe needs 1-12 names")
+        if args.get("action") == "set_meta" and not any(k in payload for k in ("site", "group", "label")):
+            raise ToolArgError("set_meta needs at least one of site, group, label")
         return await registry.send_command(args["device_id"], args["action"], payload)
 
     if name == "get_command_results":

@@ -15,6 +15,30 @@ let SERVER_IP = location.hostname;
 const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) =>
   ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
+/* Operator token: only needed when the server sets IONITY_ADMIN_TOKEN. Asked
+   for once, on the first command that is refused, and kept in this browser. */
+function adminToken() { try { return localStorage.getItem("ionity_admin_token") || ""; } catch { return ""; } }
+function jsonHeaders() {
+  const h = { "Content-Type": "application/json" };
+  const t = adminToken();
+  if (t) h["Authorization"] = `Bearer ${t}`;
+  return h;
+}
+function askAdminToken() {
+  const t = window.prompt("This fleet server requires an admin token for commands. Enter it (stored in this browser only):");
+  if (t) { try { localStorage.setItem("ionity_admin_token", t.trim()); } catch { /* private window */ } }
+  return !!t;
+}
+
+async function postCmd(url, body) {
+  const send = () => fetch(url, { method: "POST", headers: jsonHeaders(), body: JSON.stringify(body) });
+  try {
+    let r = await send();
+    if (r.status === 401 && askAdminToken()) r = await send();
+    if (r.status === 401) return { ok: false, error: "admin token required" };
+    return await r.json();
+  } catch { return { ok: false, error: "server unreachable" }; }
+}
 const ago = (s) => {
   if (s == null) return "never";
   if (s < 60) return `${Math.round(s)}s ago`;
@@ -237,10 +261,7 @@ async function openDevice(id) {
     b.onclick = async () => {
       const label = b.textContent;
       b.disabled = true;
-      const res = await fetch(`${API}/api/v1/devices/${encodeURIComponent(d.device_id)}/cmd`, {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: b.dataset.cmd }),
-      }).then((x) => x.json()).catch(() => ({ ok: false }));
+      const res = await postCmd(`${API}/api/v1/devices/${encodeURIComponent(d.device_id)}/cmd`, { action: b.dataset.cmd });
       b.textContent = res.ok ? "sent ✓" : "failed";
       setTimeout(() => { b.disabled = false; b.textContent = label; }, 1800);
     });
@@ -270,7 +291,7 @@ async function refreshAlerts() {
 /* ----------------------------------------------------------------- */
 async function rpc(method, params) {
   const r = await fetch(`${API}/api/v1/mcp/rpc`, {
-    method: "POST", headers: { "Content-Type": "application/json" },
+    method: "POST", headers: jsonHeaders(),
     body: JSON.stringify({ jsonrpc: "2.0", id: Date.now(), method, params }),
   });
   return r.json();
@@ -324,10 +345,7 @@ $("scrim").onclick = closeDrawer;
 document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeDrawer(); });
 
 $("btnBroadcast").onclick = async () => {
-  const res = await fetch(`${API}/api/v1/devices/broadcast/cmd`, {
-    method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ action: "identify" }),
-  }).then((r) => r.json()).catch(() => ({ ok: false }));
+  const res = await postCmd(`${API}/api/v1/devices/broadcast/cmd`, { action: "identify" });
   $("btnBroadcast").textContent = res.ok ? "sent ✓" : (res.error || "failed");
   setTimeout(() => ($("btnBroadcast").textContent = "Identify all"), 2200);
 };
@@ -339,7 +357,9 @@ $("mcpRun").onclick = async () => {
   catch (err) { $("mcpOut").textContent = "Invalid JSON arguments: " + err.message; return; }
   $("mcpOut").textContent = "calling…";
   try {
-    const res = await rpc("tools/call", { name: $("mcpTool").value, arguments: args });
+    let res = await rpc("tools/call", { name: $("mcpTool").value, arguments: args });
+    if ((res.result?.content?.[0]?.text || "").includes("needs the admin token") && askAdminToken())
+      res = await rpc("tools/call", { name: $("mcpTool").value, arguments: args });
     const text = res.result?.content?.[0]?.text;
     let pretty = text;
     try { pretty = JSON.stringify(JSON.parse(text), null, 2); } catch { /* plain text */ }

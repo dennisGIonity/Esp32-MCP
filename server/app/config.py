@@ -24,6 +24,10 @@ class Settings(BaseSettings):
     fleet_name: str = "Ionity ESP32-MCP Fleet"
     fleet_token: str = "dev-fleet-token-change-me"
     require_token: bool = False          # flip True once devices are provisioned
+    # Operator token for anything that CHANGES devices (REST /cmd and MCP
+    # send_command). Empty = open (lab default). Set it before the server is
+    # reachable from a network you don't fully control.
+    admin_token: str = ""
 
     # --- MQTT -------------------------------------------------------------
     mqtt_enabled: bool = True
