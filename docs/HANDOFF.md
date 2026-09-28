@@ -35,3 +35,18 @@ Policy 986 AED | (c) 2018-2026 Antwerp Designs | Ionity (Pty) Ltd | www.ionity.t
 - Stopped: lab broker, fleet server + dashboard, serial bridge, MCP bridge. Nothing listens on 1883/8099/53.
 - Restarts at logon (Startup shortcut) or when an ionity-esp32-fleet MCP tool is called. By hand: `E:\.IONITY-LAB\START-LAB.cmd`.
 - Full status and open items: https://github.com/dennisGIonity/Ionity-2nd-Router-Test-Lab/blob/main/docs/STATUS.md
+
+## 2026-09-28: top-to-bottom review (MCP server + deployables)
+- **MCP server 1.3.0**: protocol negotiation 2025-06-18 / 2025-03-26 / 2024-11-05 (shared by server + stdio bridge),
+  instructions, 2 prompts, schema-driven argument validation (limits clamped), tool titles + read-only /
+  destructive annotations, structuredContent, notifications -> 202, JSON parse errors.
+- **Security**: optional `IONITY_ADMIN_TOKEN` guards every command (REST /cmd, MCP send_command); the bridge
+  reads it from .env, the dashboard asks once. Empty = open lab mode (unchanged behaviour).
+- **Bridge bug fixed**: a backend *timeout* returned a protocol error (clients can drop the server); now a readable tool error.
+- **New deployable**: Raspberry Pi Zero / Linux agent `devices/pi-agent` (same protocol + commands as the ESP32),
+  systemd installer. Verified live end to end: registered over MQTT, ping -> pong, set_meta without reboot, Last Will -> offline.
+- **Firmware fixes**: sketch.yaml no longer pins COM ports (compile failed with the board unplugged) and lists U8g2;
+  PlatformIO now builds the one Arduino sketch (stale v1.0.0 source with hard-coded 192.168.2.11 retired).
+- **Tests**: 5 -> 23 server tests (MCP contract, HTTP transport, bridge offline, Pi agent) + 13 sentinel tests, all passing.
+- Not verifiable on this PC: PlatformIO pioarduino build (Smart App Control blocks its Python helpers). Arduino CLI builds verified.
+- Heads-up: drive C: has 52 GB free of 953 GB (5.5%).

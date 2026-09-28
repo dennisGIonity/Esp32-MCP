@@ -64,7 +64,7 @@ python server\run.py
 python scripts\fleet_simulator.py --devices 250 --interval 10
 ```
 
-Open **http://localhost:8099/** (or the host's LAN IP, e.g. `http://192.168.0.3:8099/`).
+Open **http://localhost:8099/** (or `http://ionity-fleet.local:8099/`; in the lab `http://192.168.124.4:8099/`).
 
 MQTT is optional for the simulator's HTTP mode — devices fall back to HTTP
 ingest and the server keeps working.
@@ -84,17 +84,23 @@ the lab uses the pure-Python broker so it does not depend on Docker Desktop.
 ## Flashing a real device
 
 ```powershell
-cd E:\.ESP32-MCP\firmware
-copy include\secrets.h.example include\secrets.h   # then edit WiFi + tokens
-pio run -e esp32s3 -t upload -t monitor
+# one command: detects the chip, compiles (cached), flashes, waits for the first reading
+E:\.ESP32-MCP\scripts\add_device.ps1 -Port COM12 -Label "lab-node-04"
 ```
 
-The same binary flashes every unit — `device_id` comes from the eFuse MAC.
+WiFi lives in the git-ignored `firmware-arduino/Esp32_MCP_Node/secrets.h` (copy `secrets.h.example`,
+or run the lab's `SET-LAB-WIFI.cmd`). The Arduino IDE and PlatformIO (`firmware/platformio.ini`) build
+the **same** sketch. The same binary flashes every unit, and `device_id` comes from the eFuse MAC.
+
+**Other devices:** Raspberry Pi Zero / any Linux board → [`devices/pi-agent`](devices/pi-agent/README.md)
+(`sudo bash install.sh`), Pico / Pico 2 → `firmware-arduino/Pico_MCP_Node`.
+The full matrix is in **[docs/DEPLOYABLES.md](docs/DEPLOYABLES.md)**.
+
 Re-tag a device's site/group/label afterwards without reflashing:
 
 ```bash
-curl -X POST http://192.168.0.3:8099/api/v1/devices/esp32-a1b2c3d4e5f6/cmd \
-  -H "Content-Type: application/json" \
+curl -X POST http://ionity-fleet.local:8099/api/v1/devices/esp32-a1b2c3d4e5f6/cmd \
+  -H "Content-Type: application/json" -H "Authorization: Bearer $IONITY_ADMIN_TOKEN" \
   -d '{"action":"set_meta","site":"kelvin-drive","group":"power","label":"GF riser"}'
 ```
 
@@ -107,24 +113,31 @@ See [`docs/DEVICE-PROVISIONING.md`](docs/DEVICE-PROVISIONING.md) for the 1000-un
 **Over HTTP** — point any MCP-over-HTTP client at:
 
 ```
-POST http://192.168.0.3:8099/api/v1/mcp/rpc
+POST http://ionity-fleet.local:8099/api/v1/mcp/rpc
 ```
 
-**Over stdio** — in `claude_desktop_config.json`:
+**Over stdio (Claude Desktop / Claude Code / Cowork)**, in `claude_desktop_config.json`, use the
+**bridge** to the live server. It answers the handshake even while the server is down, starts the lab
+if needed, and forwards the admin token from `.env`:
 
 ```json
 {
   "mcpServers": {
     "ionity-esp32-fleet": {
       "command": "E:\\.ESP32-MCP\\.venv\\Scripts\\python.exe",
-      "args": ["-m", "app.mcp.server"],
-      "cwd": "E:\\.ESP32-MCP\\server"
+      "args": ["E:\\.ESP32-MCP\\server\\mcp_stdio_proxy.py"]
     }
   }
 }
 ```
+(`python -m app.mcp.server` also works, but it opens the database directly: stale data, no commands.)
 
-### Tools exposed
+MCP server 1.3.0 negotiates protocol `2025-06-18` / `2025-03-26` / `2024-11-05`, sends usage
+instructions, validates every argument against the tool schema (limits are clamped, not rejected),
+returns `structuredContent`, and marks every tool read-only or destructive so the client can ask
+before acting.
+
+### Tools exposed (14)
 
 | Tool | Use it for |
 |---|---|
@@ -134,8 +147,13 @@ POST http://192.168.0.3:8099/api/v1/mcp/rpc
 | `query_telemetry` | Raw time-series for a metric over a window. |
 | `aggregate_metric` | Mean/min/max/count + top-10 devices for a metric. |
 | `get_alerts` | Open or historical alerts. |
-| `send_command` | reboot / identify / ping / set_meta — one device or `broadcast`. |
+| `send_command` ⚠ | reboot / identify / ping / set_meta / set_display / dns_probe: one device or `broadcast`. |
+| `get_command_results` | Replies to commands (e.g. `pong`, dns_probe answers), by `cmd_id`. |
+| `dns_summary`, `dns_by_device`, `dns_top_domains`, `dns_search`, `dns_recent` | What is going to what device on the LAN. |
+| `list_lan_devices` | Who is on the network (IP, MAC, vendor, hostname). |
 
+⚠ = changes devices; needs `IONITY_ADMIN_TOKEN` when one is set.
+Prompts: `fleet_health_check`, `investigate_device`.
 Resources: `ionity://fleet/summary`, `ionity://fleet/devices`, `ionity://fleet/schema`.
 
 ---
@@ -157,7 +175,7 @@ GET  /api/v1/health
 WS   /ws/fleet                      live dashboard frames
 ```
 
-Interactive docs: **http://192.168.0.3:8099/docs**
+Interactive docs: **http://ionity-fleet.local:8099/docs**
 
 ---
 
@@ -180,7 +198,9 @@ regardless of fleet size.
 
 ```
 E:\.ESP32-MCP
-├── firmware/                PlatformIO project (esp32s3 | esp32dev | esp32c3 | OTA env)
+├── firmware/                PlatformIO build of the Arduino node sketch (esp32s3 | esp32dev | esp32c3 | OTA)
+├── devices/
+│   └── pi-agent/            Raspberry Pi Zero / Linux agent + systemd installer
 ├── firmware-arduino/
 │   ├── Esp32_MCP_Node/      fleet node (Arduino IDE) - the one in the lab
 │   ├── Pico_MCP_Node/       Pico / Pico 2 (serial or WiFi)
