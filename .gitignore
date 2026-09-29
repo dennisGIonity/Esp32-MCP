@@ -65,3 +65,9 @@ flasher/dist/
 flasher/public/firmware/*.bin
 # firmware images are built (firmware/build.py) and published by CI, not committed
 firmware/dist/
+firmware/.build/
+# local scratch logs
+emu_*.txt
+fwbuild*.txt
+fwbuild*.err
+warn_*.txt

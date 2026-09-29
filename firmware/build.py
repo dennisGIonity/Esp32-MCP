@@ -30,12 +30,12 @@ import re
 import shutil
 import subprocess
 import sys
-import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SKETCH = ROOT / "firmware-arduino" / "Esp32_MCP_Node"
 DIST = ROOT / "firmware" / "dist"
+CACHE = ROOT / "firmware" / ".build"
 
 # variant -> (fqbn, esptool chip family, serial on native USB?, human name)
 VARIANTS: dict[str, tuple[str, str, bool, str]] = {
@@ -84,7 +84,9 @@ def build(cli: str, variant: str, work: Path) -> dict:
     if src.exists():
         shutil.rmtree(src)
     shutil.copytree(SKETCH, src, ignore=shutil.ignore_patterns("secrets.h", "*.log", ".build-*"))
-    out = work / f"build-{variant}"
+    # Persistent build dir per variant: arduino-cli caches the compiled core
+    # there, so a rebuild takes seconds instead of ~10 minutes per variant.
+    out = CACHE / variant
     print(f"== {variant}: {fqbn}", flush=True)
     r = subprocess.run([cli, "compile", "--fqbn", fqbn, "--build-path", str(out),
                         "--warnings", "default", str(src)], capture_output=True, text=True)
@@ -119,11 +121,12 @@ def main() -> None:
     manifest_path = DIST / "manifest.json"
     old = json.loads(manifest_path.read_text()) if manifest_path.exists() else {}
     builds = {b["variant"]: b for b in old.get("builds", [])} if old.get("version") == version else {}
-    with tempfile.TemporaryDirectory(prefix="ionity-fw-") as tmp:
-        for v in a.variants:
-            if v not in VARIANTS:
-                raise SystemExit(f"unknown variant {v}; choose from {', '.join(VARIANTS)}")
-            builds[v] = build(cli, v, Path(tmp))
+    work = CACHE / "src"                  # fixed path, so the sketch cache stays valid too
+    work.mkdir(parents=True, exist_ok=True)
+    for v in a.variants:
+        if v not in VARIANTS:
+            raise SystemExit(f"unknown variant {v}; choose from {', '.join(VARIANTS)}")
+        builds[v] = build(cli, v, work)
     manifest = {
         "product": "ionity-esp32-mcp-node",
         "version": version,
