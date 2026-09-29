@@ -72,3 +72,15 @@ Policy 986 AED | (c) 2018-2026 Antwerp Designs | Ionity (Pty) Ltd | www.ionity.t
 - Tests: 36 server (was 23) + 10 flasher. CI + Pages workflows added.
 - Next: plug a board in, open http://localhost:8099/flasher/, Flash & provision; set `IONITY_DD_API_KEY`;
   fix `.env` (`IONITY_MDNS_ADVERTISE_IP`, `IONITY_DNS_BIND`) for whichever network the lab is on.
+
+## 2026-09-29 (afternoon): fw 2.0 on the lab hardware
+- Fleet launched with `scripts\start_lab.ps1`: broker :1883, fleet server :8099, serial bridge; mDNS
+  `ionity-fleet.local -> 192.168.0.2` (laptop WiFi; the pinned 192.168.124.4 is now bypassed automatically).
+- Flashed with esptool (merged images from `firmware/build.py`, hash verified):
+  - COM3  (CH340)      esp32-98a316e5d18c  `esp32s3_uart.bin`  label "lab-node-01 (S3 16MB, CH340)"
+  - COM10 (native USB) esp32-fc012cd8ea14  `esp32s3_usb.bin`   label "lab-node-02 (S3, native USB)"
+- First real boot of fw 2.0 on both: banner, `IONITY-PROV hello`, `set` (server 192.168.0.2, site lab,
+  group bench, label) and `reboot` all answered over serial via `scripts/provision.py`.
+- Flashing rewrote NVS, so the old lab WiFi is gone: both boards wait for WiFi. Owner enters the
+  household 2.4 GHz WiFi in the flasher (Provision only) - credentials are not stored in the repo.
+- Next: after WiFi, run `fleet_summary`, `device_call_tool read_telemetry` / `run_inference` on both.

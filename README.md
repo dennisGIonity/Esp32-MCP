@@ -54,6 +54,19 @@ python scripts\fleet_simulator.py --devices 250        # load: 250 boards over H
 Dashboard **http://localhost:8099/** · Flasher **http://localhost:8099/flasher/** · API docs **/docs**.
 The lab path with the broker: `scripts\start_lab.ps1` (amqtt :1883 + host + serial bridge).
 
+### Where everything lives (lab host 192.168.0.2)
+
+| Service | On the host | From the LAN |
+|---|---|---|
+| Dashboard | http://localhost:8099/ | http://192.168.0.2:8099/ · http://ionity-fleet.local:8099/ |
+| Flasher (Chrome / Edge) | http://localhost:8099/flasher/ | http://192.168.0.2:8099/flasher/ (Web Serial needs localhost or https) |
+| API docs · health | http://localhost:8099/docs · /api/v1/health | same on :8099 |
+| MCP (HTTP) | `POST http://localhost:8099/api/v1/mcp/rpc` | `POST http://192.168.0.2:8099/api/v1/mcp/rpc` |
+| MQTT broker | `mqtt://localhost:1883` | `mqtt://192.168.0.2:1883` — no web UI; e.g. MQTT Explorer, topic `ionity/#` |
+| A board's own MCP (fw 2.0) | – | `POST http://<board-ip>/mcp` · `GET http://<board-ip>/info` |
+
+Start / restart it all: `scripts\start_lab.ps1` (broker :1883 + fleet server :8099 + serial bridge; idempotent).
+
 ---
 
 ## Flash and provision a board (no recompiling)
