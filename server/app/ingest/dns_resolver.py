@@ -182,6 +182,15 @@ class DnsService:
     # -- lifecycle ---------------------------------------------------------
     async def start(self) -> None:
         loop = asyncio.get_running_loop()
+        # Same rule as mDNS: a pinned bind address this host no longer has
+        # (DHCP gave .2 instead of .4) moves to the same network, else fails loudly.
+        if self.s.dns_bind not in ("0.0.0.0", "", "127.0.0.1"):
+            from app.ingest.discovery import choose_advertise_ip, local_ipv4s
+            if self.s.dns_bind not in local_ipv4s():
+                ip, warn = choose_advertise_ip(self.s.dns_bind)
+                if ip.rsplit(".", 1)[0] == self.s.dns_bind.rsplit(".", 1)[0]:
+                    log.warning("LAN DNS: %s", warn.replace("IONITY_MDNS_ADVERTISE_IP", "IONITY_DNS_BIND"))
+                    self.s.dns_bind = ip
         try:
             await loop.create_datagram_endpoint(
                 lambda: _ServerProtocol(self),

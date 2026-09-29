@@ -79,7 +79,9 @@ static void provFillInfo(JsonDocument &d) {
   d["chip"]       = ESP.getChipModel();
   d["chip_rev"]   = ESP.getChipRevision();
   d["flash_mb"]   = ESP.getFlashChipSize() / (1024 * 1024);
-  d["mac"]        = WiFi.macAddress();
+  uint8_t mac[6]; esp_read_mac(mac, ESP_MAC_WIFI_STA);          // valid before WiFi starts
+  char macs[18]; snprintf(macs, sizeof(macs), "%02x:%02x:%02x:%02x:%02x:%02x", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+  d["mac"]        = macs;
   d["provisioned"] = gCfg.wifiSsid.length() > 0;
   d["ssid"]       = gCfg.wifiSsid;
   d["has_pass"]   = gCfg.wifiPass.length() > 0;
@@ -95,6 +97,7 @@ static void provFillInfo(JsonDocument &d) {
   d["mode"]       = modeName(gMode);
   bool up = WiFi.status() == WL_CONNECTED;
   d["wifi"]       = up ? "connected" : "down";
+  if (!up && gWifiReason) { d["wifi_reason"] = gWifiReason; d["wifi_error"] = wifiReasonText(gWifiReason); }
   if (up) {
     d["ip"]   = WiFi.localIP().toString();
     d["rssi"] = WiFi.RSSI();
@@ -173,8 +176,8 @@ static void provSet(JsonObjectConst in) {
 static void provScan() {
   WiFi.mode(WIFI_STA);
   // A scan while the STA is still trying to associate returns -2 (busy).
-  if (WiFi.status() != WL_CONNECTED) WiFi.disconnect(false, false);
-  int n = WiFi.scanNetworks(false, false);
+  if (WiFi.status() != WL_CONNECTED) { WiFi.disconnect(false, false); delay(200); }
+  int n = WiFi.scanNetworks(false, true);                     // include hidden SSIDs
   if (n == WIFI_SCAN_FAILED || n == WIFI_SCAN_RUNNING) { delay(300); n = WiFi.scanNetworks(false, false); }
   gWifiKick = true;                  // resume joining afterwards
   JsonDocument d;
@@ -196,6 +199,8 @@ static void provTest(uint32_t timeoutMs) {
   if (gCfg.wifiSsid.length() == 0) { provError("test", "no ssid provisioned"); return; }
   if (WiFi.status() != WL_CONNECTED) {
     WiFi.mode(WIFI_STA);
+    WiFi.disconnect(false, false);
+    delay(50);
     WiFi.begin(gCfg.wifiSsid.c_str(), gCfg.wifiPass.c_str());
     unsigned long t0 = millis();
     while (WiFi.status() != WL_CONNECTED && millis() - t0 < timeoutMs) delay(100);
@@ -206,8 +211,9 @@ static void provTest(uint32_t timeoutMs) {
   d["ok"] = up;
   if (!up) {
     wl_status_t st = WiFi.status();
-    d["error"] = (st == WL_NO_SSID_AVAIL) ? "ssid not found (2.4 GHz only)" :
-                 (st == WL_CONNECT_FAILED) ? "wrong password or rejected" : "timeout joining WiFi";
+    d["error"] = gWifiReason ? String(wifiReasonText(gWifiReason)) + " (reason " + String(gWifiReason) + ")" :
+                 (st == WL_NO_SSID_AVAIL) ? String("ssid not found (2.4 GHz only)") :
+                 (st == WL_CONNECT_FAILED) ? String("wrong password or rejected") : String("timeout joining WiFi");
     provReply(d);
     return;
   }

@@ -13,6 +13,11 @@ arduino-cli and writes, for the Ionity Flasher:
 Images are built WITHOUT secrets.h: WiFi, the MCP host and tokens are written
 into NVS by the flasher, so the same image is safe to publish.
 
+    python firmware/build.py --lab esp32s3_uart
+        LAB image: includes the git-ignored secrets.h, so a board flashed with a
+        full erase seeds its NVS with the lab WiFi on first boot (no password is
+        typed anywhere). Written to firmware/dist-lab/ - never publish these.
+
     python firmware/build.py                 # all variants
     python firmware/build.py esp32s3_uart    # one
     python firmware/build.py --copy-to flasher/public/firmware
@@ -36,6 +41,7 @@ ROOT = Path(__file__).resolve().parents[1]
 SKETCH = ROOT / "firmware-arduino" / "Esp32_MCP_Node"
 DIST = ROOT / "firmware" / "dist"
 CACHE = ROOT / "firmware" / ".build"
+DIST_LAB = ROOT / "firmware" / "dist-lab"
 
 # variant -> (fqbn, esptool chip family, serial on native USB?, human name)
 VARIANTS: dict[str, tuple[str, str, bool, str]] = {
@@ -77,16 +83,19 @@ def trim_ff(img: bytes) -> bytes:
     return img[:max(end, 0x10000)]
 
 
-def build(cli: str, variant: str, work: Path) -> dict:
+def build(cli: str, variant: str, work: Path, lab: bool = False) -> dict:
     fqbn, family, usb, name = VARIANTS[variant]
     # Copy the sketch without secrets.h so no credential is baked into a public image.
     src = work / "Esp32_MCP_Node"
     if src.exists():
         shutil.rmtree(src)
-    shutil.copytree(SKETCH, src, ignore=shutil.ignore_patterns("secrets.h", "*.log", ".build-*"))
+    skip = ("*.log", ".build-*", ".theia") if lab else ("secrets.h", "*.log", ".build-*", ".theia")
+    shutil.copytree(SKETCH, src, ignore=shutil.ignore_patterns(*skip))
+    if lab and not (src / "secrets.h").exists():
+        raise SystemExit("--lab needs firmware-arduino/Esp32_MCP_Node/secrets.h (copy secrets.h.example)")
     # Persistent build dir per variant: arduino-cli caches the compiled core
     # there, so a rebuild takes seconds instead of ~10 minutes per variant.
-    out = CACHE / variant
+    out = CACHE / variant          # shared with --lab: the compiled core is reused
     print(f"== {variant}: {fqbn}", flush=True)
     r = subprocess.run([cli, "compile", "--fqbn", fqbn, "--build-path", str(out),
                         "--warnings", "default", str(src)], capture_output=True, text=True)
@@ -97,8 +106,9 @@ def build(cli: str, variant: str, work: Path) -> dict:
     merged = next(out.glob("*.merged.bin"), None)
     if merged is None:
         raise SystemExit(f"{variant}: no *.merged.bin in {out} (esp32 core >= 3.0 required)")
-    DIST.mkdir(parents=True, exist_ok=True)
-    dest = DIST / f"{variant}.bin"
+    dist = DIST_LAB if lab else DIST
+    dist.mkdir(parents=True, exist_ok=True)
+    dest = dist / f"{variant}.bin"
     data = trim_ff(merged.read_bytes())
     dest.write_bytes(data)
     usage = re.search(r"Sketch uses (\d+) bytes \((\d+)%\)", r.stdout)
@@ -115,8 +125,16 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("variants", nargs="*", default=list(VARIANTS))
     ap.add_argument("--copy-to", help="also copy images + manifest here (e.g. flasher/public/firmware)")
+    ap.add_argument("--lab", action="store_true", help="bake in secrets.h -> firmware/dist-lab (private)")
     a = ap.parse_args()
     cli = find_cli()
+    if a.lab:
+        work = CACHE / "src-lab"
+        work.mkdir(parents=True, exist_ok=True)
+        for v in (a.variants if a.variants != list(VARIANTS) else ["esp32s3_uart", "esp32s3_usb"]):
+            b = build(cli, v, work, lab=True)
+            print(f"LAB image {DIST_LAB / b['file']} ({b['size']} bytes) - contains WiFi credentials, do not share")
+        return
     version = fw_version()
     manifest_path = DIST / "manifest.json"
     old = json.loads(manifest_path.read_text()) if manifest_path.exists() else {}

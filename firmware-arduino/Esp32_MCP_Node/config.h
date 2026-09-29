@@ -88,7 +88,7 @@
 #define TELEMETRY_INTERVAL_MS 10000
 #define SENSOR_SAMPLE_MS      2000
 #define HEARTBEAT_STATUS_MS   30000
-#define WIFI_RETRY_MS         5000
+#define WIFI_RETRY_MS         12000   // one association attempt can take ~8 s
 #define MQTT_RETRY_MS         5000
 
 // --- ICMP probing ----------------------------------------------------------

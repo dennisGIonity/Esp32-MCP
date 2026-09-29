@@ -80,9 +80,14 @@ def main() -> None:
 
         if o.factory_reset:
             print(json.dumps(request(p, "factory_reset"), indent=2)); return
+        if hello.get("wifi_error"):
+            print(f"!! last WiFi attempt: {hello['wifi_error']} (reason {hello.get('wifi_reason')})")
         if o.scan:
-            for n in request(p, "scan", 15).get("networks", []):
-                print(f"  {n['rssi']:>4} dBm  ch{n['ch']:<2} {'open ' if n['open'] else '     '}{n['ssid']}")
+            r = request(p, "scan", 20)
+            if not r.get("ok"):
+                print(f"!! scan: {r.get('error', 'failed')}")
+            for n in r.get("networks", []):
+                print(f"  {n['rssi']:>4} dBm  ch{n['ch']:<2} {'open ' if n['open'] else '     '}{n['ssid'] or '(hidden)'}")
         fields = {k: v for k, v in {
             "ssid": o.ssid, "server": o.server, "mqtt_port": o.mqtt_port, "http_port": o.http_port,
             "mqtt_user": o.mqtt_user, "mqtt_pass": o.mqtt_pass, "fleet_token": o.fleet_token,

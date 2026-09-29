@@ -52,11 +52,30 @@ Board → host: `IONITY-PROV {"ok":true,"op":"<op>", ...}` (other lines are ordi
 
 CLI twin for scripts and browsers without Web Serial: `scripts/provision.py` (pyserial).
 
+## A board plugged into the lab Pi (no browser, Pi offline)
+
+```powershell
+python firmware\build.py --lab esp32s3_uart            # image with the git-ignored secrets.h baked in -> firmware/dist-lab/
+scripts\deploy_pi_board.ps1 -Image firmware\dist-lab\esp32s3_uart.bin -Label "lab-node-01" `
+    -Wheels <esptool-aarch64.tar>                        # first run only: the Pi has no internet
+```
+
+The script copies the image, `provision.py` and `serial_log.py` over SSH (key from `lab.json`), installs
+esptool into `~/ionity-flash/venv` from the offline wheels, erases, flashes, sets host/site/group/label and
+runs the WiFi test. With a full erase the lab image seeds NVS from `secrets.h`, so no password is typed.
+Watch the board: `ssh wabapi@192.168.124.3 ~/ionity-flash/venv/bin/python ~/ionity-flash/serial_log.py /dev/ttyUSB0 30 --reset`.
+
+Build the wheel set once on any machine with internet:
+`pip download esptool --platform manylinux_2_28_aarch64 --platform manylinux2014_aarch64 --platform any --python-version 3.13 --only-binary=:all:`
+(esptool itself ships as an sdist: `pip wheel esptool --no-deps` first and add `--find-links .`).
+
 ## Troubleshooting
 
 | Symptom | Fix |
 |---|---|
 | "Failed to connect" in step 1 | Hold **BOOT**, tap **RESET**, release BOOT, retry. Some CH340 boards need it. |
 | Flash OK, no hello | Native-USB board flashed with a `_uart` image (or the reverse) - pick the other image. Or tap RESET: the USB port re-enumerates after reset and the page asks you to re-select it. |
-| `ssid not found` | ESP32 WiFi is 2.4 GHz only. Use **Scan** to see what the board sees. |
+| `ssid not found` / reason 201 | ESP32 WiFi is 2.4 GHz only, and the network must be on. Use **Scan** to see what the board sees (hidden networks show as "(hidden)"). |
+| reason 15 / 2 / 204 | Wrong WiFi password. |
+| `wifi_error` in hello | fw 2.0 reports the driver's last disconnect reason in `hello` / `get` / `test`, and logs it on serial. |
 | Online on the board, not on the host | The MCP host address is wrong or the broker is down; check `integrations_status` / `/api/v1/health`. |

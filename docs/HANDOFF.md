@@ -84,3 +84,19 @@ Policy 986 AED | (c) 2018-2026 Antwerp Designs | Ionity (Pty) Ltd | www.ionity.t
 - Flashing rewrote NVS, so the old lab WiFi is gone: both boards wait for WiFi. Owner enters the
   household 2.4 GHz WiFi in the flasher (Provision only) - credentials are not stored in the repo.
 - Next: after WiFi, run `fleet_summary`, `device_call_tool read_telemetry` / `run_inference` on both.
+
+## 2026-09-29 (evening): full lab up - Pi-attached board deployed, lab WiFi missing
+- Laptop: WiFi 192.168.0.2 (household) + Ethernet **192.168.124.2** on the H3C (lab.json expects .4 - no DHCP
+  reservation yet). Host now picks the same-/24 address for mDNS + LAN DNS automatically: ionity-fleet.local ->
+  192.168.124.2, LAN DNS bound on 192.168.124.2:53.
+- Pi 5 (wabapi@192.168.124.3, eth0 only, **no internet, clock ~8 days behind** - no NTP) has lab-node-01
+  (esp32-98a316e5d18c, CH340, /dev/ttyUSB0). Deployed with `scripts/deploy_pi_board.ps1` + offline esptool wheels
+  (`~/ionity-flash/venv`), lab image from `firmware/build.py --lab` (secrets.h baked in, full erase -> NVS seeded).
+- **Blocker:** the board reports WiFi reason **201 SSID not found** for IONITY-LAB-IOT, and the Pi's own scan
+  (nmcli) doesn't see it either -> the H3C 2.4 GHz IoT network is off/hidden. The board retries every 12 s and will
+  join by itself once it is broadcasting.
+- Firmware fixes from the hardware run: WiFi retry no longer calls begin() while the driver is mid-connect
+  ("sta is connecting, cannot set config"), 12 s retry, disconnect reason captured (own STA_LEAVING ignored) and
+  reported in hello/get/test + serial log; hello MAC read from eFuse (was 00:00:.. before WiFi start); scan
+  includes hidden SSIDs and reports failure. New `scripts/serial_log.py`.
+- lab-node-02 (esp32-fc012cd8ea14, native USB) still on the laptop, COM10 held by another program.

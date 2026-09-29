@@ -260,3 +260,13 @@ def test_stale_pinned_advertise_ip_falls_back():
     assert ip != "203.0.113.77" and warn and "not on any adapter" in warn
     ip, warn = d.choose_advertise_ip("127.0.0.1")
     assert ip == "127.0.0.1" and warn is None
+
+
+def test_pinned_ip_prefers_same_subnet(monkeypatch):
+    from app.ingest import discovery as d
+    monkeypatch.setattr(d, "local_ipv4s", lambda: {"127.0.0.1", "192.168.0.2", "192.168.124.2"})
+    monkeypatch.setattr(d, "primary_lan_ip", lambda: "192.168.0.2")
+    ip, warn = d.choose_advertise_ip("192.168.124.4")        # lab pin, DHCP gave .2
+    assert ip == "192.168.124.2" and "same network" in warn
+    ip, warn = d.choose_advertise_ip("10.9.9.9")              # other network entirely
+    assert ip == "192.168.0.2" and "not on any adapter" in warn

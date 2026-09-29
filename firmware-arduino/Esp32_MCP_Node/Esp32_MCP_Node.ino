@@ -77,6 +77,24 @@ uint32_t gTxOk = 0, gTxFail = 0;
 unsigned long lastSample = 0, lastTelemetry = 0, lastStatus = 0;
 unsigned long lastWifiTry = 0, lastMqttTry = 0, lastProbe = 0, lastFast = 0;
 bool gWifiKick = true;          // next ensureWifi() tries immediately (boot, new credentials)
+uint8_t gWifiReason = 0;        // last STA disconnect reason from the WiFi driver (0 = none)
+
+// Human text for the disconnect reasons that matter when a board won't join.
+const char *wifiReasonText(uint8_t r) {
+  switch (r) {
+    case 0:   return "";
+    case 2: case 15: case 204: return "wrong password (auth/4-way handshake failed)";
+    case 201: return "SSID not found (off, hidden on another band, or 5 GHz only - ESP32 is 2.4 GHz)";
+    case 202: return "authentication failed";
+    case 203: return "association failed (AP full or MAC filtered)";
+    case 205: return "connection failed";
+    case 23:  return "802.1X / enterprise auth failed";
+    case 18: case 19: case 20: case 24: case 29: return "security mode not supported (use WPA2-PSK, not WPA3-only)";
+    case 8:   return "left the network";
+    case 200: return "beacon timeout (weak signal)";
+    default:  return "disconnected";
+  }
+}
 
 // State mode + edge inference (EdgeAI / DeviceMcp tabs)
 StateMode gMode = MODE_ACTIVE;
@@ -483,10 +501,28 @@ void ensureWifi() {
   lastWifiTry = millis();
 
   if (gCfg.wifiSsid.length() == 0) return;          // not provisioned yet
+  static bool handler = false;
+  if (!handler) {
+    handler = true;
+    WiFi.onEvent([](WiFiEvent_t e, WiFiEventInfo_t info) {
+      if (e == ARDUINO_EVENT_WIFI_STA_DISCONNECTED) {
+        uint8_t r = info.wifi_sta_disconnected.reason;
+        // 8 ASSOC_LEAVE / 36 STA_LEAVING are our own disconnect() before a
+        // retry - keep the reason that actually explains the failure.
+        if (r != 8 && r != 36) gWifiReason = r;
+      }
+      if (e == ARDUINO_EVENT_WIFI_STA_GOT_IP) gWifiReason = 0;
+    });
+  }
+  if (gWifiReason) logln("WiFi: last attempt failed - reason " + String(gWifiReason) + " " + wifiReasonText(gWifiReason));
   logln("WiFi connecting to \"" + gCfg.wifiSsid + "\" ...");
   WiFi.mode(WIFI_STA);
   WiFi.setHostname((String(OTA_HOSTNAME_PREFIX) + macSuffix()).c_str());
   WiFi.setAutoReconnect(true);
+  // Restart the attempt cleanly: begin() while the driver is still
+  // connecting fails with "sta is connecting, cannot set config".
+  WiFi.disconnect(false, false);
+  delay(50);
   WiFi.begin(gCfg.wifiSsid.c_str(), gCfg.wifiPass.c_str());
 }
 

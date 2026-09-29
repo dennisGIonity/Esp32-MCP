@@ -75,8 +75,18 @@ def choose_advertise_ip(configured: str) -> tuple[str, str | None]:
     configured = (configured or "").strip()
     if not configured:
         return primary_lan_ip(), None
-    if configured in local_ipv4s():
+    local = local_ipv4s()
+    if configured in local:
         return configured, None
+    # Same /24 first: the pin says WHICH network the boards live on (the lab),
+    # even when DHCP handed this host a different address on it (.2 vs .4).
+    # Falling back to the default-route NIC would point lab boards at the
+    # household WiFi, which they cannot reach.
+    prefix = configured.rsplit(".", 1)[0] + "."
+    same = sorted(ip for ip in local if ip.startswith(prefix) and ip != "127.0.0.1")
+    if same:
+        return same[0], (f"IONITY_MDNS_ADVERTISE_IP={configured} is not on this host; using "
+                         f"{same[0]} on the same network {prefix}0/24 (pin it in the H3C DHCP)")
     ip = primary_lan_ip()
     return ip, (f"IONITY_MDNS_ADVERTISE_IP={configured} is not on any adapter of this host "
                 f"(cable out / network changed) - advertising {ip} instead")
