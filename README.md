@@ -2,7 +2,7 @@
 ========================================================================================
 AEDI - IONITY GLOBAL - ESP32-MCP FLEET PLATFORM
 Author: Johan Wilhelm van Antwerp | Ionity (Pty) Ltd | AEDI
-Document ID: DOC-2026-09-ESP32MCP-001 | Version: 1.0.0 | Updated: 2026-09-21 SAST
+Document ID: DOC-2026-09-ESP32MCP-001 | Version: 2.0.0 | Updated: 2026-09-29 SAST
 Governance: Policy 986 AED | License: AED 900 | CC BY-NC-SA 4.0 where stated
 (c) 2018-2026 Antwerp Designs | Ionity (Pty) Ltd - All Rights Reserved - TM2
 Web: https://www.ionity.today | https://www.ionity.world | Ref: https://www.ionity.co.za
@@ -10,115 +10,76 @@ Classification: PUBLIC | Building Tomorrow, Today. | Anything is Possible with G
 ========================================================================================
 -->
 
-# Ionity ESP32-MCP — Fleet Telemetry & Model Context Protocol Gateway
+# Ionity ESP32-MCP — flash, provision and command an ESP32 fleet from an AI
 
-One binary on the device. One server for the fleet. One MCP endpoint for the AI.
+**One image on every board. One MCP host for the fleet. An MCP server on every board.**
 
-Scales from the first board on your desk to **1000+ ESP32 nodes** reporting into
-the fleet host, with a live dashboard and a Model Context Protocol surface so
-Claude / AEDi can query and command the whole fleet as a single system.
-
-> **Live lab:** three real boards (2× ESP32-S3 over MQTT, 1× Pico 2 over the
-> serial bridge) report into `site=lab`. The lab itself — isolated network, shared
-> MQTT broker, Pi 5 tools, health check — is its own project,
-> **[Ionity-2nd-Router-Test-Lab](https://github.com/dennisGIonity/Ionity-2nd-Router-Test-Lab)** (private, `E:\.IONITY-LAB`),
-> and ESP32-MCP is registered in it. Start everything with `E:\.IONITY-LAB\lab.ps1 start`
-> (or just this project with `scripts\start_lab.ps1`, which runs at logon). See **[docs/LAB.md](docs/LAB.md)**.
->
-> Boards find the server as **`ionity-fleet.local`** over mDNS, not by a fixed
-> IP — a router swap moved the LAN once already and the fleet followed.
-
----
-
-## What this is
+```
+ Claude / Ollama / AEDi ──MCP──►  Fleet host (FastAPI :8099)  ──MQTT (compact JSON-RPC)──►  ESP32 node (fw 2.0)
+                                   · 17 fleet tools                                           · own MCP server:
+                                   · device_call_tool bridge  ◄──telemetry / status / LWT───   read_telemetry, run_inference,
+                                   · dashboard  · flasher                                      set_actuator, set_state_mode …
+                                   · Datadog forwarder ──► Datadog (metrics, events, checks)   · http://<board>/mcp on the LAN
+        Browser (Chrome/Edge) ── Web Serial ──► flash image + write WiFi / MCP host / tokens into NVS
+```
 
 | Layer | What it does |
 |---|---|
-| **Firmware** (`firmware/`) | PlatformIO / Arduino. MQTT primary, HTTP fallback, MAC-derived device id, NVS provisioning, LWT, offline ring buffer, OTA. |
-| **Fleet server** (`server/`) | FastAPI. MQTT bridge + HTTP ingest → in-memory registry → batched SQLite writes. Alert engine, WebSocket broadcaster. |
-| **MCP gateway** (`server/app/mcp/`) | JSON-RPC 2.0, over HTTP *and* stdio. Seven tools covering the whole fleet. |
-| **Dashboard** (`dashboard/`) | Live fleet monitor: KPIs, ingest rate, health bar, device grid, drill-down, alerts, MCP console. |
-| **Simulator** (`scripts/`) | Fakes N devices so you can prove the stack before flashing hardware. |
-| **Reference** (`_reference/`) | `E:\.RouterProject` imported verbatim. See [`docs/REUSE-AUDIT.md`](docs/REUSE-AUDIT.md). |
+| **Firmware 2.0** (`firmware-arduino/Esp32_MCP_Node`) | One image for any network: WiFi, MCP host and tokens live in NVS, written over USB by the flasher. MQTT primary / HTTP fallback, LWT, offline buffer, OTA. **On-device MCP server** over HTTP (`:80/mcp`) and MQTT. Edge inference, actuators, state modes. |
+| **Flasher** (`flasher/`) | React + esptool-js + Web Serial. Identifies the chip, picks the right image, flashes, provisions WiFi + MCP host, checks the board joined and its MCP tools answer. Served at `/flasher/`, also built for GitHub Pages. |
+| **Fleet host** (`server/`) | FastAPI. MQTT bridge + HTTP ingest → registry → batched SQLite. Alerts, WebSocket dashboard, firmware images for the flasher. |
+| **MCP gateway** (`server/app/mcp/`) | JSON-RPC 2.0 over HTTP and stdio, protocol 2025-06-18. 17 tools, incl. `device_call_tool` which reaches each board's own MCP server through the broker. |
+| **Datadog** (`server/app/integrations/datadog.py`) | The host forwards every metric, alert, online/offline event and a per-board service check. Boards never hold the key. |
+| **Dashboard** (`dashboard/`) | Live fleet monitor, MCP console, link to the flasher. |
+| **Emulator / simulator** (`scripts/`) | `device_emulator.py` = one fw 2.0 board incl. its MCP tools; `fleet_simulator.py` = N boards for load. |
+
+> **Live lab:** 2× ESP32-S3 (MQTT) + 1× Pico 2 (serial bridge) in `site=lab`. The lab network is its own
+> project, **[Ionity-2nd-Router-Test-Lab](https://github.com/dennisGIonity/Ionity-2nd-Router-Test-Lab)**
+> (`E:\.IONITY-LAB`). Boards find the host as **`ionity-fleet.local`** over mDNS, or at the address the
+> flasher wrote into them.
 
 ---
 
-## Quick start — no hardware needed
+## Quick start
 
 ```powershell
 cd E:\.ESP32-MCP
-
-# 1. Python deps
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
+python -m venv .venv; .\.venv\Scripts\Activate.ps1
 pip install -r server\requirements.txt
-# Windows Smart App Control blocks zeroconf's compiled DLLs (mDNS silently off).
-# Reinstall it as pure Python so ionity-fleet.local is advertised:
-$env:SKIP_CYTHON = '1'; pip install --force-reinstall --no-deps --no-binary zeroconf zeroconf
-
-# 2. Start the fleet server (dashboard + API + MCP on :8099)
-python server\run.py
-
-# 3. In a second terminal: pretend to be 250 ESP32s
-.\.venv\Scripts\Activate.ps1
-python scripts\fleet_simulator.py --devices 250 --interval 10
+python server\run.py                                   # dashboard, API, MCP, flasher on :8099
+python scripts\device_emulator.py                      # a fw 2.0 board, incl. its MCP tools (needs the broker)
+python scripts\fleet_simulator.py --devices 250        # load: 250 boards over HTTP
 ```
 
-Open **http://localhost:8099/** (or `http://ionity-fleet.local:8099/`; in the lab `http://192.168.124.4:8099/`).
-
-MQTT is optional for the simulator's HTTP mode — devices fall back to HTTP
-ingest and the server keeps working.
-
-### With the broker (the real path)
-
-```powershell
-scripts\start_lab.ps1         # amqtt broker :1883 + fleet server :8099 + serial bridge
-python scripts\fleet_simulator.py --devices 1000 --transport mqtt
-```
-
-`docker compose up -d mosquitto` is the production alternative (Mosquitto);
-the lab uses the pure-Python broker so it does not depend on Docker Desktop.
+Dashboard **http://localhost:8099/** · Flasher **http://localhost:8099/flasher/** · API docs **/docs**.
+The lab path with the broker: `scripts\start_lab.ps1` (amqtt :1883 + host + serial bridge).
 
 ---
 
-## Flashing a real device
+## Flash and provision a board (no recompiling)
 
-```powershell
-# one command: detects the chip, compiles (cached), flashes, waits for the first reading
-E:\.ESP32-MCP\scripts\add_device.ps1 -Port COM12 -Label "lab-node-04"
-```
+1. `python firmware\build.py` — builds the four images (`esp32s3_uart`, `esp32s3_usb`, `esp32_classic`,
+   `esp32c3_usb`) into `firmware/dist/` with a manifest (sha256, size). No `secrets.h` goes into them.
+2. Open **http://localhost:8099/flasher/** in Chrome or Edge, plug the board in, then:
+   **Select USB port → Flash & provision.** The flasher detects the chip (and whether it is on a
+   CH340/CP210x bridge or native USB), writes the image, waits for the new firmware to say hello,
+   writes WiFi + MCP host + tokens into NVS, has the board join WiFi and find the host, reboots it,
+   and then confirms from the host side that it is online and its MCP tools answer.
+3. Already on fw 2.0? Tick **Provision only** to move a board to another network, or
+   **Update only** to flash new firmware and keep its settings (the NVS partition is skipped).
 
-WiFi lives in the git-ignored `firmware-arduino/Esp32_MCP_Node/secrets.h` (copy `secrets.h.example`,
-or run the lab's `SET-LAB-WIFI.cmd`). The Arduino IDE and PlatformIO (`firmware/platformio.ini`) build
-the **same** sketch. The same binary flashes every unit, and `device_id` comes from the eFuse MAC.
-
-**Other devices:** Raspberry Pi Zero / any Linux board → [`devices/pi-agent`](devices/pi-agent/README.md)
-(`sudo bash install.sh`), Pico / Pico 2 → `firmware-arduino/Pico_MCP_Node`.
-The full matrix is in **[docs/DEPLOYABLES.md](docs/DEPLOYABLES.md)**.
-
-Re-tag a device's site/group/label afterwards without reflashing:
-
-```bash
-curl -X POST http://ionity-fleet.local:8099/api/v1/devices/esp32-a1b2c3d4e5f6/cmd \
-  -H "Content-Type: application/json" -H "Authorization: Bearer $IONITY_ADMIN_TOKEN" \
-  -d '{"action":"set_meta","site":"kelvin-drive","group":"power","label":"GF riser"}'
-```
-
-See [`docs/DEVICE-PROVISIONING.md`](docs/DEVICE-PROVISIONING.md) for the 1000-unit workflow.
+No Chrome? `python scripts\provision.py COM8 --ssid IONITY-LAB-IOT --password - --server 192.168.0.2 --mcp-token auto --test`.
+Details: **[docs/FLASHER.md](docs/FLASHER.md)**. The old path (`scripts\add_device.ps1`, `secrets.h`) still works:
+`secrets.h` now only seeds the first boot.
 
 ---
 
-## Wiring the MCP server to Claude
+## The MCP layers
 
-**Over HTTP** — point any MCP-over-HTTP client at:
+### 1 · Fleet host MCP (AI orchestrator + device bridge)
 
-```
-POST http://ionity-fleet.local:8099/api/v1/mcp/rpc
-```
-
-**Over stdio (Claude Desktop / Claude Code / Cowork)**, in `claude_desktop_config.json`, use the
-**bridge** to the live server. It answers the handshake even while the server is down, starts the lab
-if needed, and forwards the admin token from `.env`:
+HTTP: `POST http://ionity-fleet.local:8099/api/v1/mcp/rpc` (Bearer `IONITY_ADMIN_TOKEN` for write tools).
+stdio for Claude Desktop / Claude Code / Cowork — the bridge keeps answering while the host is down:
 
 ```json
 {
@@ -130,31 +91,59 @@ if needed, and forwards the admin token from `.env`:
   }
 }
 ```
-(`python -m app.mcp.server` also works, but it opens the database directly: stale data, no commands.)
 
-MCP server 1.3.0 negotiates protocol `2025-06-18` / `2025-03-26` / `2024-11-05`, sends usage
-instructions, validates every argument against the tool schema (limits are clamped, not rejected),
-returns `structuredContent`, and marks every tool read-only or destructive so the client can ask
-before acting.
-
-### Tools exposed (14)
+Local models (Ollama through any MCP client, e.g. `mcphost` or Open WebUI's MCP bridge) use the same HTTP endpoint.
 
 | Tool | Use it for |
 |---|---|
 | `fleet_summary` | Whole-fleet health in one call. Start here. |
-| `list_devices` | Filter by site / group / health / free text, paged. |
-| `get_device` | One device plus recent history. |
-| `query_telemetry` | Raw time-series for a metric over a window. |
-| `aggregate_metric` | Mean/min/max/count + top-10 devices for a metric. |
+| `list_devices`, `get_device` | Filter / page the fleet; one board plus history (shows `mode`, `mcp_url`, `sleeping_until`). |
+| `query_telemetry`, `aggregate_metric` | Time series, or mean/min/max + top-10 for a metric. |
 | `get_alerts` | Open or historical alerts. |
-| `send_command` ⚠ | reboot / identify / ping / set_meta / set_display / dns_probe: one device or `broadcast`. |
-| `get_command_results` | Replies to commands (e.g. `pong`, dns_probe answers), by `cmd_id`. |
-| `dns_summary`, `dns_by_device`, `dns_top_domains`, `dns_search`, `dns_recent` | What is going to what device on the LAN. |
-| `list_lan_devices` | Who is on the network (IP, MAC, vendor, hostname). |
+| `send_command` ⚠ | reboot / identify / ping / set_meta / set_display / dns_probe / **set_state_mode**; one board or `broadcast`. |
+| `get_command_results` | Replies to commands, and edge-inference events. |
+| **`device_list_tools`** | Ask one board which MCP tools it has (goes to the board). |
+| **`device_call_tool`** ⚠* | Call a tool on the board's own MCP server and get its answer (~5 ms on the LAN). |
+| **`integrations_status`** | Datadog forwarder + MQTT bridge counters and last error. |
+| `dns_*`, `list_lan_devices` | What is going to what device on the LAN; who is on the network. |
 
-⚠ = changes devices; needs `IONITY_ADMIN_TOKEN` when one is set.
-Prompts: `fleet_health_check`, `investigate_device`.
-Resources: `ionity://fleet/summary`, `ionity://fleet/devices`, `ionity://fleet/schema`.
+⚠ = changes hardware; needs the admin token when one is set. \* only the write tools
+(`set_actuator`, `set_state_mode`, `identify`); `read_telemetry`, `get_device_info`, `run_inference` are open.
+
+### 2 · On-device MCP (every fw 2.0 board)
+
+`POST http://<board>/mcp` (JSON-RPC, `initialize` / `tools/list` / `tools/call`), or through the host with
+`device_call_tool` — the board never has to face the internet or parse a heavy handshake.
+
+| Board tool | What it does |
+|---|---|
+| `read_telemetry` | Temperature, ADC, digital in, RSSI, free / minimum-ever / largest-block heap, PSRAM, loop time avg/max (µs), FreeRTOS task count, loop stack headroom, actuators, last inference. |
+| `run_inference(model_id, input_frame?, threshold?)` | On-chip models, no extra libraries: `anomaly_zscore` (ADC vs rolling window), `rssi_motion` (RSSI jitter as a coarse presence signal), `analog_threshold`. Returns label + confidence. TFLite Micro / ESP-DL models slot in as more `model_id`s. |
+| `set_actuator(channel, value)` | `led`, `alert_led`, `relay0` (0/1), `pwm0`, `pwm1` (duty 0..1, 5 kHz LEDC). Pins per board in NVS; unsafe pins refused. |
+| `set_state_mode(mode)` | `ACTIVE`, `STANDBY` (60 s telemetry), `INFERENCE_ACTIVE` (model every 2 s + `inf_*` metrics + events), `LOW_POWER_SLEEP` (deep sleep, announced), `FAILSAFE` (all outputs off and locked, survives reboot). |
+| `get_device_info`, `identify` | Identity/config without secrets; blink LED + flash OLED. |
+
+Writes over HTTP need the board's `mcp_token` (the flasher can generate one). Full spec:
+**[docs/DEVICE-MCP.md](docs/DEVICE-MCP.md)**. Other ESP32 MCP stacks (Espressif `esp-iot-solution`
+`mcp_server`, Solnera ESP32-MCPServer, Xiaozhi, `@midas/esp32-devops-mcp`) and how they fit:
+**[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#mcp-ecosystem)**.
+
+---
+
+## Datadog
+
+```ini
+# .env
+IONITY_DD_ENABLED=true
+IONITY_DD_API_KEY=<Organization settings → API keys>
+IONITY_DD_SITE=datadoghq.eu          # or datadoghq.com, us3/us5.datadoghq.com, ap1.datadoghq.com
+IONITY_DD_ENV=lab
+```
+
+Every numeric metric → `ionity.esp32.<metric>` (gauge, host = device_id, tags `device_id site group fw
+transport env service`), fleet rollups `ionity.fleet.*`, events for alert raised/cleared and board
+online/offline/sleeping/inference, and service check `ionity.esp32.can_connect`. Dashboard + monitor
+recipes: **[docs/DATADOG.md](docs/DATADOG.md)**.
 
 ---
 
@@ -166,16 +155,20 @@ POST /api/v1/devices/register       first-boot handshake
 GET  /api/v1/fleet/summary
 GET  /api/v1/devices?site=&group=&health=&search=&limit=&offset=
 GET  /api/v1/devices/{id}?history=100
-POST /api/v1/devices/{id}/cmd       {"action":"identify"}   ({id} may be "broadcast")
+POST /api/v1/devices/{id}/cmd       {"action":"set_state_mode","mode":"STANDBY"}   ({id} may be "broadcast")
+POST /api/v1/devices/{id}/mcp       JSON-RPC relayed to the board's own MCP server
+GET  /api/v1/commands/results
 GET  /api/v1/telemetry/query?metric=temp_c&minutes=60
 GET  /api/v1/telemetry/aggregate?metric=rssi_dbm&minutes=60
 GET  /api/v1/alerts?open_only=true
+GET  /api/v1/firmware/manifest      images for the flasher
+GET  /api/v1/firmware/{variant}.bin
+GET  /api/v1/provisioning/defaults  host / ports / (admin) fleet token for the flasher
+GET  /api/v1/integrations           Datadog + MQTT stats
 POST /api/v1/mcp/rpc                MCP JSON-RPC 2.0
 GET  /api/v1/health
 WS   /ws/fleet                      live dashboard frames
 ```
-
-Interactive docs: **http://ionity-fleet.local:8099/docs**
 
 ---
 
@@ -198,28 +191,28 @@ regardless of fleet size.
 
 ```
 E:\.ESP32-MCP
-├── firmware/                PlatformIO build of the Arduino node sketch (esp32s3 | esp32dev | esp32c3 | OTA)
-├── devices/
-│   └── pi-agent/            Raspberry Pi Zero / Linux agent + systemd installer
 ├── firmware-arduino/
-│   ├── Esp32_MCP_Node/      fleet node (Arduino IDE) - the one in the lab
+│   ├── Esp32_MCP_Node/      fw 2.0 node: main + Provision, DeviceMcp, EdgeAI, Actuators, Oled tabs
 │   ├── Pico_MCP_Node/       Pico / Pico 2 (serial or WiFi)
-│   └── Esp32_Network_Sentinel/  single-site link/power sentinel with OLED clock (from Ionity-ESP32-Reporter)
-├── server/                  FastAPI fleet server + MCP gateway (:8099)
-│   └── app/{api,ingest,storage,fleet,mcp}
-├── modules/
-│   └── network-sentinel/    Kelvin Drive network sentinel service (:8000): MikroTik, load-shedding,
-│                            probes, speedtest, security + traffic analysis, its own MCP + dashboard
+│   └── Esp32_Network_Sentinel/  single-site link/power sentinel with OLED clock
+├── firmware/
+│   ├── build.py             builds the flasher images + manifest (arduino-cli)
+│   └── platformio.ini       PlatformIO build of the same sketch
+├── flasher/                 React web flasher (esptool-js, Web Serial) -> /flasher/ and GitHub Pages
+├── server/                  FastAPI fleet host + MCP gateway (:8099)
+│   └── app/{api,ingest,storage,fleet,mcp,integrations}
+├── devices/pi-agent/        Raspberry Pi Zero / Linux agent + systemd installer
+├── modules/network-sentinel/  Kelvin Drive network sentinel service (:8000)
 ├── dashboard/               fleet dashboard served at /
+├── scripts/                 start_lab, add_device, provision, device_emulator, fleet_simulator, serial bridge
 ├── infra/                   Dockerfile + mosquitto.conf
-├── scripts/                 start_lab, add_device, serial bridge, simulator
-└── docs/                    architecture, reuse audit, schema, provisioning, lab, roadmap
+├── .github/workflows/       CI (tests, firmware matrix, flasher) + Pages/release
+└── docs/                    architecture, flasher, device MCP, Datadog, schema, provisioning, lab, roadmap
 ```
 
-> **One repo.** `Ionity-ESP32-Reporter` (formerly `E:\.RouterProject`) was merged in on 2026-09-25:
-> its service lives in `modules/network-sentinel`, its firmware in `firmware-arduino/Esp32_Network_Sentinel`.
-> The lab (network, broker, Pi tools) is separate: `github.com/dennisGIonity/Ionity-2nd-Router-Test-Lab`.
+What changed in 2.0 and why: **[CHANGELOG.md](CHANGELOG.md)**.
 
 ---
 
-*Governance: Policy 986 AED · Licence AED 900 · © 2018-2026 Antwerp Designs | Ionity (Pty) Ltd · TM2*
+*Governance: Policy 986 AED · Licence AED 900 · © 2018-2026 Antwerp Designs | Ionity (Pty) Ltd · TM2 ·
+[www.ionity.today](https://www.ionity.today) · [www.ionity.world](https://www.ionity.world)*

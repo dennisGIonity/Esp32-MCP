@@ -9,6 +9,11 @@ REST + WebSocket surface.
 /api/v1/telemetry/query    GET   time-series query
 /api/v1/alerts             GET   alerts
 /api/v1/mcp/rpc            POST  MCP JSON-RPC over HTTP
+/api/v1/devices/{id}/mcp   POST  relay JSON-RPC to the board's own MCP server (fw >= 2.0)
+/api/v1/firmware/manifest  GET   flasher images (firmware/build.py)
+/api/v1/firmware/{file}    GET   one merged image
+/api/v1/provisioning/defaults GET what the flasher pre-fills (host, ports, token for admins)
+/api/v1/integrations       GET   Datadog forwarder + MQTT bridge stats
 /api/v1/health             GET   liveness + ingest stats
 /ws/fleet                  WS    live dashboard feed
 """
@@ -16,11 +21,14 @@ from __future__ import annotations
 
 import asyncio
 import hmac
+import json
+import re
 import time
+from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Request, HTTPException, Header, WebSocket, WebSocketDisconnect, Query
-from fastapi.responses import Response
+from fastapi.responses import Response, FileResponse
 
 from app.config import settings
 from app.models import TelemetryIn, CommandIn
@@ -238,6 +246,87 @@ async def mcp_rpc(request: Request) -> Any:
 
 
 # --------------------------------------------------------------------------
+# Flasher support: firmware images + provisioning defaults
+# --------------------------------------------------------------------------
+_FW_NAME = re.compile(r"^[a-z0-9_]+\.bin$")
+
+
+@router.get("/api/v1/firmware/manifest")
+async def firmware_manifest():
+    path = Path(settings.firmware_dist) / "manifest.json"
+    if not path.exists():
+        raise HTTPException(status_code=404,
+                            detail="no firmware built - run: python firmware/build.py")
+    return json.loads(path.read_text())
+
+
+@router.get("/api/v1/firmware/{name}")
+async def firmware_file(name: str):
+    if not _FW_NAME.match(name):
+        raise HTTPException(status_code=400, detail="bad image name")
+    path = Path(settings.firmware_dist) / name
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="image not built")
+    return FileResponse(str(path), media_type="application/octet-stream",
+                        headers={"Cache-Control": "no-cache"})
+
+
+@router.get("/api/v1/provisioning/defaults")
+async def provisioning_defaults(request: Request):
+    """What the flasher pre-fills: where boards should report, and (only for an
+    admin, or in open lab mode) the fleet enrolment token."""
+    from app.ingest.discovery import choose_advertise_ip
+    disc = getattr(request.app.state, "discovery", None)
+    ds = disc.stats() if disc else {}
+    # Never hand the flasher an address this host does not actually have.
+    host, warning = (settings.public_host, None) if settings.public_host else \
+        choose_advertise_ip(settings.mdns_advertise_ip)
+    out = {
+        "server": host,
+        "mdns_host": f"{ds.get('hostname', 'ionity-fleet.local')}".rstrip("."),
+        "mqtt_port": settings.mqtt_port,
+        "http_port": settings.port,
+        "site": "lab",
+        "group": "bench",
+        "fleet_name": settings.fleet_name,
+        "require_token": settings.require_token,
+        "admin": _is_admin(request),
+        "warning": warning,
+    }
+    if _is_admin(request):
+        out["fleet_token"] = settings.fleet_token
+        out["mqtt_user"] = settings.mqtt_username
+    return out
+
+
+@router.get("/api/v1/integrations")
+async def integrations(request: Request):
+    return {k: v.stats() for k, v in getattr(request.app.state, "integrations", {}).items()}
+
+
+@router.post("/api/v1/devices/{device_id}/mcp")
+async def device_mcp(request: Request, device_id: str):
+    """Relay one JSON-RPC request to a board's own MCP server over MQTT.
+    Write tools need the admin token, same as /cmd."""
+    try:
+        rpc = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="body must be a JSON-RPC object")
+    if not isinstance(rpc, dict):
+        raise HTTPException(status_code=400, detail="body must be a JSON-RPC object")
+    from app.mcp.tools import DEVICE_READ_TOOLS
+    if rpc.get("method") == "tools/call":
+        tool = (rpc.get("params") or {}).get("name")
+        if tool not in DEVICE_READ_TOOLS and not _is_admin(request):
+            raise HTTPException(status_code=401, detail="admin token required for write tools")
+    r = await request.app.state.registry.call_device(device_id, rpc, settings.device_rpc_timeout_s)
+    if not r.get("ok") and "response" not in r:
+        raise HTTPException(status_code=504 if "no reply" in r.get("error", "") else 409,
+                            detail=r.get("error"))
+    return r.get("response")
+
+
+# --------------------------------------------------------------------------
 # Health
 # --------------------------------------------------------------------------
 @router.get("/api/v1/health")
@@ -262,6 +351,8 @@ async def health(request: Request):
         "admin_token_required": bool(settings.admin_token),
         "mcp": {"protocol": mcp_protocol.LATEST_VERSION, "server": mcp_protocol.SERVER_VERSION,
                 "tools": len(MCP_TOOLS)},
+        "datadog": (app.state.datadog.stats() if getattr(app.state, "datadog", None)
+                    else {"enabled": False}),
     }
 
 

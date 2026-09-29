@@ -70,7 +70,7 @@ async def test_every_tool_has_annotations_and_schema():
         names.add(t["name"])
         assert t["inputSchema"]["type"] == "object"
         a = t["annotations"]
-        assert a["readOnlyHint"] is (t["name"] not in T.WRITE_TOOLS)
+        assert a["readOnlyHint"] is (t["name"] not in T.MAY_WRITE_TOOLS)
     assert T.TOOL_INDEX["send_command"]["annotations"]["destructiveHint"] is True
 
 

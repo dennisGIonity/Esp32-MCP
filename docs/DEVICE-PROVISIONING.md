@@ -3,6 +3,10 @@ AEDI - IONITY GLOBAL | DOC-2026-09-ESP32MCP-005 | v1.0.0 | Policy 986 AED
 (c) 2018-2026 Antwerp Designs | Ionity (Pty) Ltd | Classification: PUBLIC
 -->
 
+> **fw 2.0 (2026-09-29):** the fastest path is now the web flasher — [FLASHER.md](FLASHER.md). It writes
+> WiFi, the MCP host and tokens into NVS over USB, so `secrets.h` is no longer needed per network.
+> `scripts/provision.py` does the same from a terminal, for bulk runs.
+
 # Provisioning 1000 devices
 
 The whole design exists to make this boring. **One binary, no per-unit code

@@ -113,7 +113,8 @@ MCP_TOOLS: list[dict[str, Any]] = [
             "dns_probe (the device asks a DNS resolver - Gate^Flame by default - "
             "for each of up to 12 'names' and reports the answer: an address, "
             "0.0.0.0 = blocked, NXDOMAIN, SERVFAIL or TIMEOUT; read the reply "
-            "with get_command_results). Requires MQTT."
+            "with get_command_results), set_state_mode (fw >= 2.0: mode STANDBY|ACTIVE|"
+            "INFERENCE_ACTIVE|LOW_POWER_SLEEP|FAILSAFE, duration_s for sleep). Requires MQTT."
         ),
         "inputSchema": {
             "type": "object",
@@ -121,7 +122,10 @@ MCP_TOOLS: list[dict[str, Any]] = [
                 "device_id": {"type": "string"},
                 "action": {"type": "string",
                            "enum": ["reboot", "identify", "ping", "set_meta", "set_display",
-                                    "dns_probe"]},
+                                    "dns_probe", "set_state_mode"]},
+                "mode": {"type": "string",
+                         "enum": ["STANDBY", "ACTIVE", "INFERENCE_ACTIVE", "LOW_POWER_SLEEP", "FAILSAFE"]},
+                "duration_s": {"type": "integer", "maximum": 86400},
                 "dns_server": {"type": "string",
                                "description": "resolver IPv4 for dns_probe (default: the node's gf_dns)"},
                 "names": {"type": "array", "items": {"type": "string"}, "maxItems": 12},
@@ -150,6 +154,61 @@ MCP_TOOLS: list[dict[str, Any]] = [
                 "limit": {"type": "integer", "default": 20, "maximum": 200},
             },
         },
+    },
+]
+
+# ---------------------------------------------------------------------------
+# On-device MCP bridge (fw >= 2.0). Every board runs its own MCP server; these
+# two tools reach it through the broker, so the agent needs no board IPs and
+# the board never faces the internet. Compact JSON-RPC over MQTT, not an
+# HTTP/SSE handshake per call.
+# ---------------------------------------------------------------------------
+DEVICE_READ_TOOLS = {"get_device_info", "read_telemetry", "run_inference"}
+DEVICE_WRITE_TOOLS = {"set_actuator", "set_state_mode", "identify"}
+
+MCP_TOOLS += [
+    {
+        "name": "device_list_tools",
+        "description": (
+            "Ask one board (fw >= 2.0) which MCP tools it exposes, with their input "
+            "schemas: get_device_info, read_telemetry, run_inference, set_actuator, "
+            "set_state_mode, identify. The call goes to the board itself over MQTT."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {"device_id": {"type": "string"}},
+            "required": ["device_id"],
+        },
+    },
+    {
+        "name": "device_call_tool",
+        "description": (
+            "Call a tool on one board's own MCP server and return its answer. Read tools: "
+            "read_telemetry (live heap, loop timing, ADC, RSSI, actuators), get_device_info, "
+            "run_inference {model_id: anomaly_zscore|rssi_motion|analog_threshold, "
+            "input_frame?, threshold?}. Write tools (need the admin token, ask the user "
+            "first): set_actuator {channel: led|alert_led|pwm0|pwm1|relay0, value 0..1}, "
+            "set_state_mode {mode, duration_s?, model_id?}, identify."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "device_id": {"type": "string"},
+                "tool": {"type": "string",
+                         "enum": sorted(DEVICE_READ_TOOLS | DEVICE_WRITE_TOOLS)},
+                "arguments": {"type": "object"},
+                "timeout_s": {"type": "integer", "default": 8, "maximum": 30},
+            },
+            "required": ["device_id", "tool"],
+        },
+    },
+    {
+        "name": "integrations_status",
+        "description": (
+            "State of the host's outbound integrations: Datadog forwarder (enabled, site, "
+            "points/events/checks sent, queue, last error) and the MQTT bridge."
+        ),
+        "inputSchema": {"type": "object", "properties": {}},
     },
 ]
 
@@ -251,9 +310,11 @@ _TITLES = {
     "dns_summary": "LAN DNS summary", "dns_by_device": "DNS by device",
     "dns_top_domains": "Top domains", "dns_search": "Search DNS",
     "dns_recent": "Recent DNS queries", "list_lan_devices": "LAN devices",
+    "device_list_tools": "Board's MCP tools", "device_call_tool": "Call a board's MCP tool",
+    "integrations_status": "Integrations (Datadog)",
 }
 for _t in MCP_TOOLS:
-    _write = _t["name"] == "send_command"
+    _write = _t["name"] in ("send_command", "device_call_tool")
     _t["title"] = _TITLES.get(_t["name"], _t["name"])
     _t["annotations"] = {
         "title": _t["title"],
@@ -264,7 +325,19 @@ for _t in MCP_TOOLS:
     }
 
 TOOL_INDEX: dict[str, dict[str, Any]] = {t["name"]: t for t in MCP_TOOLS}
+# Always need the admin token. device_call_tool is checked per call instead
+# (see needs_admin): reading a board's telemetry is not a write.
 WRITE_TOOLS = {"send_command"}
+# Tools that CAN change hardware (annotated readOnlyHint=false).
+MAY_WRITE_TOOLS = WRITE_TOOLS | {"device_call_tool"}
+
+
+def needs_admin(name: str, args: Any) -> bool:
+    if name in WRITE_TOOLS:
+        return True
+    if name == "device_call_tool" and isinstance(args, dict):
+        return args.get("tool") not in DEVICE_READ_TOOLS
+    return False
 
 
 class ToolArgError(ValueError):
@@ -310,6 +383,9 @@ def validate_args(name: str, args: Any) -> dict[str, Any]:
             val = str(val)
             if "enum" in spec and val not in spec["enum"]:
                 raise ToolArgError(f"{name}: '{key}' must be one of {spec['enum']}, got '{val}'")
+        elif typ == "object":
+            if not isinstance(val, dict):
+                raise ToolArgError(f"{name}: '{key}' must be an object")
         elif typ == "array":
             if isinstance(val, str):
                 val = [v.strip() for v in val.split(",") if v.strip()]
@@ -343,7 +419,7 @@ MCP_RESOURCES: list[dict[str, Any]] = [
 ]
 
 
-async def execute(name: str, args: dict, registry, store, dns=None) -> Any:
+async def execute(name: str, args: dict, registry, store, dns=None, integrations=None) -> Any:
     """Dispatch an MCP tool call against the live fleet."""
     args = validate_args(name, args)
     # ---- LAN DNS visibility ---------------------------------------------
@@ -420,7 +496,9 @@ async def execute(name: str, args: dict, registry, store, dns=None) -> Any:
     if name == "send_command":
         payload = {k: v for k, v in args.items()
                    if k in ("site", "group", "label", "driver", "sda", "scl",
-                            "dns_server", "names") and v is not None}
+                            "dns_server", "names", "mode", "duration_s") and v is not None}
+        if args.get("action") == "set_state_mode" and not payload.get("mode"):
+            raise ToolArgError("set_state_mode needs mode")
         if args.get("action") == "dns_probe":
             names = payload.get("names") or []
             if not names or len(names) > 12:
@@ -428,6 +506,46 @@ async def execute(name: str, args: dict, registry, store, dns=None) -> Any:
         if args.get("action") == "set_meta" and not any(k in payload for k in ("site", "group", "label")):
             raise ToolArgError("set_meta needs at least one of site, group, label")
         return await registry.send_command(args["device_id"], args["action"], payload)
+
+    if name == "device_list_tools":
+        from app.config import settings
+        r = await registry.call_device(args["device_id"],
+                                       {"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
+                                       settings.device_rpc_timeout_s)
+        if r.get("ok") and isinstance(r.get("response"), dict):
+            tools = (r["response"].get("result") or {}).get("tools", [])
+            return {"ok": True, "device_id": args["device_id"], "count": len(tools),
+                    "tools": tools, "elapsed_ms": r.get("elapsed_ms")}
+        return r
+
+    if name == "device_call_tool":
+        tool = args["tool"]
+        timeout = float(min(max(int(args.get("timeout_s", 8)), 1), 30))
+        r = await registry.call_device(args["device_id"], {
+            "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+            "params": {"name": tool, "arguments": args.get("arguments") or {}}}, timeout)
+        resp = r.get("response")
+        if not r.get("ok") or not isinstance(resp, dict):
+            return r
+        if "error" in resp:
+            return {"ok": False, "device_id": args["device_id"], "tool": tool,
+                    "error": resp["error"].get("message"), "elapsed_ms": r.get("elapsed_ms")}
+        res = resp.get("result") or {}
+        data = res.get("structuredContent")
+        if data is None:
+            txt = (res.get("content") or [{}])[0].get("text", "")
+            try:
+                import json as _json
+                data = _json.loads(txt)
+            except ValueError:
+                data = {"text": txt}
+        return {"ok": not res.get("isError", False), "device_id": args["device_id"],
+                "tool": tool, "result": data, "elapsed_ms": r.get("elapsed_ms")}
+
+    if name == "integrations_status":
+        integrations = integrations or {}
+        return {k: (v.stats() if hasattr(v, "stats") else v) for k, v in integrations.items()} \
+            or {"datadog": {"enabled": False}}
 
     if name == "get_command_results":
         return {"results": registry.list_cmd_results(

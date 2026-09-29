@@ -22,6 +22,13 @@ from app.storage.base import Store
 
 log = logging.getLogger("ionity.fleet")
 
+_MODES = ["ACTIVE", "STANDBY", "INFERENCE_ACTIVE", "LOW_POWER_SLEEP", "FAILSAFE"]
+
+
+def _mode_from_metrics(m: dict) -> str | None:
+    v = m.get("state_mode")
+    return _MODES[int(v)] if isinstance(v, (int, float)) and 0 <= int(v) < len(_MODES) else None
+
 
 class FleetRegistry:
     def __init__(self, store: Store):
@@ -38,6 +45,11 @@ class FleetRegistry:
         # command's outcome (e.g. what Gate^Flame answered to a dns_probe) was
         # invisible to MCP. Kept in memory: recent, bounded, never invented.
         self.cmd_results: deque[dict[str, Any]] = deque(maxlen=500)
+        # cmd_id -> Future: device_call_tool waits on the board's reply.
+        self._waiters: dict[str, asyncio.Future] = {}
+        # Optional sinks (Datadog). Each has on_telemetry / on_alert / on_state.
+        self.sinks: list[Any] = []
+        self._stopping = False
 
     # -- lifecycle ---------------------------------------------------------
     async def start(self) -> None:
@@ -61,13 +73,25 @@ class FleetRegistry:
         self._pruner_task = asyncio.create_task(self._pruner_loop())
 
     async def stop(self) -> None:
-        for t in (self._writer_task, self._pruner_task):
-            if t:
-                t.cancel()
-                try:
-                    await t
-                except asyncio.CancelledError:
-                    pass
+        # Let the writer finish its batch and drain the queue instead of
+        # cancelling it mid-query: cancelling an in-flight aiosqlite call and
+        # then closing the connection deadlocks aiosqlite 0.22 (seen as a hung
+        # shutdown and hung tests).
+        self._stopping = True
+        if self._writer_task:
+            try:
+                await asyncio.wait_for(asyncio.shield(self._writer_task), timeout=10)
+            except (asyncio.TimeoutError, asyncio.CancelledError):
+                self._writer_task.cancel()
+        for fut in self._waiters.values():
+            if not fut.done():
+                fut.cancel()
+        if self._pruner_task:
+            self._pruner_task.cancel()
+            try:
+                await self._pruner_task
+            except asyncio.CancelledError:
+                pass
 
     # -- ingest ------------------------------------------------------------
     def ingest(self, t: TelemetryIn) -> None:
@@ -86,8 +110,14 @@ class FleetRegistry:
             "uptime_s": t.uptime_s,
             "metrics": dict(t.metrics),
         })
+        if getattr(t.net, "mcp", None):
+            d["mcp_url"] = t.net.mcp
+        if t.mode:
+            d["mode"] = t.mode
         d["msg_count"] = d.get("msg_count", 0) + 1
+        d.pop("sleeping_until", None)
         self._recent_ts.append(now)
+        self._emit("on_telemetry", d, t.metrics, t.at())
 
         try:
             self.queue.put_nowait(t)
@@ -112,16 +142,33 @@ class FleetRegistry:
             # Last Will fired: mark it stale-now rather than faking a heartbeat.
             d["last_seen"] = d.get("last_seen") or time.time()
             d["lwt_offline"] = True
+            d.pop("sleeping_until", None)
+        elif s.state == "sleeping":
+            # Deliberate deep sleep (set_state_mode LOW_POWER_SLEEP): offline,
+            # but announced, so it is not mistaken for a crash.
+            d["lwt_offline"] = True
+            d["sleeping_until"] = time.time() + (s.sleep_s or 0)
         else:
             d["lwt_offline"] = False
             d["last_seen"] = time.time()
+            d.pop("sleeping_until", None)
+        if s.mode:
+            d["mode"] = s.mode
+        self._emit("on_state", d, s.state,
+                   f"sleeping {s.sleep_s}s" if s.state == "sleeping" else "")
 
     # -- durable writer ----------------------------------------------------
     async def _writer_loop(self) -> None:
         BATCH, FLUSH_S = 200, 1.0
         while True:
             try:
-                batch: list[TelemetryIn] = [await self.queue.get()]
+                if self._stopping and self.queue.empty():
+                    return
+                try:
+                    first = await asyncio.wait_for(self.queue.get(), 0.25)
+                except asyncio.TimeoutError:
+                    continue
+                batch: list[TelemetryIn] = [first]
                 deadline = time.monotonic() + FLUSH_S
                 while len(batch) < BATCH and time.monotonic() < deadline:
                     try:
@@ -187,9 +234,11 @@ class FleetRegistry:
                         message=f"{msg} (={v})", value=v, raised_at=now,
                     ))
                     active.add(code)
+                    self._emit("on_alert", d, code, f"{msg} (={v})", sev, v, True)
             elif code in active:
                 await self.store.clear_alert(t.device_id, code, now)
                 active.discard(code)
+                self._emit("on_alert", d, code, msg, sev, v, False)
 
     # -- views -------------------------------------------------------------
     def _health(self, d: dict) -> str:
@@ -218,6 +267,9 @@ class FleetRegistry:
             uptime_s=d.get("uptime_s"), msg_count=d.get("msg_count", 0),
             metrics=d.get("metrics", {}),
             active_alerts=sorted(d.get("alerts", set())),
+            mode=d.get("mode") or _mode_from_metrics(d.get("metrics", {})),
+            sleeping_until=d.get("sleeping_until"),
+            mcp_url=d.get("mcp_url"),
         )
 
     def list_views(self, site=None, group=None, health=None,
@@ -289,13 +341,22 @@ class FleetRegistry:
                 detail = json.loads(detail)
             except json.JSONDecodeError:
                 pass
-        self.cmd_results.append({
+        rec = {
             "received_at": time.time(),
             "device_id": data.get("device_id"),
             "cmd_id": data.get("cmd_id"),
             "ok": data.get("ok"),
             "detail": detail,
-        })
+        }
+        self.cmd_results.append(rec)
+        fut = self._waiters.pop(str(data.get("cmd_id")), None)
+        if fut and not fut.done():
+            fut.set_result(rec)
+        if isinstance(detail, dict) and detail.get("event") == "inference":
+            d = self.devices.get(data.get("device_id") or "", {})
+            self._emit("on_state", d, f"inference:{detail.get('label')}",
+                       f"{detail.get('model')} -> {detail.get('label')} "
+                       f"(confidence {detail.get('confidence')})")
 
     def list_cmd_results(self, device_id: str | None = None, cmd_id: str | None = None,
                          limit: int = 20) -> list[dict[str, Any]]:
@@ -304,13 +365,67 @@ class FleetRegistry:
                and (not cmd_id or r["cmd_id"] == cmd_id)]
         return out[:limit]
 
+    # -- sinks -------------------------------------------------------------
+    def _emit(self, hook: str, *args) -> None:
+        for sink in self.sinks:
+            fn = getattr(sink, hook, None)
+            if fn:
+                try:
+                    fn(*args)
+                except Exception:
+                    log.debug("sink %s.%s failed", type(sink).__name__, hook, exc_info=True)
+
     # -- outbound commands -------------------------------------------------
+    _seq = 0
+
+    def _new_cmd_id(self) -> str:
+        FleetRegistry._seq = (FleetRegistry._seq + 1) % 1000
+        return f"c{int(time.time()*1000)}{FleetRegistry._seq:03d}"
+
+    async def call_device(self, device_id: str, rpc: dict, timeout_s: float) -> dict:
+        """Send one JSON-RPC request to a board's own MCP server over MQTT and
+        wait for its reply. Returns {"ok", "response"|"error", "elapsed_ms"}."""
+        if device_id not in self.devices:
+            return {"ok": False, "error": f"unknown device '{device_id}'"}
+        if not self.command_publisher:
+            return {"ok": False, "error": "MQTT publisher unavailable - device MCP calls need the broker"}
+        d = self.devices[device_id]
+        if d.get("sleeping_until") and d["sleeping_until"] > time.time():
+            return {"ok": False, "error": f"{device_id} is in LOW_POWER_SLEEP for another "
+                                          f"{int(d['sleeping_until'] - time.time())}s"}
+        health = self._health(d)
+        if health == "offline" and (time.time() - (d.get("last_seen") or 0)) > 3 * settings.offline_after_s:
+            # Long gone: say so now instead of making the agent wait out a timeout.
+            return {"ok": False, "error": f"{device_id} is offline (last seen "
+                                          f"{int(time.time() - (d.get('last_seen') or 0))}s ago)"}
+        cmd_id = self._new_cmd_id()
+        fut: asyncio.Future = asyncio.get_running_loop().create_future()
+        self._waiters[cmd_id] = fut
+        t0 = time.monotonic()
+        ok = await self.command_publisher(device_id, "mcp",
+                                          {"action": "mcp", "cmd_id": cmd_id, "rpc": rpc})
+        if not ok:
+            self._waiters.pop(cmd_id, None)
+            return {"ok": False, "error": "broker refused the publish (MQTT down?)"}
+        try:
+            rec = await asyncio.wait_for(fut, timeout_s)
+        except asyncio.TimeoutError:
+            self._waiters.pop(cmd_id, None)
+            health = self._health(d)
+            return {"ok": False, "cmd_id": cmd_id,
+                    "error": f"no reply from {device_id} in {timeout_s:.0f}s (health={health}; "
+                             "fw < 2.0.0 has no on-device MCP)"}
+        resp = rec.get("detail")
+        return {"ok": bool(rec.get("ok")), "cmd_id": cmd_id,
+                "elapsed_ms": round((time.monotonic() - t0) * 1000),
+                "response": resp}
+
     async def send_command(self, device_id: str, action: str, payload: dict) -> dict:
         if device_id not in self.devices and device_id != "broadcast":
             return {"ok": False, "error": f"unknown device '{device_id}'"}
         if not self.command_publisher:
             return {"ok": False, "error": "MQTT publisher unavailable - commands need the broker"}
-        body = {"action": action, "cmd_id": f"c{int(time.time()*1000)}", **payload}
+        body = {"action": action, "cmd_id": self._new_cmd_id(), **payload}
         ok = await self.command_publisher(device_id, action, body)
         await self.store.log_command(device_id, action, json.dumps(body))
         return {"ok": ok, "device_id": device_id, "command": body}

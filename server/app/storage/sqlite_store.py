@@ -24,6 +24,7 @@ from app.storage.dns_mixin import DnsStoreMixin
 SCHEMA = """
 PRAGMA journal_mode=WAL;
 PRAGMA synchronous=NORMAL;
+PRAGMA journal_size_limit=33554432;
 
 CREATE TABLE IF NOT EXISTS devices (
     device_id   TEXT PRIMARY KEY,
@@ -106,6 +107,7 @@ class SQLiteStore(DnsStoreMixin, Store):
         await self.db.executescript(SCHEMA)
         await self.db.executescript(self.DNS_SCHEMA)
         await self.db.commit()
+        await self.checkpoint()          # start every run with a small WAL
 
     async def close(self) -> None:
         if self.db:
@@ -277,7 +279,21 @@ class SQLiteStore(DnsStoreMixin, Store):
         c1 = await self.db.execute("DELETE FROM telemetry WHERE ts < ?", (older_than_s,))
         c2 = await self.db.execute("DELETE FROM telemetry_metric WHERE ts < ?", (older_than_s,))
         await self.db.commit()
+        await self.checkpoint()
         return (c1.rowcount or 0) + (c2.rowcount or 0)
 
     async def commit(self) -> None:
         await self.db.commit()
+
+    async def checkpoint(self) -> dict[str, Any]:
+        """Fold the WAL back into the database and truncate it.
+
+        Found 2026-09-29: data/fleet.db-wal had grown to 150 MB beside a 13 MB
+        database. Passive auto-checkpoints reuse the WAL but never shrink it, so
+        one big prune transaction left it at its high-water mark for good.
+        TRUNCATE (plus journal_size_limit) keeps it bounded."""
+        await self.db.commit()
+        async with self.db.execute("PRAGMA wal_checkpoint(TRUNCATE)") as cur:
+            row = await cur.fetchone()
+        busy, log_pages, ckpt = (tuple(row) + (None, None, None))[:3] if row else (None, None, None)
+        return {"busy": busy, "wal_pages": log_pages, "checkpointed": ckpt}

@@ -117,6 +117,33 @@ aggregates instead of on-the-fly `AVG()`.
 | Dashboard | open on the LAN | behind the Ionity Local Drive auth / reverse proxy |
 | OTA | password only | password + signed images |
 
+## MCP ecosystem
+
+Two MCP tiers, deliberately split (fw 2.0, 2026-09-29):
+
+| Tier | Runs on | Here | Role |
+|---|---|---|---|
+| **Host MCP** (AI orchestrator + device bridge) | workstation / gateway | `server/app/mcp` (FastAPI, JSON-RPC over HTTP + stdio bridge) | Fleet-wide reasoning, history, alerts, commands; `device_call_tool` turns an agent's call into one compact MQTT message to one board. |
+| **On-device MCP** | every ESP32 | `DeviceMcp.ino` | Direct hardware tools: telemetry incl. heap + loop timing, edge inference, actuators, state modes. |
+
+Why the bridge: the board never parses an HTTP/SSE MCP session from the internet, never holds cloud
+credentials, and keeps working for LAN agents when the host is down (`http://<board>/mcp`).
+
+Related projects and where they fit (none are vendored; we implement the protocol ourselves so one
+Arduino sketch runs on S3/C3/classic with a small footprint):
+
+| Project | Fit |
+|---|---|
+| Espressif `esp-iot-solution` `mcp_server` component (ESP-IDF, S3/C6) | The ESP-IDF route for a production FreeRTOS build. Our tool names and JSON shapes are compatible, so the host bridge does not care which firmware answers. |
+| Solnera ESP32-MCPServer (Arduino/PlatformIO) | Same idea as `DeviceMcp.ino` with worker tasks; ours is synchronous in `loop()` and measured (loop_us_*). |
+| Xiaozhi embedded MCP framework | Voice/vision front-end + MCP; a Xiaozhi board can register as another node if it speaks the telemetry schema. |
+| `@midas/esp32-devops-mcp` (npm) | Developer-side build / serial / benchmark MCP for the workstation; complements the fleet host (CI/flashing) rather than replacing it. Our own CI + `firmware/build.py` + the flasher cover builds and flashing. |
+
+## Observability
+
+The host forwards to **Datadog** (metrics, events, service checks) — see [DATADOG.md](DATADOG.md).
+Boards stay dumb about the cloud.
+
 ---
 
 *Governance: Policy 986 AED · © 2018-2026 Antwerp Designs | Ionity (Pty) Ltd*

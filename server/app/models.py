@@ -13,6 +13,9 @@ from pydantic import BaseModel, Field
 class NetInfo(BaseModel):
     ip: str | None = None
     transport: Literal["mqtt", "http", "serial", "sim", "unknown"] = "unknown"
+    server: str | None = None
+    resolved_by: str | None = None
+    mcp: str | None = None            # fw >= 2.0: http://<board>/mcp
 
 
 class TelemetryIn(BaseModel):
@@ -27,6 +30,7 @@ class TelemetryIn(BaseModel):
     metrics: dict[str, float | int | bool | str] = Field(default_factory=dict)
     net: NetInfo = Field(default_factory=NetInfo)
     ts: float | None = None          # server fills if device has no RTC
+    mode: str | None = None          # fw >= 2.0 state mode
 
     def at(self) -> float:
         return self.ts if self.ts else time.time()
@@ -38,7 +42,10 @@ class StatusIn(BaseModel):
     group: str = "default"
     label: str | None = None
     fw: str | None = None
-    state: Literal["online", "offline"] = "online"
+    state: Literal["online", "offline", "sleeping"] = "online"
+    mode: str | None = None
+    sleep_s: int | None = None
+    mcp: bool | None = None
     ip: str | None = None
     uptime_s: int | None = None
     tx_ok: int | None = None
@@ -61,6 +68,9 @@ class DeviceView(BaseModel):
     msg_count: int = 0
     metrics: dict[str, Any] = Field(default_factory=dict)
     active_alerts: list[str] = Field(default_factory=list)
+    mode: str | None = None               # ACTIVE / STANDBY / INFERENCE_ACTIVE / FAILSAFE ...
+    sleeping_until: float | None = None   # set while the board is in LOW_POWER_SLEEP
+    mcp_url: str | None = None            # the board's own MCP endpoint (fw >= 2.0)
 
 
 class Alert(BaseModel):
@@ -75,7 +85,10 @@ class Alert(BaseModel):
 
 
 class CommandIn(BaseModel):
-    action: Literal["reboot", "identify", "ping", "set_meta", "set_display", "dns_probe"]
+    action: Literal["reboot", "identify", "ping", "set_meta", "set_display", "dns_probe",
+                    "set_state_mode"]
+    mode: Literal["STANDBY", "ACTIVE", "INFERENCE_ACTIVE", "LOW_POWER_SLEEP", "FAILSAFE"] | None = None
+    duration_s: int | None = Field(default=None, ge=5, le=86400)
     # dns_probe: ask a resolver (default: Gate^Flame at the node's configured
     # gf_dns, 192.168.124.3 in the lab) for each name; the device reports what
     # came back - an address, 0.0.0.0 (blocked), NXDOMAIN, SERVFAIL or TIMEOUT.

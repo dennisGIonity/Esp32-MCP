@@ -75,6 +75,26 @@ class Settings(BaseSettings):
     dns_timeout_s: float = 3.0
     dns_retention_days: int = 14
 
+    # --- Datadog (fleet host forwards; boards never hold the key) --------
+    dd_enabled: bool = False
+    dd_api_key: str = ""
+    dd_site: str = "datadoghq.com"       # datadoghq.eu, us3/us5.datadoghq.com, ap1.datadoghq.com
+    dd_env: str = "lab"
+    dd_service: str = "ionity-esp32-mcp"
+    dd_metric_prefix: str = "ionity.esp32"
+    dd_tags: str = ""                    # extra comma-separated tags, e.g. "team:iot,region:za"
+    dd_flush_s: float = 15.0
+
+    # --- On-device MCP bridge ---------------------------------------------
+    # device_call_tool waits this long for the board's JSON-RPC reply over MQTT.
+    device_rpc_timeout_s: float = 8.0
+
+    # --- Flasher --------------------------------------------------------------
+    # Images served to the React flasher at /flasher (built by firmware/build.py).
+    firmware_dist: str = str(ROOT / "firmware" / "dist")
+    # The host the flasher tells boards to report to. Empty = this host's LAN IP.
+    public_host: str = ""
+
     # --- Dashboard broadcast ---------------------------------------------
     ws_broadcast_interval_s: float = 2.0
 

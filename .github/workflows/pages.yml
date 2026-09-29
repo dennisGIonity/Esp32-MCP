@@ -1,0 +1,56 @@
+# AEDI - IONITY GLOBAL | Publish the Ionity ESP32 Flasher (GitHub Pages) + release images | Policy 986 AED
+# Settings -> Pages -> Source: GitHub Actions.
+name: flasher-pages
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: arduino/setup-arduino-cli@v2
+      - uses: actions/cache@v4
+        with: { path: ~/.arduino15, key: arduino-esp32-3.3.11-v1 }
+      - name: esp32 core + libraries
+        run: |
+          arduino-cli config init --overwrite
+          arduino-cli config set board_manager.additional_urls https://espressif.github.io/arduino-esp32/package_esp32_index.json
+          arduino-cli core update-index
+          arduino-cli core install esp32:esp32@3.3.11
+          arduino-cli lib install PubSubClient@2.8 ArduinoJson@7.4.3 U8g2@2.36.19
+      - name: Firmware images bundled into the page
+        run: python3 firmware/build.py --copy-to flasher/public/firmware
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm, cache-dependency-path: flasher/package-lock.json }
+      - working-directory: flasher
+        run: npm ci && npm test && npm run build
+      - uses: actions/upload-pages-artifact@v3
+        with: { path: flasher/dist }
+      - name: Attach images to the release (tags only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            firmware/dist/*.bin
+            firmware/dist/manifest.json
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: { name: github-pages, url: "${{ steps.deployment.outputs.page_url }}" }
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

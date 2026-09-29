@@ -9,10 +9,36 @@
 // so this one sketch flashes 1000 devices.
 // ===========================================================================
 
-#include "secrets.h"
+// secrets.h is OPTIONAL since fw 2.0.0. Credentials are provisioned into NVS
+// over USB serial by the Ionity Flasher (flasher/) or `scripts/provision.py`;
+// secrets.h only seeds the very first boot of a hand-built image.
+#if __has_include("secrets.h")
+  #include "secrets.h"
+#endif
+#ifndef WIFI_SSID
+  #define WIFI_SSID         ""
+#endif
+#ifndef WIFI_PASSWORD
+  #define WIFI_PASSWORD     ""
+#endif
+#ifndef MQTT_USERNAME
+  #define MQTT_USERNAME     ""
+#endif
+#ifndef MQTT_PASSWORD
+  #define MQTT_PASSWORD     ""
+#endif
+#ifndef FLEET_TOKEN
+  #define FLEET_TOKEN       "dev-fleet-token-change-me"
+#endif
+#ifndef OTA_PASSWORD
+  #define OTA_PASSWORD      ""          // empty = OTA disabled until provisioned
+#endif
+#ifndef MCP_TOKEN
+  #define MCP_TOKEN         ""          // empty = on-device MCP is read-only over HTTP
+#endif
 
 // --- Firmware identity -----------------------------------------------------
-#define FW_VERSION            "1.2.0"   // 1.2.0: dns_probe against Gate^Flame; 1.1.0: OLED auto-detect + set_display
+#define FW_VERSION            "2.0.0"   // 2.0.0: NVS/serial provisioning, on-device MCP server, edge inference, actuators, state modes; 1.2.0: dns_probe against Gate^Flame; 1.1.0: OLED auto-detect + set_display
 // Gate^Flame box the dns_probe command asks by default (lab Pi, eth0). Overridable
 // per unit without reflashing: the command's "dns_server" field, or NVS key "gf_dns".
 #define GF_DNS_DEFAULT        "192.168.124.3"
@@ -96,6 +122,42 @@
 // --- OTA -------------------------------------------------------------------
 #define OTA_ENABLED           1
 #define OTA_HOSTNAME_PREFIX   "ionity-esp32-"
+
+// --- On-device MCP server (JSON-RPC 2.0 over HTTP, and over MQTT) ---------
+#define MCP_HTTP_PORT         80
+#define MCP_HTTP_PATH         "/mcp"
+#define MCP_SERVER_NAME       "ionity-esp32-node"
+
+// --- Serial provisioning (Ionity Flasher) ------------------------------------
+// Host sends one JSON object per line: {"ionity":"prov","op":"get"}
+// Device answers one line:            IONITY-PROV {"ok":true,...}
+#define PROV_PREFIX           "IONITY-PROV "
+#define PROV_LINE_MAX         768
+// Boot with no WiFi configured -> stay here waiting for the flasher
+#define PROV_WAIT_LOG_MS      5000
+
+// --- State modes --------------------------------------------------------------
+#define STANDBY_TELEMETRY_MS  60000
+#define FAST_SAMPLE_MS        250     // RSSI / analog rings for edge inference
+#define RING_LEN              64
+#define DEFAULT_SLEEP_S       300
+
+// --- Actuators (LEDC PWM; attached on first use only) -------------------------
+#define PWM_FREQ_HZ           5000
+#define PWM_RES_BITS          10
+#if defined(CONFIG_IDF_TARGET_ESP32C3)
+  #define PIN_PWM0_DEFAULT    4
+  #define PIN_PWM1_DEFAULT    5
+  #define PIN_RELAY0_DEFAULT  10
+#elif defined(CONFIG_IDF_TARGET_ESP32S3) || defined(CONFIG_IDF_TARGET_ESP32S2)
+  #define PIN_PWM0_DEFAULT    5
+  #define PIN_PWM1_DEFAULT    6
+  #define PIN_RELAY0_DEFAULT  7
+#else
+  #define PIN_PWM0_DEFAULT    25
+  #define PIN_PWM1_DEFAULT    26
+  #define PIN_RELAY0_DEFAULT  27
+#endif
 
 // --- Serial ----------------------------------------------------------------
 #define SERIAL_BAUD           115200

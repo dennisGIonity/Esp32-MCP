@@ -23,6 +23,7 @@ from app.ingest.dns_resolver import DnsService
 from app.ingest.discovery import DiscoveryService, primary_lan_ip
 from app.mcp.server import FleetMCPServer
 from app.api.routes import router, ws_clients
+from app.integrations.datadog import DatadogForwarder
 
 logging.basicConfig(
     level=logging.INFO,
@@ -31,6 +32,7 @@ logging.basicConfig(
 log = logging.getLogger("ionity.main")
 
 DASHBOARD_DIR = ROOT / "dashboard"
+FLASHER_DIR = ROOT / "flasher" / "dist"
 
 
 async def broadcaster(app: FastAPI) -> None:
@@ -82,7 +84,16 @@ async def lifespan(app: FastAPI):
     await discovery.start()
     app.state.discovery = discovery
 
-    app.state.mcp = FleetMCPServer(registry, store, dns=app.state.dns)
+    datadog = DatadogForwarder(settings, registry)
+    await datadog.start()
+    registry.sinks.append(datadog)
+    app.state.datadog = datadog
+    app.state.integrations = {"datadog": datadog}
+    if app.state.mqtt:
+        app.state.integrations["mqtt"] = app.state.mqtt
+
+    app.state.mcp = FleetMCPServer(registry, store, dns=app.state.dns,
+                                   integrations=app.state.integrations)
 
     bcast = asyncio.create_task(broadcaster(app))
 
@@ -91,6 +102,10 @@ async def lifespan(app: FastAPI):
     log.info(" HTTP      http://%s:%s", settings.host, settings.port)
     log.info(" Dashboard http://%s:%s/", settings.host, settings.port)
     log.info(" MCP RPC   http://%s:%s/api/v1/mcp/rpc", settings.host, settings.port)
+    log.info(" Flasher   http://%s:%s/flasher/  (%s)", settings.host, settings.port,
+             "built" if FLASHER_DIR.exists() else "not built: cd flasher && npm run build")
+    log.info(" Datadog   %s", f"-> api.{settings.dd_site} env={settings.dd_env}"
+             if datadog.enabled else "off (IONITY_DD_ENABLED / IONITY_DD_API_KEY)")
     log.info(" MQTT      %s:%s (enabled=%s)", settings.mqtt_host,
              settings.mqtt_port, settings.mqtt_enabled)
     log.info(" Storage   %s -> %s", settings.storage_driver, settings.sqlite_path)
@@ -112,6 +127,7 @@ async def lifespan(app: FastAPI):
     yield
 
     bcast.cancel()
+    await datadog.stop()
     await discovery.stop()
     if app.state.dns:
         await app.state.dns.stop()
@@ -128,7 +144,7 @@ app = FastAPI(
         "Telemetry ingest, fleet registry, alerting and Model Context Protocol "
         "gateway for 1000+ ESP32 edge nodes. Policy 986 AED."
     ),
-    version="1.0.0",
+    version="2.0.0",
     lifespan=lifespan,
 )
 
@@ -147,7 +163,8 @@ async def dashboard_no_cache(request, call_next):
     """Browsers must revalidate the dashboard, or they keep showing an old UI
     after an update (cheap: unchanged files come back as 304)."""
     response = await call_next(request)
-    if request.url.path == "/" or request.url.path.startswith("/static/"):
+    p = request.url.path
+    if p == "/" or p.startswith("/static/") or p == "/flasher/" or p == "/flasher/index.html":
         response.headers["Cache-Control"] = "no-cache"
     return response
 
@@ -158,3 +175,9 @@ if DASHBOARD_DIR.exists():
     @app.get("/", include_in_schema=False)
     async def dashboard_index():
         return FileResponse(str(DASHBOARD_DIR / "index.html"))
+
+
+if FLASHER_DIR.exists():
+    # The React flasher (flasher/, `npm run build`). Web Serial works on
+    # http://localhost, so the lab needs no certificate for it.
+    app.mount("/flasher", StaticFiles(directory=str(FLASHER_DIR), html=True), name="flasher")

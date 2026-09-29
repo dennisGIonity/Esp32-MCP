@@ -15,6 +15,14 @@ AEDI - IONITY GLOBAL | DOC-2026-09-ESP32MCP-006 | v1.0.0 | Policy 986 AED
 - Fleet simulator to 1000+ devices
 - Docker compose stack (Mosquitto + server)
 
+## Phase 0.5 — shipped (v2.0.0, 2026-09-29)
+
+- Web flasher (React, esptool-js, Web Serial) with NVS provisioning over USB — no recompile per network
+- On-device MCP server on every board (HTTP + MQTT), bridged by the host's `device_call_tool`
+- Edge inference (z-score anomaly, RSSI motion, threshold), actuators, state modes incl. FAILSAFE / deep sleep
+- Datadog forwarder (metrics, events, service checks)
+- CI: server, sentinel, flasher, firmware matrix; GitHub Pages flasher + release images
+
 ## Phase 1 — harden before deployment
 
 | Item | Why |
@@ -23,7 +31,8 @@ AEDI - IONITY GLOBAL | DOC-2026-09-ESP32MCP-006 | v1.0.0 | Policy 986 AED
 | `IONITY_REQUIRE_TOKEN=true` end to end | Unauthenticated ingest is a fleet-spoofing hole |
 | Dashboard behind Ionity Local Drive auth | Currently open on the LAN |
 | Signed OTA images | Password-only OTA lets anyone on the LAN push firmware |
-| `pytest` coverage on registry + storage + MCP dispatch | Only smoke tests today |
+| TFLite Micro / ESP-DL model slot in `run_inference` | The three built-in models are statistical |
+| Signed images in the flasher manifest | sha256 today proves integrity, not origin |
 | Windows service wrapper (NSSM) for the server | Must survive a reboot of 192.168.0.3 |
 
 ## Phase 2 — scale

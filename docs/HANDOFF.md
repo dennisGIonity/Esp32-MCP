@@ -50,3 +50,25 @@ Policy 986 AED | (c) 2018-2026 Antwerp Designs | Ionity (Pty) Ltd | www.ionity.t
 - **Tests**: 5 -> 23 server tests (MCP contract, HTTP transport, bridge offline, Pi agent) + 13 sentinel tests, all passing.
 - Not verifiable on this PC: PlatformIO pioarduino build (Smart App Control blocks its Python helpers). Arduino CLI builds verified.
 - Heads-up: drive C: has 52 GB free of 953 GB (5.5%).
+
+## 2026-09-29: revamp/v2 - flasher, on-device MCP, Datadog, MCP host fixes
+- **Why boards were offline:** laptop on WiFi 192.168.0.2, H3C Ethernet without DHCP, no board on USB, and
+  `.env` pinned `IONITY_MDNS_ADVERTISE_IP=192.168.124.4` (H3C NIC, not present) -> mDNS sent every board to
+  an address nothing could reach. The host now falls back to the routed LAN IP and logs why.
+- **WAL bug:** `data/fleet.db-wal` was 150 MB beside a 13 MB DB. `journal_size_limit` + `wal_checkpoint(TRUNCATE)`
+  at start and after each prune; now 0 bytes after restart.
+- **Hung shutdown/tests:** cancelling the writer mid-aiosqlite-query deadlocked close(); the writer now drains.
+- **fw 2.0.0:** NVS + serial provisioning (ionity-prov/1), on-device MCP (HTTP :80/mcp + MQTT), edge inference,
+  actuators, state modes. All 4 images compile (S3 uart/usb 62 %, classic 63 %, C3 68 %). Not yet flashed to
+  hardware - no board was on USB.
+- **Flasher** at `/flasher/` (React, esptool-js 0.7). **Datadog** forwarder off until `IONITY_DD_API_KEY` is set.
+- **MCP host 2.0.0:** `device_list_tools`, `device_call_tool`, `integrations_status`, `set_state_mode`.
+  Verified live: host -> broker -> `scripts/device_emulator.py` -> reply in 3-4 ms, FAILSAFE lock honoured.
+- Independent code review (no hardware) fixed before commit: WiFi never started inside setup's 20 s
+  wait (retry timer), serial RX buffer set after begin() (ignored in core 3.x), MQTT retries starving
+  the loop on HTTP fallback, full I2C scan toggling actuator pins at boot, scan during connect; flasher:
+  handshake spin, read loop dying on break/framing errors, native-USB re-enumeration needing a new click,
+  close() racing the reader lock.
+- Tests: 36 server (was 23) + 10 flasher. CI + Pages workflows added.
+- Next: plug a board in, open http://localhost:8099/flasher/, Flash & provision; set `IONITY_DD_API_KEY`;
+  fix `.env` (`IONITY_MDNS_ADVERTISE_IP`, `IONITY_DNS_BIND`) for whichever network the lab is on.

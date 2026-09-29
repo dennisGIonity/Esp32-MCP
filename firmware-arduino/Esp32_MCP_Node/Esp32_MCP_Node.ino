@@ -1,39 +1,49 @@
 // ===========================================================================
 // AEDI - IONITY GLOBAL | ESP32-MCP Fleet Node  (Arduino IDE sketch)
-// Doc ID: DOC-2026-09-ESP32MCP-FW | Version 1.0.0 | Policy 986 AED
+// Doc ID: DOC-2026-09-ESP32MCP-FW | Version 2.0.0 | Policy 986 AED
 // (c) 2018-2026 Antwerp Designs | Ionity (Pty) Ltd - All Rights Reserved
 // ---------------------------------------------------------------------------
-// ONE SKETCH, MANY DEVICES.
-//   * device_id from eFuse MAC        -> no per-unit edits
-//   * site/group/label from NVS       -> provision without reflashing
-//   * MQTT primary, HTTP POST fallback-> survives a broker outage
-//   * retained status + Last Will     -> server sees offline in ~90s
-//   * offline ring buffer             -> no data loss across short dropouts
+// ONE IMAGE, ANY NETWORK, MANY DEVICES.
+//   * device_id from eFuse MAC          -> no per-unit edits
+//   * WiFi + MCP host + tokens in NVS   -> written over USB by the Ionity
+//                                          Flasher; no recompile per network
+//   * MQTT primary, HTTP POST fallback  -> survives a broker outage
+//   * retained status + Last Will       -> server sees offline in ~90s
+//   * offline ring buffer               -> no data loss across short dropouts
+//   * on-device MCP server              -> tools/list + tools/call over HTTP
+//                                          (:80/mcp) and over MQTT ("mcp" cmd)
+//   * edge inference, actuators, state modes (STANDBY / ACTIVE /
+//     INFERENCE_ACTIVE / LOW_POWER_SLEEP / FAILSAFE)
 //
-// Board:    Tools > Board > esp32 > (ESP32S3 Dev Module | ESP32 Dev Module | ...)
-// Requires: PubSubClient, ArduinoJson (Library Manager)
+// Tabs: Provision (NVS + serial protocol), DeviceMcp (MCP server),
+//       EdgeAI (inference), Actuators, Oled.
+// Requires: PubSubClient, ArduinoJson 7, U8g2 (Library Manager)
 // ===========================================================================
 
 #include <Arduino.h>
 #include <WiFi.h>
 #include <HTTPClient.h>
+#include <WebServer.h>
 #include <PubSubClient.h>
 #include <ArduinoJson.h>
 #include <Preferences.h>
 #include <ESPmDNS.h>
 #include <ArduinoOTA.h>
 #include <esp_system.h>
+#include <esp_sleep.h>
 #if __has_include(<esp_mac.h>)
   #include <esp_mac.h>
 #endif
 
 #include "config.h"
+#include "NodeState.h"
 
 // ---------------------------------------------------------------------------
-// Runtime identity (resolved once at boot)
+// Runtime identity + configuration (resolved once at boot)
 // ---------------------------------------------------------------------------
 String gDeviceId, gSite, gGroup, gLabel;
 String tTelemetry, tStatus, tEvent, tCmd, tCmdResult;
+NodeConfig gCfg;
 
 // Resolved server address + how we found it (reported in telemetry so a
 // misrouted fleet is visible on the dashboard rather than silently dead).
@@ -45,25 +55,17 @@ uint8_t gConsecutiveFails = 0;
 bool gUseHeartbeatLed = true;
 bool gUseAlertLed     = true;
 bool gUseDigitalSense = true;
+int8_t gOledSda = -1, gOledScl = -1;   // set by oledDetect() (Oled tab)
 
-Preferences prefs;
-WiFiClient  netClient;
+Preferences  prefs;
+WiFiClient   netClient;
 PubSubClient mqtt(netClient);
+WebServer    mcpHttp(MCP_HTTP_PORT);
+bool         gMcpHttpUp = false;
 
 // ---------------------------------------------------------------------------
 // Sample + fleet state
 // ---------------------------------------------------------------------------
-struct Sample {
-  uint32_t ts_ms;
-  float    temp_c;
-  float    analog_v;
-  bool     digital_state;
-  float    rssi_dbm;
-  float    latency_ms;
-  float    packet_loss_pct;
-  uint32_t free_heap;
-};
-
 Sample  gLatest;
 Sample  gBuffer[OFFLINE_BUFFER_SLOTS];
 uint8_t gBufCount = 0;
@@ -73,7 +75,24 @@ bool     gUseHttp   = false;
 uint32_t gTxOk = 0, gTxFail = 0;
 
 unsigned long lastSample = 0, lastTelemetry = 0, lastStatus = 0;
-unsigned long lastWifiTry = 0, lastMqttTry = 0, lastProbe = 0;
+unsigned long lastWifiTry = 0, lastMqttTry = 0, lastProbe = 0, lastFast = 0;
+bool gWifiKick = true;          // next ensureWifi() tries immediately (boot, new credentials)
+
+// State mode + edge inference (EdgeAI / DeviceMcp tabs)
+StateMode gMode = MODE_ACTIVE;
+Ring      gRingAnalog, gRingRssi;
+Inference gLastInference;
+uint32_t  gInferenceRuns = 0;
+String    gInfModel = "anomaly_zscore";   // model INFERENCE_ACTIVE runs
+
+// Actuator state (Actuators tab). -1 = never driven.
+float gAct[5] = {-1, -1, -1, -1, -1};     // led, alert_led, pwm0, pwm1, relay0
+int8_t gPinPwm0 = PIN_PWM0_DEFAULT, gPinPwm1 = PIN_PWM1_DEFAULT, gPinRelay0 = PIN_RELAY0_DEFAULT;
+
+// Loop timing - read_telemetry reports it so an agent can see a blocked loop.
+uint32_t gLoopUsAvg = 0, gLoopUsMax = 0, gLoopCount = 0;
+uint32_t gMcpCalls = 0;
+extern uint32_t gPendingSleepS;
 
 void logln(const String &m) { Serial.println(String(LOG_PREFIX) + m); }
 
@@ -126,9 +145,26 @@ void loadIdentity() {
 // moves rather than needing 1000 boards reflashed.
 // ---------------------------------------------------------------------------
 void resolveServer() {
-  prefs.begin("ionity", true);
-  String pinned = prefs.getString("server_ip", "");
-  prefs.end();
+  // 1. host written by the flasher ("server"), 2. legacy "server_ip" pin
+  String pinned = gCfg.server;
+  if (pinned.length() == 0) {
+    prefs.begin("ionity", true);
+    pinned = prefs.getString("server_ip", "");
+    prefs.end();
+  }
+  if (pinned.endsWith(".local")) {                // a name, not an address
+    if (WiFi.status() == WL_CONNECTED) {
+      String h = pinned.substring(0, pinned.length() - 6);
+      IPAddress ip = MDNS.queryHost(h.c_str(), 3000);
+      if (ip != IPAddress((uint32_t)0)) { gServerHost = ip.toString(); gServerVia = "mdns"; return; }
+    }
+    pinned = "";
+  } else if (pinned.length() > 0 && !IPAddress().fromString(pinned)) {
+    IPAddress ip;                                 // plain DNS name
+    if (WiFi.status() == WL_CONNECTED && WiFi.hostByName(pinned.c_str(), ip)) {
+      gServerHost = ip.toString(); gServerVia = "dns"; return;
+    }
+  }
   if (pinned.length() > 0) {
     gServerHost = pinned;
     gServerVia  = "nvs";
@@ -205,6 +241,16 @@ String buildTelemetryJson(const Sample &s) {
   if (!isnan(s.rssi_dbm))        m["rssi_dbm"]        = s.rssi_dbm;
   m["oled"]            = oledPresent() ? 1 : 0;
   m["free_heap_bytes"] = s.free_heap;
+  m["min_free_heap_bytes"] = ESP.getMinFreeHeap();
+  m["loop_us_avg"]     = gLoopUsAvg;
+  m["loop_us_max"]     = gLoopUsMax;
+  m["state_mode"]      = (int)gMode;
+  if (gMode == MODE_INFERENCE_ACTIVE && gLastInference.ok) {
+    m["inf_confidence"] = round(gLastInference.confidence * 1000) / 1000.0;
+    m["inf_score"]      = round(gLastInference.score * 1000) / 1000.0;
+    m["inf_positive"]   = (gLastInference.label == "anomaly" || gLastInference.label == "motion" ||
+                           gLastInference.label == "above") ? 1 : 0;
+  }
   if (!isnan(s.latency_ms))      m["latency_ms"]      = round(s.latency_ms * 10) / 10.0;
   if (!isnan(s.packet_loss_pct)) m["packet_loss_pct"] = s.packet_loss_pct;
 
@@ -213,6 +259,8 @@ String buildTelemetryJson(const Sample &s) {
   n["transport"]   = gUseHttp ? "http" : "mqtt";
   n["server"]      = gServerHost;   // makes a misrouted fleet visible,
   n["resolved_by"] = gServerVia;    // instead of silently dead
+  n["mcp"]         = gMcpHttpUp ? ("http://" + WiFi.localIP().toString() + MCP_HTTP_PATH) : "";
+  doc["mode"]      = modeName(gMode);
 
   String out;
   serializeJson(doc, out);
@@ -233,6 +281,8 @@ String buildStatusJson(const char *state) {
   doc["tx_fail"]   = gTxFail;
   doc["transport"] = gUseHttp ? "http" : "mqtt";
   doc["oled"]      = oledNote();
+  doc["mode"]      = modeName(gMode);
+  doc["mcp"]       = gMcpHttpUp;
   String out;
   serializeJson(doc, out);
   return out;
@@ -347,7 +397,7 @@ void onMqttMessage(char *topic, byte *payload, unsigned int len) {
     // "auto" clears pinned pins so the next boot scans again.
     prefs.begin("ionity", false);
     String drv = doc["driver"] | "";
-    if (drv == "auto") { prefs.remove("oled_sda"); prefs.remove("oled_scl"); prefs.putString("oled_drv", "ssd1306"); }
+    if (drv == "auto") { prefs.remove("oled_sda"); prefs.remove("oled_scl"); prefs.remove("oled_none"); prefs.putString("oled_drv", "ssd1306"); }
     else if (drv.length()) prefs.putString("oled_drv", drv);
     if (doc["sda"].is<int>() && doc["scl"].is<int>()) {
       prefs.putInt("oled_sda", doc["sda"].as<int>());
@@ -364,6 +414,25 @@ void onMqttMessage(char *topic, byte *payload, unsigned int len) {
     publishCmdResult(cmdId, true, "metadata stored; rebooting to re-topic");
     delay(250);
     ESP.restart();
+  } else if (action == "mcp") {
+    // {"action":"mcp","cmd_id":"..","rpc":{"jsonrpc":"2.0","id":1,"method":"tools/call",...}}
+    // The fleet host bridges an AI agent's call to this board's own MCP tools.
+    // MQTT is trusted (the host enforces its admin token), so write tools are allowed.
+    JsonDocument resp;
+    mcpDispatch(doc["rpc"].as<JsonObject>(), resp, true);
+    String out; serializeJson(resp, out);
+    publishCmdResult(cmdId, !resp["error"].is<JsonObject>(), out);
+  } else if (action == "set_state_mode") {
+    String mode = doc["mode"] | "";
+    String upper = mode; upper.toUpperCase();
+    if (upper == "LOW_POWER_SLEEP") {           // reply first, then sleep from loop()
+      publishCmdResult(cmdId, true, "entering LOW_POWER_SLEEP");
+      gPendingSleepS = doc["duration_s"] | DEFAULT_SLEEP_S;
+      return;
+    }
+    String err;
+    bool ok = applyStateMode(mode, 0, err, cmdId);
+    publishCmdResult(cmdId, ok, ok ? String("mode ") + modeName(gMode) : err);
   } else if (action == "ping") {
     publishCmdResult(cmdId, true, "pong");
   } else if (action == "dns_probe") {
@@ -409,30 +478,35 @@ void onMqttMessage(char *topic, byte *payload, unsigned int len) {
 // ---------------------------------------------------------------------------
 void ensureWifi() {
   if (WiFi.status() == WL_CONNECTED) return;
-  if (millis() - lastWifiTry < WIFI_RETRY_MS) return;
+  if (!gWifiKick && millis() - lastWifiTry < WIFI_RETRY_MS) return;
+  gWifiKick = false;
   lastWifiTry = millis();
 
-  logln("WiFi connecting to \"" WIFI_SSID "\" ...");
+  if (gCfg.wifiSsid.length() == 0) return;          // not provisioned yet
+  logln("WiFi connecting to \"" + gCfg.wifiSsid + "\" ...");
   WiFi.mode(WIFI_STA);
   WiFi.setHostname((String(OTA_HOSTNAME_PREFIX) + macSuffix()).c_str());
   WiFi.setAutoReconnect(true);
-  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  WiFi.begin(gCfg.wifiSsid.c_str(), gCfg.wifiPass.c_str());
 }
 
 bool ensureMqtt() {
   if (mqtt.connected()) { gMqttFails = 0; gUseHttp = false; return true; }
+  if (gCfg.role == "standalone") return false;       // MCP-only board, no host
   if (WiFi.status() != WL_CONNECTED) return false;
-  if (millis() - lastMqttTry < MQTT_RETRY_MS) return false;
+  // On the HTTP fallback, probe the broker only once a minute: each failed
+  // connect() blocks ~3 s, which would starve serial provisioning and /mcp.
+  if (millis() - lastMqttTry < (gUseHttp ? 60000UL : (unsigned long)MQTT_RETRY_MS)) return false;
   lastMqttTry = millis();
 
-  mqtt.setServer(gServerHost.c_str(), MQTT_PORT);
+  mqtt.setServer(gServerHost.c_str(), gCfg.mqttPort);
   mqtt.setKeepAlive(MQTT_KEEPALIVE_S);
-  mqtt.setBufferSize(2048);   // a 12-name dns_probe reply is ~1.2 KB once escaped
+  mqtt.setBufferSize(4096);   // tools/list via MQTT is ~2.5 KB once escaped
   mqtt.setCallback(onMqttMessage);
 
   String willPayload = buildStatusJson("offline");
-  bool ok = (strlen(MQTT_USERNAME) > 0)
-    ? mqtt.connect(gDeviceId.c_str(), MQTT_USERNAME, MQTT_PASSWORD,
+  bool ok = (gCfg.mqttUser.length() > 0)
+    ? mqtt.connect(gDeviceId.c_str(), gCfg.mqttUser.c_str(), gCfg.mqttPass.c_str(),
                    tStatus.c_str(), 1, true, willPayload.c_str())
     : mqtt.connect(gDeviceId.c_str(), NULL, NULL,
                    tStatus.c_str(), 1, true, willPayload.c_str());
@@ -463,12 +537,13 @@ bool ensureMqtt() {
 bool sendHttp(const String &json) {
   if (WiFi.status() != WL_CONNECTED) return false;
   HTTPClient http;
-  String url = "http://" + gServerHost + ":" + String(SERVER_HTTP_PORT) + HTTP_INGEST_PATH;
+  if (gCfg.role == "standalone") return false;
+  String url = "http://" + gServerHost + ":" + String(gCfg.httpPort) + HTTP_INGEST_PATH;
   http.setConnectTimeout(4000);
   http.setTimeout(6000);
   http.begin(url);
   http.addHeader("Content-Type", "application/json");
-  http.addHeader("X-Fleet-Token", FLEET_TOKEN);
+  http.addHeader("X-Fleet-Token", gCfg.fleetToken);
   int code = http.POST(json);
   if (code <= 0) logln("HTTP error: " + http.errorToString(code));
   else if (code >= 300) logln("HTTP " + String(code) + ": " + http.getString().substring(0, 120));
@@ -544,7 +619,8 @@ void pushTelemetry() {
 #if OTA_ENABLED
 void setupOta() {
   ArduinoOTA.setHostname((String(OTA_HOSTNAME_PREFIX) + macSuffix()).c_str());
-  ArduinoOTA.setPassword(OTA_PASSWORD);
+  if (gCfg.otaPass.length() == 0) { logln("OTA off (no ota_pass provisioned)"); return; }
+  ArduinoOTA.setPassword(gCfg.otaPass.c_str());
   ArduinoOTA.onStart([]() { logln("OTA start"); });
   ArduinoOTA.onEnd([]()   { logln("OTA done"); });
   ArduinoOTA.onError([](ota_error_t e) { logln("OTA error " + String(e)); });
@@ -556,7 +632,27 @@ void setupOta() {
 // ---------------------------------------------------------------------------
 // Setup / loop
 // ---------------------------------------------------------------------------
+bool gNetInit = false, gWasUp = false;
+
+void onWifiUp() {
+  gWasUp = true;
+  logln("WiFi OK   ip=" + WiFi.localIP().toString() +
+        "  gw=" + WiFi.gatewayIP().toString() +
+        "  rssi=" + String(WiFi.RSSI()) + "dBm");
+  if (!gNetInit) {                 // once per boot; WiFi can drop and return
+    gNetInit = true;
+    MDNS.begin((String(OTA_HOSTNAME_PREFIX) + macSuffix()).c_str());
+    MDNS.addService("ionity-mcp", "tcp", MCP_HTTP_PORT);
+#if OTA_ENABLED
+    setupOta();
+#endif
+    mcpHttpBegin();
+  }
+  resolveServer();
+}
+
 void setup() {
+  Serial.setRxBufferSize(1024);    // before begin(): core 3.x ignores it afterwards
   Serial.begin(SERIAL_BAUD);
   delay(1200);                      // let native-USB CDC enumerate
   Serial.println();
@@ -566,70 +662,94 @@ void setup() {
   logln(" Policy 986 AED | Building Tomorrow, Today.");
   logln("=========================================================");
 
-  // The probe metrics are only produced by the PlatformIO build. Mark them
-  // NaN up front so a zero-initialised struct never reports a fabricated
-  // "0 ms latency / 0% loss" that looks like a genuine measurement.
   gLatest.latency_ms      = NAN;
   gLatest.packet_loss_pct = NAN;
   gLatest.rssi_dbm        = NAN;
 
   loadIdentity();
+  loadConfig();                     // Provision tab: NVS, seeded once from secrets.h
+  loadStateMode();                  // EdgeAI tab: FAILSAFE survives a reboot
+  loadActuatorPins();
 
-  // Find the display BEFORE claiming LED/sensor pins: if it shares one of
-  // them, oledDetect() switches that LED/sensor off so the bus isn't fought over.
   oledDetect();
   if (gUseHeartbeatLed) { pinMode(PIN_LED_HEARTBEAT, OUTPUT); digitalWrite(PIN_LED_HEARTBEAT, LOW); }
   if (gUseAlertLed)     { pinMode(PIN_LED_ALERT, OUTPUT);     digitalWrite(PIN_LED_ALERT, LOW); }
   if (gUseDigitalSense) pinMode(PIN_DIGITAL_SENSE, INPUT_PULLUP);
 
-  ensureWifi();
+  provAnnounce();                   // "IONITY-PROV {hello}" - the flasher waits for this
 
+  if (gCfg.wifiSsid.length() == 0) {
+    // Unprovisioned: stay reachable on serial until the flasher writes WiFi.
+    logln("NOT PROVISIONED - waiting for WiFi + MCP host over USB serial");
+    unsigned long lastLog = millis();
+    while (gCfg.wifiSsid.length() == 0) {
+      provPoll();
+      if (millis() - lastLog > PROV_WAIT_LOG_MS) { lastLog = millis(); provAnnounce(); }
+      if (gUseHeartbeatLed) digitalWrite(PIN_LED_HEARTBEAT, (millis() / 500) % 2);
+      delay(20);
+    }
+  }
+
+  ensureWifi();
   unsigned long t0 = millis();
   while (WiFi.status() != WL_CONNECTED && millis() - t0 < 20000) {
-    delay(250);
-    Serial.print(".");
-    if (gUseHeartbeatLed) digitalWrite(PIN_LED_HEARTBEAT, !digitalRead(PIN_LED_HEARTBEAT));
+    provPoll();                     // the flasher can fix a wrong password here
+    ensureWifi();                   // retries, and picks up credentials the flasher just wrote
+    delay(50);
+    if (gUseHeartbeatLed) digitalWrite(PIN_LED_HEARTBEAT, (millis() / 250) % 2);
   }
-  Serial.println();
   if (gUseHeartbeatLed) digitalWrite(PIN_LED_HEARTBEAT, LOW);
 
   if (WiFi.status() == WL_CONNECTED) {
-    logln("WiFi OK   ip=" + WiFi.localIP().toString() +
-          "  gw=" + WiFi.gatewayIP().toString() +
-          "  rssi=" + String(WiFi.RSSI()) + "dBm");
-    // mDNS responder must be up before we can query for the server.
-    MDNS.begin((String(OTA_HOSTNAME_PREFIX) + macSuffix()).c_str());
-#if OTA_ENABLED
-    setupOta();
-#endif
+    onWifiUp();
   } else {
-    logln("WiFi FAILED - check SSID/password in secrets.h. Buffering locally.");
+    logln("WiFi FAILED for \"" + gCfg.wifiSsid + "\" - re-provision with the flasher. Buffering locally.");
     if (gUseAlertLed) digitalWrite(PIN_LED_ALERT, HIGH);
+    resolveServer();
   }
 
-  resolveServer();
   ensureMqtt();
   sampleSensors();
-  logln("Boot complete. Reporting to " + gServerHost + ":" + String(SERVER_HTTP_PORT) +
-        " (via " + gServerVia + ") every " + String(TELEMETRY_INTERVAL_MS / 1000) + "s.");
+  logln("Boot complete. mode=" + String(modeName(gMode)) + "  host " + gServerHost + " (via " +
+        gServerVia + ")  role=" + gCfg.role);
 }
 
 void loop() {
+  uint32_t t0 = micros();
   unsigned long now = millis();
 
+  provPoll();
+
   ensureWifi();
+  bool up = (WiFi.status() == WL_CONNECTED);
+  if (up && !gWasUp) onWifiUp();                    // (re)joined after boot
+  if (!up) gWasUp = false;
+
   ensureMqtt();
   if (mqtt.connected()) mqtt.loop();
+  if (gMcpHttpUp) mcpHttp.handleClient();
+  mcpAfterReply();
 #if OTA_ENABLED
   ArduinoOTA.handle();
 #endif
 
-  if (now - lastSample >= SENSOR_SAMPLE_MS) { lastSample = now; sampleSensors(); }
+  if (now - lastFast >= FAST_SAMPLE_MS) {
+    lastFast = now;
+    gRingAnalog.push((analogRead(PIN_ANALOG_SENSE) / 4095.0f) * 3.3f);
+    if (up) gRingRssi.push((float)WiFi.RSSI());
+  }
+  if (now - lastSample >= SENSOR_SAMPLE_MS) {
+    lastSample = now;
+    sampleSensors();
+    if (gMode == MODE_INFERENCE_ACTIVE) edgeTick();
+  }
   oledUpdate();
 
-  if (now - lastTelemetry >= TELEMETRY_INTERVAL_MS) {
+  uint32_t every = (gMode == MODE_STANDBY) ? STANDBY_TELEMETRY_MS : TELEMETRY_INTERVAL_MS;
+  if (now - lastTelemetry >= every) {
     lastTelemetry = now;
     pushTelemetry();
+    gLoopUsMax = 0;                                 // window max per report
   }
 
   if (now - lastStatus >= HEARTBEAT_STATUS_MS) {
@@ -638,5 +758,8 @@ void loop() {
       mqtt.publish(tStatus.c_str(), buildStatusJson("online").c_str(), true);
   }
 
-  delay(10);
+  uint32_t dt = micros() - t0;
+  gLoopUsAvg = gLoopCount++ ? (gLoopUsAvg * 15 + dt) / 16 : dt;
+  if (dt > gLoopUsMax) gLoopUsMax = dt;
+  delay(gMode == MODE_STANDBY ? 40 : 10);
 }

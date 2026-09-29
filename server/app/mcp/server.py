@@ -25,7 +25,7 @@ PROTOCOL_VERSION = protocol.LATEST_VERSION
 SERVER_NAME = protocol.SERVER_NAME
 SERVER_VERSION = protocol.SERVER_VERSION
 
-UNAUTHORIZED = ("send_command needs the admin token: set IONITY_ADMIN_TOKEN for the MCP "
+UNAUTHORIZED = ("This call changes a device and needs the admin token: set IONITY_ADMIN_TOKEN for the MCP "
                 "bridge, or send 'Authorization: Bearer <token>' over HTTP.")
 
 PROMPTS = [
@@ -66,10 +66,11 @@ def _err(msg_id, code, message):
 
 
 class FleetMCPServer:
-    def __init__(self, registry, store, dns=None):
+    def __init__(self, registry, store, dns=None, integrations=None):
         self.registry = registry
         self.store = store
         self.dns = dns
+        self.integrations = integrations or {}
 
     async def handle(self, req: dict[str, Any], authorized: bool = True) -> dict[str, Any] | None:
         """`authorized` is False only when an admin token is configured and the
@@ -101,12 +102,13 @@ class FleetMCPServer:
         if method == "tools/call":
             name = params.get("name")
             args = params.get("arguments") or {}
-            if name in mcp_tools.WRITE_TOOLS and not authorized:
+            if mcp_tools.needs_admin(name, args) and not authorized:
                 return _ok(msg_id, {"content": [{"type": "text", "text": UNAUTHORIZED}],
                                     "isError": True})
             try:
                 result = await mcp_tools.execute(name, args, self.registry,
-                                                 self.store, dns=self.dns)
+                                                 self.store, dns=self.dns,
+                                                 integrations=self.integrations)
                 body = {
                     "content": [{"type": "text", "text": json.dumps(result, indent=2, default=str)}],
                     "isError": bool(isinstance(result, dict) and result.get("ok") is False),

@@ -9,7 +9,13 @@
 # the moment the sketch opens.
 # No more hunting through Tools menus on every unit you flash.
 #
-# Detected hardware: ESP32-S3 rev v0.2, 16 MB flash, CH340 USB-UART bridge
+# Flasher images (firmware/build.py / CI) use the *_uart / *_usb profiles:
+#   _uart  Serial on UART0 -> boards with a CH340 / CP210x USB-UART bridge
+#   _usb   Serial on native USB CDC -> boards with only the ESP32's own USB
+# FlashSize=4M in the flasher images: min_spiffs fits in 4 MB, so one image
+# boots on 4/8/16 MB modules (the flasher writes it with flashSize "keep").
+#
+# Lab hardware: ESP32-S3 rev v0.2, 16 MB flash, CH340 USB-UART bridge
 #   -> FlashSize=16M            use the whole chip
 #   -> PartitionScheme=min_spiffs  1.9 MB app x2 OTA slots (default 1.3 MB
 #                                  left us at 83% full)
@@ -20,7 +26,7 @@ default_fqbn: esp32:esp32:esp32s3:FlashSize=16M,PartitionScheme=min_spiffs
 default_protocol: serial
 
 profiles:
-  # The board on the bench right now.
+  # The lab boards (16 MB, CH340).
   s3_16mb:
     fqbn: esp32:esp32:esp32s3:FlashSize=16M,PartitionScheme=min_spiffs
     platforms:
@@ -30,9 +36,9 @@ profiles:
       - ArduinoJson (7.4.3)
       - U8g2 (2.36.19)
 
-  # Cheap high-volume fleet nodes.
-  esp32_classic:
-    fqbn: esp32:esp32:esp32
+  # Flasher: ESP32-S3 with USB-UART bridge (CH340/CP210x).
+  esp32s3_uart:
+    fqbn: esp32:esp32:esp32s3:FlashSize=4M,PartitionScheme=min_spiffs,CDCOnBoot=default
     platforms:
       - platform: esp32:esp32 (3.3.11)
     libraries:
@@ -40,8 +46,29 @@ profiles:
       - ArduinoJson (7.4.3)
       - U8g2 (2.36.19)
 
-  esp32c3:
-    fqbn: esp32:esp32:esp32c3
+  # Flasher: ESP32-S3 on its native USB port.
+  esp32s3_usb:
+    fqbn: esp32:esp32:esp32s3:FlashSize=4M,PartitionScheme=min_spiffs,CDCOnBoot=cdc
+    platforms:
+      - platform: esp32:esp32 (3.3.11)
+    libraries:
+      - PubSubClient (2.8)
+      - ArduinoJson (7.4.3)
+      - U8g2 (2.36.19)
+
+  # Flasher: classic ESP32 / WROOM-32 (always a USB-UART bridge).
+  esp32_classic:
+    fqbn: esp32:esp32:esp32:FlashSize=4M,PartitionScheme=min_spiffs
+    platforms:
+      - platform: esp32:esp32 (3.3.11)
+    libraries:
+      - PubSubClient (2.8)
+      - ArduinoJson (7.4.3)
+      - U8g2 (2.36.19)
+
+  # Flasher: ESP32-C3 on native USB (Super Mini etc.).
+  esp32c3_usb:
+    fqbn: esp32:esp32:esp32c3:FlashSize=4M,PartitionScheme=min_spiffs,CDCOnBoot=cdc
     platforms:
       - platform: esp32:esp32 (3.3.11)
     libraries:

@@ -1,0 +1,30 @@
+{
+  "name": "ionity-esp32-flasher",
+  "private": true,
+  "version": "2.0.0",
+  "description": "Ionity ESP32-MCP web flasher: flash, provision WiFi + MCP host over Web Serial, verify. Policy 986 AED.",
+  "author": "Johan Wilhelm van Antwerp | Ionity (Pty) Ltd",
+  "license": "SEE LICENSE IN ../README.md",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "esptool-js": "^0.7.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@types/w3c-web-serial": "^1.0.7",
+    "@vitejs/plugin-react": "^5.0.0",
+    "typescript": "~5.9.0",
+    "vite": "^7.0.0",
+    "vitest": "^3.2.0"
+  }
+}

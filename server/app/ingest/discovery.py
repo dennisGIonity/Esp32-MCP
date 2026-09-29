@@ -49,6 +49,39 @@ def primary_lan_ip() -> str:
         s.close()
 
 
+def local_ipv4s() -> set[str]:
+    """Every IPv4 this host currently holds (all adapters)."""
+    ips: set[str] = {"127.0.0.1"}
+    try:
+        ips.update(socket.gethostbyname_ex(socket.gethostname())[2])
+    except Exception:
+        pass
+    try:
+        for info in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET):
+            ips.add(info[4][0])
+    except Exception:
+        pass
+    ips.add(primary_lan_ip())
+    return ips
+
+
+def choose_advertise_ip(configured: str) -> tuple[str, str | None]:
+    """The pinned IONITY_MDNS_ADVERTISE_IP if this host really has it, else the
+    routed LAN IP - plus a warning explaining the fallback.
+
+    Found 2026-09-29: .env pinned 192.168.124.4 (the H3C lab NIC). With that
+    cable out, mDNS kept telling every board to use an address nothing could
+    reach, so the whole fleet went offline while the server looked healthy."""
+    configured = (configured or "").strip()
+    if not configured:
+        return primary_lan_ip(), None
+    if configured in local_ipv4s():
+        return configured, None
+    ip = primary_lan_ip()
+    return ip, (f"IONITY_MDNS_ADVERTISE_IP={configured} is not on any adapter of this host "
+                f"(cable out / network changed) - advertising {ip} instead")
+
+
 class DiscoveryService:
     def __init__(self, settings):
         self.s = settings
@@ -56,6 +89,7 @@ class DiscoveryService:
         self.info = None
         self.ip: str | None = None
         self.error: str | None = None
+        self.warning: str | None = None
 
     async def start(self) -> None:
         if not self.s.mdns_enabled:
@@ -69,7 +103,9 @@ class DiscoveryService:
             return
 
         try:
-            self.ip = self.s.mdns_advertise_ip.strip() or primary_lan_ip()
+            self.ip, self.warning = choose_advertise_ip(self.s.mdns_advertise_ip)
+            if self.warning:
+                log.warning("mDNS: %s", self.warning)
             self.zc = AsyncZeroconf()
             self.info = ServiceInfo(
                 SERVICE_TYPE,
@@ -107,4 +143,5 @@ class DiscoveryService:
             "advertised_ip": self.ip,
             "service": SERVICE_TYPE,
             "error": self.error,
+            "warning": self.warning,
         }

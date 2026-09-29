@@ -25,7 +25,7 @@
 #include <U8g2lib.h>
 
 U8G2   *gOled = nullptr;
-int8_t  gOledSda = -1, gOledScl = -1;
+// gOledSda / gOledScl live in the main tab (Actuators needs them, and comes first).
 uint8_t gOledAddr = 0;
 String  gOledDrv = "ssd1306";
 String  gOledNote = "not searched";
@@ -66,6 +66,7 @@ void oledDetect() {
   gOledDrv = prefs.getString("oled_drv", "ssd1306");
   int nvSda = prefs.getInt("oled_sda", -1);
   int nvScl = prefs.getInt("oled_scl", -1);
+  bool scannedNone = prefs.getBool("oled_none", false);
   prefs.end();
 
   if (gOledDrv == "off") { gOledNote = "disabled (oled_drv=off)"; logln("OLED: disabled by NVS"); return; }
@@ -88,9 +89,12 @@ void oledDetect() {
       if (p[0] == 17 && p[1] == 18) heltecPower();
       if (i2cProbe(p[0], p[1], addr)) { gOledSda = p[0]; gOledScl = p[1]; gOledAddr = addr; break; }
     }
-    if (gOledSda < 0) {
+    if (gOledSda < 0 && scannedNone) {
+      gOledNote = "no I2C display (full scan done earlier; set_display auto to rescan)";
+    } else if (gOledSda < 0) {
       // Fallback: every safe GPIO pair (~1-2 s). Found pins are saved to NVS
-      // so the next boot goes straight to them.
+      // so the next boot goes straight to them. The actuator pins are left
+      // out: driving them open-drain here could click a relay at every boot.
 #if defined(CONFIG_IDF_TARGET_ESP32S3)
       const int8_t pool[] = {1,2,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,21,38,39,40,41,42,45,46,47,48};
 #elif defined(CONFIG_IDF_TARGET_ESP32C3)
@@ -99,9 +103,11 @@ void oledDetect() {
       const int8_t pool[] = {4,5,13,14,15,16,17,18,19,21,22,23,25,26,27,32,33};
 #endif
       logln("OLED: not on common pins - scanning all safe GPIO pairs...");
+      auto isAct = [](int p) { return p == gPinPwm0 || p == gPinPwm1 || p == gPinRelay0; };
       for (int8_t sda : pool) {
+        if (isAct(sda)) continue;
         for (int8_t scl : pool) {
-          if (sda == scl) continue;
+          if (sda == scl || isAct(scl)) continue;
           if (i2cProbe(sda, scl, addr)) { gOledSda = sda; gOledScl = scl; gOledAddr = addr; break; }
         }
         if (gOledSda >= 0) break;
@@ -115,6 +121,7 @@ void oledDetect() {
         snprintf(n, sizeof(n), "no I2C display on any GPIO pair (psram %uMB) - SPI/parallel screen?",
                  (unsigned)(ESP.getPsramSize() >> 20));
         gOledNote = n;
+        prefs.begin("ionity", false); prefs.putBool("oled_none", true); prefs.end();   // don't rescan every boot
       }
     }
   }
