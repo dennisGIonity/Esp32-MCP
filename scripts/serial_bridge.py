@@ -281,6 +281,7 @@ def main() -> None:
     a = ap.parse_args()
 
     started: set[str] = set()
+    _last_no_ports_log = 0.0
     log(f"forwarding to {a.server}")
     start_mqtt(a.mqtt_host, a.mqtt_port)
     while True:
@@ -291,7 +292,14 @@ def main() -> None:
                 threading.Thread(target=pump, args=(p, a.baud, a.server),
                                  daemon=True).start()
         if not ports and not started:
-            log("no RP2040/RP2350 serial ports found yet; watching")
+            # Log the transition once, then at most hourly - not every 15 s
+            # forever (bridge_out.txt reached 100 KB of this one line).
+            now = time.time()
+            if now - _last_no_ports_log >= (0 if _last_no_ports_log == 0 else 3600):
+                log("no RP2040/RP2350 serial ports found yet; watching (next notice in 1 h)")
+                _last_no_ports_log = now
+        else:
+            _last_no_ports_log = 0
         time.sleep(15)
 
 

@@ -140,6 +140,12 @@ static void provSet(JsonObjectConst in) {
     gCfg.wifiPass = p; prefs.putString("wifi_pass", p); changed.add("pass"); netChanged = true;
   }
   if (putStr(in["server"], "server", gCfg.server))           changed.add("server");
+  for (const char *pk : {"mqtt_port", "http_port"}) {          // mirror the flasher's 1-65535 check
+    if (in[pk].is<int>()) {
+      int port = in[pk].as<int>();
+      if (port < 1 || port > 65535) { prefs.end(); provError("set", String(pk) + " must be 1-65535"); return; }
+    }
+  }
   if (in["mqtt_port"].is<int>()) { gCfg.mqttPort = in["mqtt_port"].as<int>(); prefs.putUShort("mqtt_port", gCfg.mqttPort); changed.add("mqtt_port"); }
   if (in["http_port"].is<int>()) { gCfg.httpPort = in["http_port"].as<int>(); prefs.putUShort("http_port", gCfg.httpPort); changed.add("http_port"); }
   if (putStr(in["mqtt_user"],   "mqtt_user",   gCfg.mqttUser))   changed.add("mqtt_user");

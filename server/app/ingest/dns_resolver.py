@@ -18,6 +18,7 @@ Pure asyncio + stdlib wire-format parsing -- no extra dependency.
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import logging
 import struct
 import time
@@ -151,7 +152,33 @@ class _ServerProtocol(asyncio.DatagramProtocol):
         self.svc.transport = transport
 
     def datagram_received(self, data: bytes, addr):
-        asyncio.create_task(self.svc.handle(data, addr))
+        # Keep a reference: an un-referenced task can be garbage-collected
+        # mid-flight (asyncio docs), and a bounded set is our back-pressure.
+        if len(self.svc._inflight) >= self.svc.MAX_INFLIGHT:
+            self.svc.dropped += 1
+            return
+        t = asyncio.get_running_loop().create_task(self.svc.handle(data, addr))
+        self.svc._inflight.add(t)
+        t.add_done_callback(self.svc._inflight.discard)
+
+
+class _UpstreamProtocol(asyncio.DatagramProtocol):
+    """One outbound query; the future resolves with the raw reply."""
+
+    def __init__(self, payload: bytes, fut: asyncio.Future):
+        self.payload = payload
+        self.fut = fut
+
+    def connection_made(self, tr):
+        tr.sendto(self.payload)
+
+    def datagram_received(self, d, _a):
+        if not self.fut.done():
+            self.fut.set_result(d)
+
+    def error_received(self, exc):
+        if not self.fut.done():
+            self.fut.set_exception(exc)
 
 
 class DnsService:
@@ -166,6 +193,15 @@ class DnsService:
             (h.strip(), 53) for h in settings.dns_upstreams.split(",") if h.strip()
         ]
         self._cache: dict[tuple[str, str], tuple[bytes, float]] = {}
+        self._inflight: set[asyncio.Task] = set()
+        self.dropped = 0
+        self.refused = 0
+        # Only answer clients on these networks. A resolver that answers the
+        # whole internet is an amplification vector; the lab is RFC1918 + loopback.
+        self.allowed_nets = [ipaddress.ip_network(n.strip()) for n in
+                             getattr(settings, "dns_allow_from",
+                                     "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,127.0.0.0/8").split(",")
+                             if n.strip()]
         self._pending: list[dict[str, Any]] = []
         self._lock = asyncio.Lock()
         self._writer: asyncio.Task | None = None
@@ -222,9 +258,24 @@ class DnsService:
         self.running = False
 
     # -- request path ------------------------------------------------------
+    MAX_INFLIGHT = 512
+    MAX_CACHE = 5000
+
+    def _client_allowed(self, ip: str) -> bool:
+        try:
+            a = ipaddress.ip_address(ip)
+        except ValueError:
+            return False
+        return any(a in n for n in self.allowed_nets)
+
     async def handle(self, data: bytes, addr) -> None:
         client_ip = addr[0]
         t0 = time.perf_counter()
+        if not self._client_allowed(client_ip):
+            self.refused += 1                       # silently drop: no REFUSED reflection
+            return
+        if len(data) > 512 and not (len(data) >= 12 and (data[2] & 0x80) == 0):
+            return
         q = parse_question(data)
         if not q:
             return
@@ -261,10 +312,15 @@ class DnsService:
         answers, rcode = parse_answers(resp)
         if rcode == 0 and answers:
             self._cache[key] = (resp, time.time() + min_ttl(resp))
-            if len(self._cache) > 5000:
+            if len(self._cache) > self.MAX_CACHE:
                 now = time.time()
                 for k, v in list(self._cache.items()):
                     if v[1] <= now:
+                        self._cache.pop(k, None)
+                # Still over the cap after expiring: evict the soonest-to-expire
+                # so a scan of random names cannot grow memory without bound.
+                if len(self._cache) > self.MAX_CACHE:
+                    for k, _ in sorted(self._cache.items(), key=lambda kv: kv[1][1])[: len(self._cache) - self.MAX_CACHE]:
                         self._cache.pop(k, None)
         self._record(client_ip, qname, qtype, answers, rcode, False,
                      (time.perf_counter() - t0) * 1000)
@@ -273,26 +329,17 @@ class DnsService:
         loop = asyncio.get_running_loop()
         for host, port in self.upstreams:
             fut: asyncio.Future = loop.create_future()
-
-            class _Cli(asyncio.DatagramProtocol):
-                def connection_made(self, tr):
-                    tr.sendto(data)
-
-                def datagram_received(self, d, _a):
-                    if not fut.done():
-                        fut.set_result(d)
-
-                def error_received(self, exc):
-                    if not fut.done():
-                        fut.set_exception(exc)
-
             try:
-                tr, _ = await loop.create_datagram_endpoint(_Cli, remote_addr=(host, port))
+                tr, _ = await loop.create_datagram_endpoint(
+                    lambda d=data, f=fut: _UpstreamProtocol(d, f), remote_addr=(host, port))
                 try:
-                    return await asyncio.wait_for(fut, timeout=self.s.dns_timeout_s)
+                    resp = await asyncio.wait_for(fut, timeout=self.s.dns_timeout_s)
                 finally:
                     tr.close()
-            except Exception:
+                # Accept only a reply to OUR transaction, from a real response.
+                if len(resp) >= 12 and resp[:2] == data[:2] and (resp[2] & 0x80):
+                    return resp
+            except (asyncio.TimeoutError, OSError):
                 continue
         return None
 
@@ -393,8 +440,9 @@ class DnsService:
         try:
             import json as _json
             from pathlib import Path as _Path
-            cfg = _Path(__file__).resolve().parents[3] / "config" / "device_labels.json"
-            for k, v in _json.loads(cfg.read_text(encoding="utf-8")).items():
+            cfg = _Path(__file__).parents[3] / "config" / "device_labels.json"    # resolve() would hit the disk on the loop
+            text = await asyncio.to_thread(cfg.read_text, encoding="utf-8")   # keep file I/O off the loop
+            for k, v in _json.loads(text).items():
                 if re.fullmatch(r"[0-9a-fA-F]{2}([-:][0-9a-fA-F]{2}){5}", k) and v.get("label"):
                     manual[k.lower().replace(":", "-")] = v["label"]
         except Exception:
@@ -448,6 +496,10 @@ class DnsService:
             "cache_hit_rate": round(self.cache_hits / self.queries, 3) if self.queries else 0.0,
             "upstream_failures": self.upstream_fails,
             "pending_writes": len(self._pending),
+            "inflight": len(self._inflight),
+            "dropped_overload": self.dropped,
+            "refused_clients": self.refused,
+            "allow_from": [str(n) for n in self.allowed_nets],
         }
 
 

@@ -100,3 +100,15 @@ Policy 986 AED | (c) 2018-2026 Antwerp Designs | Ionity (Pty) Ltd | www.ionity.t
   reported in hello/get/test + serial log; hello MAC read from eFuse (was 00:00:.. before WiFi start); scan
   includes hidden SSIDs and reports failure. New `scripts/serial_log.py`.
 - lab-node-02 (esp32-fc012cd8ea14, native USB) still on the laptop, COM10 held by another program.
+
+## 2026-10-03: audit patches landed, lab WiFi still mismatched
+- Committed the 2026-10-02 audit (docs/AUDIT-2026-10-02.md): pinned server requirements, offline-buffer timestamp
+  fix (F-03), closure/task fixes, sentinel import fix (NameError: Optional), mosquitto ACL, firmware changes.
+  Verified here: server 42 tests pass, sentinel 24 pass, fw 2.0.0 S3 uart/usb images compile (62 %).
+- H3C was factory-reset 2026-09-29; wizard named the networks **Ionity-LAB_2.4G** / **Ionity-LAB_5G**. secrets.h and
+  lab.json still say IONITY-LAB-IOT, so lab-node-01 (now on the laptop, COM3) reports reason 201 SSID not found.
+  Fix: flasher "Provision only" with SSID Ionity-LAB_2.4G, or rename the 2.4 GHz SSID back on the router, or run
+  SET-LAB-WIFI.cmd with the new name + password and reflash --lab.
+- Pi 5: eth0 192.168.124.3 (lab, no default route; DHCP static entry added on the H3C), wlan0 Afrihost (household
+  internet, default route). Internet + NTP OK. Laptop lab NIC = 192.168.124.2 (host adapts; pin .4 or update lab.json).
+- lab-node-02 (native USB) was online on the household WiFi on 09-29; currently unplugged/offline.

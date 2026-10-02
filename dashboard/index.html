@@ -8,7 +8,7 @@
 <meta name="copyright" content="(c) 2018-2026 Antwerp Designs | Ionity (Pty) Ltd">
 <meta name="description" content="Live monitoring for the Ionity ESP32-MCP edge fleet. Policy 986 AED.">
 <meta name="color-scheme" content="dark">
-<link rel="stylesheet" href="/static/style.css?v=2">
+<link rel="stylesheet" href="/static/style.css?v=3">
 </head>
 <body>
 <div class="wrap">
@@ -75,7 +75,7 @@
     <select id="fGroup"><option value="">All groups</option></select>
     <button id="btnBroadcast" class="btn ghost">Identify all</button>
   </div>
-  <div id="grid" class="grid"></div>
+  <div id="grid" class="grid" role="list" aria-label="Devices" aria-live="off"></div>
   <div id="truncNote" class="muted trunc"></div>
 </section>
 
@@ -146,15 +146,15 @@
 </footer>
 </div>
 
-<div id="scrim" class="scrim"></div>
-<div id="drawer" class="drawer" role="dialog" aria-label="Device details">
+<!-- Native <dialog>: focus trap, Escape, backdrop and aria-modal come from the browser. -->
+<dialog id="drawer" class="drawer" aria-labelledby="dTitle">
   <div class="drawer-h">
     <strong id="dTitle">device</strong>
-    <button id="dClose" class="btn ghost sm">Close</button>
+    <button id="dClose" class="btn ghost sm" autofocus>Close</button>
   </div>
   <div id="dBody" class="drawer-b"></div>
-</div>
+</dialog>
 
-<script src="/static/app.js?v=2"></script>
+<script src="/static/app.js?v=3"></script>
 </body>
 </html>

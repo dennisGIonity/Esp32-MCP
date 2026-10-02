@@ -119,8 +119,8 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=[o.strip() for o in os.getenv("SENTINEL_CORS_ORIGINS", "*").split(",") if o.strip()],
+    allow_credentials=False,   # no cookies are used; "*" + credentials is invalid per Fetch
     allow_methods=["*"],
     allow_headers=["*"],
 )

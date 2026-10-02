@@ -1,0 +1,28 @@
+# AEDI - IONITY GLOBAL | Mosquitto ACL for the ESP32-MCP fleet | Policy 986 AED
+#
+# ionity_server : the fleet host. Reads everything, is the ONLY identity that
+#                 may publish commands (ionity/+/+/cmd, ionity/broadcast/cmd).
+# ionity_fleet  : shared identity provisioned into every board / Pi (flasher
+#                 "MQTT user/password", /etc/ionity-agent.conf). A board may only
+#                 write its own topics (client id == device_id, %c) and read
+#                 its own cmd topic plus the broadcast channel.
+# ionity_tools  : read-only for operators (MQTT Explorer, debugging).
+#
+# Create the users:
+#   docker compose exec mosquitto mosquitto_passwd -c /mosquitto/config/passwd ionity_server
+#   docker compose exec mosquitto mosquitto_passwd    /mosquitto/config/passwd ionity_fleet
+#   docker compose exec mosquitto mosquitto_passwd    /mosquitto/config/passwd ionity_tools
+# then set allow_anonymous false in mosquitto.conf.
+
+user ionity_server
+topic readwrite ionity/#
+
+user ionity_fleet
+topic read ionity/broadcast/cmd
+pattern write ionity/+/%c/telemetry
+pattern write ionity/+/%c/status
+pattern write ionity/+/%c/cmd/result
+pattern read  ionity/+/%c/cmd
+
+user ionity_tools
+topic read ionity/#

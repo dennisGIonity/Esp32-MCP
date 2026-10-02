@@ -23,6 +23,14 @@ class Store(ABC):
     @abstractmethod
     async def insert_telemetry(self, t: TelemetryIn) -> None: ...
 
+    async def insert_telemetry_batch(self, items: list[tuple[TelemetryIn, float]]) -> None:
+        for t, _ts in items:
+            await self.insert_telemetry(t)
+
+    async def upsert_devices_batch(self, items: list[tuple[TelemetryIn, float]]) -> None:
+        for t, _ts in items:
+            await self.upsert_device(t)
+
     @abstractmethod
     async def query_telemetry(
         self,

@@ -2,7 +2,7 @@ import sys
 import json
 import asyncio
 import logging
-from typing import Dict, Any, Optional
+from typing import Dict, Any
 from mcp.tools_and_resources import MCP_TOOLS_DEFINITIONS, MCP_RESOURCES_DEFINITIONS
 
 logger = logging.getLogger("sentinel.mcp")

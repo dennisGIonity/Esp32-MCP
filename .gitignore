@@ -72,3 +72,4 @@ emu_*.txt
 fwbuild*.txt
 fwbuild*.err
 warn_*.txt
+.ruff_cache/

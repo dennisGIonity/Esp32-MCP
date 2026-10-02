@@ -12,6 +12,7 @@ let SERVER_IP = location.hostname;
 
 /* Everything rendered with innerHTML goes through esc(): DNS names, labels and
    hostnames come from arbitrary LAN devices and must never be treated as HTML. */
+const RCODE = { 0: "", 1: "FORMERR", 2: "SERVFAIL", 3: "NXDOMAIN", 5: "REFUSED" };
 const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) =>
   ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
@@ -77,10 +78,12 @@ function fmtMetric(v) {
 /* ----------------------------------------------------------------- */
 /* WebSocket                                                          */
 /* ----------------------------------------------------------------- */
+let wsDelay = 1000;
 function connect() {
   const proto = location.protocol === "https:" ? "wss" : "ws";
   const ws = new WebSocket(`${proto}://${location.host}/ws/fleet`);
   ws.onopen = () => {
+    wsDelay = 1000;
     $("wsDot").className = "dot live";
     $("wsLabel").textContent = "live";
     $("wsPill").className = "pill good";
@@ -89,7 +92,8 @@ function connect() {
     $("wsDot").className = "dot down";
     $("wsLabel").textContent = "reconnecting…";
     $("wsPill").className = "pill badp";
-    setTimeout(connect, 2500);
+    setTimeout(connect, wsDelay + Math.random() * 500);   // 1 s -> 30 s with jitter
+    wsDelay = Math.min(wsDelay * 2, 30000);
   };
   ws.onerror = () => ws.close();
   ws.onmessage = (ev) => {
@@ -195,36 +199,73 @@ function passes(d) {
   return true;
 }
 
+function cardHtml(d) {
+  const name = d.label || d.device_id;
+  const where = d.ip || (d.transport === "serial" ? "USB serial" : "—");
+  return `<div class="c-top">
+      <div class="c-name">
+        <div class="c-lab" title="${esc(name)}">${esc(name)}</div>
+        <div class="c-id">${esc(d.device_id)}</div>
+      </div>
+      <span class="hp">${esc(d.health)}</span>
+    </div>
+    <div class="c-badges">
+      <span class="bdg acc">${esc(d.transport || "?")}</span>
+      <span class="bdg">fw ${esc(d.fw || "?")}</span>
+      <span class="bdg">${esc(d.site)}/${esc(d.group)}</span>
+    </div>
+    <div class="c-m">${metricTiles(d.metrics || {})}</div>
+    <div class="c-foot"><span>seen ${esc(ago(d.last_seen_age_s))}</span><span>${esc(where)}</span></div>`;
+}
+
+/* Keyed reconciliation: cards are updated in place, so focus, scroll position
+   and screen-reader context survive the 2 s fleet tick instead of being
+   thrown away by a full innerHTML rebuild. */
 function drawGrid(devices) {
+  const grid = $("grid");
   const list = devices.filter(passes);
   $("shown").textContent = `${list.length} of ${devices.length} shown`;
-  $("grid").innerHTML = list.map((d) => {
-    const name = d.label || d.device_id;
-    const where = d.ip || (d.transport === "serial" ? "USB serial" : "—");
-    return `<div class="card ${esc(d.health)}" data-id="${esc(d.device_id)}" tabindex="0">
-      <div class="c-top">
-        <div class="c-name">
-          <div class="c-lab" title="${esc(name)}">${esc(name)}</div>
-          <div class="c-id">${esc(d.device_id)}</div>
-        </div>
-        <span class="hp">${esc(d.health)}</span>
-      </div>
-      <div class="c-badges">
-        <span class="bdg acc">${esc(d.transport || "?")}</span>
-        <span class="bdg">fw ${esc(d.fw || "?")}</span>
-        <span class="bdg">${esc(d.site)}/${esc(d.group)}</span>
-      </div>
-      <div class="c-m">${metricTiles(d.metrics || {})}</div>
-      <div class="c-foot"><span>seen ${esc(ago(d.last_seen_age_s))}</span><span>${esc(where)}</span></div>
-    </div>`;
-  }).join("") || `<div class="empty">No devices match these filters. Nothing reporting yet? Plug a board in and run
-      <code>scripts\\add_device.ps1 -Port COMx</code>.</div>`;
+
+  if (!list.length) {
+    grid.replaceChildren();
+    grid.insertAdjacentHTML("beforeend", `<div class="empty">No devices match these filters. Nothing reporting yet? Plug a board in and run
+      <code>scripts\\add_device.ps1 -Port COMx</code>.</div>`);
+    return;
+  }
+  grid.querySelector(".empty")?.remove();
+
+  const existing = new Map([...grid.querySelectorAll(".card")].map((el) => [el.dataset.id, el]));
+  let cursor = grid.firstElementChild;
+  for (const d of list) {
+    let el = existing.get(d.device_id);
+    const sig = JSON.stringify([d.health, d.label, d.fw, d.transport, d.site, d.group, d.ip, d.metrics,
+                                Math.round(d.last_seen_age_s ?? -1)]);
+    if (!el) {
+      el = document.createElement("div");
+      el.dataset.id = d.device_id;
+      el.tabIndex = 0;
+      el.setAttribute("role", "listitem");
+    } else {
+      existing.delete(d.device_id);
+    }
+    if (el.dataset.sig !== sig) {
+      el.dataset.sig = sig;
+      el.className = `card ${d.health}`;
+      el.setAttribute("aria-label", `${d.label || d.device_id}, ${d.health}`);
+      el.innerHTML = cardHtml(d);
+    }
+    if (el !== cursor) grid.insertBefore(el, cursor);   // keeps the priority order
+    else cursor = cursor.nextElementSibling;
+  }
+  for (const stale of existing.values()) stale.remove();
 }
 
 /* ----------------------------------------------------------------- */
 /* Device drawer                                                      */
 /* ----------------------------------------------------------------- */
-function closeDrawer() { $("drawer").classList.remove("open"); $("scrim").classList.remove("open"); }
+let lastFocus = null;
+function closeDrawer() { const dlg = $("drawer"); if (dlg.open) dlg.close(); }
+$("drawer").addEventListener("close", () => { lastFocus?.focus?.(); lastFocus = null; });
 
 async function openDevice(id) {
   const r = await fetch(`${API}/api/v1/devices/${encodeURIComponent(id)}?history=40`);
@@ -266,8 +307,8 @@ async function openDevice(id) {
       setTimeout(() => { b.disabled = false; b.textContent = label; }, 1800);
     });
 
-  $("drawer").classList.add("open");
-  $("scrim").classList.add("open");
+  lastFocus = document.activeElement;
+  if (!$("drawer").open) $("drawer").showModal();   // focus trap, Escape, backdrop, aria-modal - native
 }
 
 /* ----------------------------------------------------------------- */
@@ -341,8 +382,7 @@ $("grid").onkeydown = (e) => {
   if (card && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); openDevice(card.dataset.id); }
 };
 $("dClose").onclick = closeDrawer;
-$("scrim").onclick = closeDrawer;
-document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeDrawer(); });
+$("drawer").onclick = (e) => { if (e.target === $("drawer")) closeDrawer(); };   // click on the backdrop
 
 $("btnBroadcast").onclick = async () => {
   const res = await postCmd(`${API}/api/v1/devices/broadcast/cmd`, { action: "identify" });
@@ -408,7 +448,7 @@ function feedRow(q, timeText) {
   const who = q.label || q.hostname || q.client_ip || "?";
   let status = "";
   if (q.cached) status = '<span class="chip c">cached</span>';
-  else if (q.rcode && q.rcode !== "NOERROR") status = `<span class="chip x">${esc(q.rcode)}</span>`;
+  else if (q.rcode) status = `<span class="chip x">${esc(RCODE[q.rcode] ?? "RCODE" + q.rcode)}</span>`;
   return `<div class="q">
     <span class="q-t">${esc(timeText)}</span>
     <span class="q-who" title="${esc(who)} · ${esc(q.client_ip)}">${esc(who)}</span>

@@ -73,7 +73,7 @@ async def ingest(request: Request, x_fleet_token: str | None = Header(default=No
         try:
             t = TelemetryIn(**raw)
         except Exception as e:
-            raise HTTPException(status_code=422, detail=str(e))
+            raise HTTPException(status_code=422, detail=str(e)) from None
         # It arrived over HTTP, whatever the device believed - EXCEPT readings a
         # bridge forwarded on a device's behalf ("serial"), or the simulator's.
         # Overwriting those would hide how the reading actually travelled.
@@ -311,7 +311,7 @@ async def device_mcp(request: Request, device_id: str):
     try:
         rpc = await request.json()
     except Exception:
-        raise HTTPException(status_code=400, detail="body must be a JSON-RPC object")
+        raise HTTPException(status_code=400, detail="body must be a JSON-RPC object") from None
     if not isinstance(rpc, dict):
         raise HTTPException(status_code=400, detail="body must be a JSON-RPC object")
     from app.mcp.tools import DEVICE_READ_TOOLS

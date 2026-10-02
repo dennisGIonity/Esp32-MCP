@@ -13,7 +13,7 @@ SUPPORTED_VERSIONS = ("2025-06-18", "2025-03-26", "2024-11-05")
 LATEST_VERSION = SUPPORTED_VERSIONS[0]
 
 SERVER_NAME = "ionity-esp32-fleet-mcp"
-SERVER_VERSION = "2.0.0"
+SERVER_VERSION = "2.0.1"
 
 INSTRUCTIONS = (
     "Ionity ESP32-MCP fleet: live telemetry and control for ESP32, Raspberry Pi "

@@ -25,6 +25,9 @@ SCHEMA = """
 PRAGMA journal_mode=WAL;
 PRAGMA synchronous=NORMAL;
 PRAGMA journal_size_limit=33554432;
+PRAGMA busy_timeout=5000;
+PRAGMA temp_store=MEMORY;
+PRAGMA foreign_keys=ON;
 
 CREATE TABLE IF NOT EXISTS devices (
     device_id   TEXT PRIMARY KEY,
@@ -63,6 +66,8 @@ CREATE TABLE IF NOT EXISTS telemetry_metric (
 );
 CREATE INDEX IF NOT EXISTS idx_tm_name_ts     ON telemetry_metric(name, ts DESC);
 CREATE INDEX IF NOT EXISTS idx_tm_dev_name_ts ON telemetry_metric(device_id, name, ts DESC);
+-- The hourly pruner deletes by ts alone; without this it scans the whole table.
+CREATE INDEX IF NOT EXISTS idx_tm_ts          ON telemetry_metric(ts);
 
 CREATE TABLE IF NOT EXISTS alerts (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -172,6 +177,64 @@ class SQLiteStore(DnsStoreMixin, Store):
                 " VALUES (?,?,?,?,?,?)",
                 rows,
             )
+
+    async def insert_telemetry_batch(self, items: list[tuple[TelemetryIn, float]]) -> None:
+        """One round trip per table for a whole batch (the writer drains up to
+        200 readings per second; per-row awaits cost 3 thread hops each).
+        `items` = [(reading, effective_ts)]."""
+        if not items:
+            return
+        await self.db.executemany(
+            "INSERT INTO telemetry (device_id, site, grp, ts, uptime_s, seq, metrics)"
+            " VALUES (?,?,?,?,?,?,?)",
+            [(t.device_id, t.site, t.group, ts, t.uptime_s, t.seq, json.dumps(t.metrics))
+             for t, ts in items],
+        )
+        rows = [
+            (t.device_id, ts, t.site, t.group, k, n)
+            for t, ts in items
+            for k, v in t.metrics.items()
+            if (n := _numeric(v)) is not None
+        ]
+        if rows:
+            await self.db.executemany(
+                "INSERT INTO telemetry_metric (device_id, ts, site, grp, name, value)"
+                " VALUES (?,?,?,?,?,?)",
+                rows,
+            )
+
+    async def upsert_devices_batch(self, items: list[tuple[TelemetryIn, float]]) -> None:
+        """Collapse N readings from the same board into one UPSERT carrying the
+        newest values and the right msg_count increment."""
+        if not items:
+            return
+        latest: dict[str, tuple[TelemetryIn, float, int]] = {}
+        for t, ts in items:
+            prev = latest.get(t.device_id)
+            n = (prev[2] + 1) if prev else 1
+            if prev is None or ts >= prev[1]:
+                latest[t.device_id] = (t, ts, n)
+            else:
+                latest[t.device_id] = (prev[0], prev[1], n)
+        now = time.time()
+        await self.db.executemany(
+            """
+            INSERT INTO devices (device_id, site, grp, label, fw, product, ip,
+                                 transport, first_seen, last_seen, msg_count)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?)
+            ON CONFLICT(device_id) DO UPDATE SET
+                site=excluded.site, grp=excluded.grp,
+                label=COALESCE(excluded.label, devices.label),
+                fw=COALESCE(excluded.fw, devices.fw),
+                product=COALESCE(excluded.product, devices.product),
+                ip=COALESCE(excluded.ip, devices.ip),
+                transport=COALESCE(excluded.transport, devices.transport),
+                last_seen=MAX(excluded.last_seen, devices.last_seen),
+                msg_count=devices.msg_count+excluded.msg_count
+            """,
+            [(t.device_id, t.site, t.group, t.label, t.fw, t.product,
+              t.net.ip, t.net.transport, now, now, n) for t, _ts, n in latest.values()],
+        )
 
     async def query_telemetry(
         self, device_id=None, site=None, group=None, metric=None,

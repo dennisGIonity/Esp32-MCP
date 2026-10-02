@@ -17,7 +17,11 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: { python-version: "3.12", cache: pip, cache-dependency-path: server/requirements.txt }
-      - run: pip install -r server/requirements.txt
+      - run: pip install -r server/requirements.txt ruff pip-audit
+      - name: Lint (ruff) - undefined names, bugbear, async, security
+        run: ruff check --select E9,F,B,ASYNC,S,RUF006 --ignore S101,S104,S105,S110,S311,S310,S603,S607,S608,B008 server/app server/mcp_stdio_proxy.py devices scripts
+      - name: Dependency audit
+        run: pip-audit -r server/requirements.txt
       - name: Fleet host + MCP tests
         working-directory: server
         run: python -m pytest -q
@@ -29,7 +33,9 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: { python-version: "3.12" }
-      - run: pip install -r modules/network-sentinel/requirements.txt pytest pytest-asyncio
+      - run: pip install -r modules/network-sentinel/requirements.txt pytest pytest-asyncio ruff
+      - name: Lint (ruff) - F821 here would have caught the 2026-09 import failure
+        run: ruff check --select E9,F modules/network-sentinel
       - working-directory: modules/network-sentinel
         run: python -m pytest -q
 
@@ -41,6 +47,7 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: 22, cache: npm, cache-dependency-path: flasher/package-lock.json }
       - run: npm ci
+      - run: npm audit --omit=dev --audit-level=high
       - run: npm run typecheck
       - run: npm test
       - run: npm run build

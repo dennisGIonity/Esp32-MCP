@@ -5,6 +5,7 @@
 #include <Wire.h>
 #include <time.h>
 #include <U8g2lib.h>
+#include <ArduinoJson.h>
 #include "config.h"
 
 // ============================================================================
@@ -36,6 +37,8 @@ struct ProbeMetrics {
 
 ProbeMetrics currentMetrics;
 bool ntpSynced = false;
+bool gWifiWasUp = false;      // edge-detect (re)joins so NTP is configured every time, not only at boot
+uint8_t gProbeTurn = 0;       // alternate probe targets: one blocking connect per tick, not two
 unsigned long lastDisplayUpdate = 0;
 unsigned long lastTelemetryPush = 0;
 unsigned long lastProbeTime = 0;
@@ -81,28 +84,31 @@ void connectNetwork() {
     #endif
 
     WiFi.mode(WIFI_STA);
+    WiFi.setAutoReconnect(true);
+    WiFi.setHostname("ionity-sentinel");
     WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
 
-    // Initial brief wait (non-blocking)
-    int attempts = 0;
-    while (WiFi.status() != WL_CONNECTED && attempts < 15) {
+    // Short wait so the splash can say "connecting"; loop() handles the rest
+    // (and calls onWifiConnected() on the first join and every rejoin).
+    for (int i = 0; i < 15 && WiFi.status() != WL_CONNECTED; i++) {
         delay(300);
         Serial.print(".");
         digitalWrite(PIN_LED_HEARTBEAT, !digitalRead(PIN_LED_HEARTBEAT));
-        attempts++;
     }
-
-    if (WiFi.status() == WL_CONNECTED) {
-        Serial.println("\n[Network] WiFi Connected! IP: " + WiFi.localIP().toString());
-        digitalWrite(PIN_LED_HEARTBEAT, HIGH);
-
-        // Configure NTP Real-Time Clock (South Africa UTC+2)
-        configTime(GMT_OFFSET_SEC, DAYLIGHT_OFFSET_SEC, NTP_SERVER_1, NTP_SERVER_2);
-        Serial.println("[NTP] Time synchronization initialized.");
-    } else {
+    if (WiFi.status() != WL_CONNECTED) {
         Serial.println("\n[Network] WiFi connection pending... Clock running on local tick.");
         digitalWrite(PIN_LED_ALERT, HIGH);
     }
+}
+
+void onWifiConnected() {
+    Serial.println("\n[Network] WiFi Connected! IP: " + WiFi.localIP().toString());
+    digitalWrite(PIN_LED_HEARTBEAT, HIGH);
+    digitalWrite(PIN_LED_ALERT, LOW);
+    // Configure NTP on EVERY (re)join - a board that joined late or rejoined
+    // after an outage used to run on the millis() clock forever.
+    configTime(GMT_OFFSET_SEC, DAYLIGHT_OFFSET_SEC, NTP_SERVER_1, NTP_SERVER_2);
+    Serial.println("[NTP] Time synchronization (re)initialized.");
 }
 
 // Sub-millisecond TCP socket probe to measure real latency
@@ -127,13 +133,12 @@ void probeTargets() {
         return;
     }
 
-    // 1. Probe Google DNS (8.8.8.8:53)
-    float lat1 = probeSocketLatency(TARGET_PUBLIC_DNS1, 53);
-    currentMetrics.latency_dns1_ms = lat1 < 999.0f ? lat1 : 999.0f;
-
-    // 2. Probe Cloudflare DNS (1.1.1.1:53)
-    float lat2 = probeSocketLatency(TARGET_PUBLIC_DNS2, 53);
-    currentMetrics.latency_dns2_ms = lat2 < 999.0f ? lat2 : 999.0f;
+    // One target per tick: <= 1.2 s blocked every 2 s instead of 2.4 s, so the
+    // 4 FPS clock keeps moving; both targets are still refreshed every 4 s.
+    if ((gProbeTurn++ & 1) == 0) currentMetrics.latency_dns1_ms = probeSocketLatency(TARGET_PUBLIC_DNS1, 53);
+    else                         currentMetrics.latency_dns2_ms = probeSocketLatency(TARGET_PUBLIC_DNS2, 53);
+    float lat1 = currentMetrics.latency_dns1_ms;
+    float lat2 = currentMetrics.latency_dns2_ms;
 
     // Jitter: difference between probes
     if (lat1 < 999.0f && lat2 < 999.0f) {
@@ -245,25 +250,29 @@ void pushTelemetryJSON() {
     currentMetrics.free_heap_bytes = ESP.getFreeHeap();
     currentMetrics.chip_temp_c = temperatureRead();
 
+    JsonDocument d;
+    d["device_id"]       = SENTINEL_DEVICE_ID;
+    d["site_name"]       = SITE_NAME;
+    d["firmware"]        = SENTINEL_FIRMWARE_VER;
+    d["uptime_seconds"]  = currentMetrics.uptime_seconds;
+    d["mains_power_ok"]  = currentMetrics.mains_power_ok;
+    d["stability_score"] = currentMetrics.stability_score;
+    d["packet_loss_pct"] = currentMetrics.packet_loss_pct;
+    d["jitter_ms"]       = currentMetrics.jitter_ms;
+    d["dns_latency_ms"]  = currentMetrics.latency_dns1_ms;
+    d["chip_temp_c"]     = currentMetrics.chip_temp_c;
+    d["free_heap_bytes"] = currentMetrics.free_heap_bytes;
+    String jsonPayload; serializeJson(d, jsonPayload);
+
     HTTPClient http;
     String url = "http://" + String(SENTINEL_SERVER_HOST) + ":" + String(SENTINEL_SERVER_PORT) + String(SENTINEL_API_ENDPOINT);
-
+    http.setConnectTimeout(3000);
+    http.setTimeout(4000);
     http.begin(url);
     http.addHeader("Content-Type", "application/json");
-
-    String jsonPayload = "{";
-    jsonPayload += "\"device_id\":\"" + String(SENTINEL_DEVICE_ID) + "\",";
-    jsonPayload += "\"site_name\":\"" + String(SITE_NAME) + "\",";
-    jsonPayload += "\"firmware\":\"" + String(SENTINEL_FIRMWARE_VER) + "\",";
-    jsonPayload += "\"uptime_seconds\":" + String(currentMetrics.uptime_seconds) + ",";
-    jsonPayload += "\"mains_power_ok\":" + String(currentMetrics.mains_power_ok ? "true" : "false") + ",";
-    jsonPayload += "\"stability_score\":" + String(currentMetrics.stability_score, 2) + ",";
-    jsonPayload += "\"packet_loss_pct\":" + String(currentMetrics.packet_loss_pct, 1) + ",";
-    jsonPayload += "\"jitter_ms\":" + String(currentMetrics.jitter_ms, 2) + ",";
-    jsonPayload += "\"dns_latency_ms\":" + String(currentMetrics.latency_dns1_ms, 1) + ",";
-    jsonPayload += "\"chip_temp_c\":" + String(currentMetrics.chip_temp_c, 1) + ",";
-    jsonPayload += "\"free_heap_bytes\":" + String(currentMetrics.free_heap_bytes);
-    jsonPayload += "}";
+#ifdef FLEET_TOKEN
+    http.addHeader("X-Fleet-Token", FLEET_TOKEN);   // = SENTINEL_FEED_TOKEN on the sentinel service
+#endif
 
     int httpCode = http.POST(jsonPayload);
     if (httpCode > 0) {
@@ -298,6 +307,9 @@ void setup() {
 
 void loop() {
     unsigned long now = millis();
+    bool up = WiFi.status() == WL_CONNECTED;
+    if (up && !gWifiWasUp) onWifiConnected();        // boot join AND every rejoin
+    gWifiWasUp = up;
 
     // 1. Smooth Screen Refresh (Clock & Telemetry)
     if (now - lastDisplayUpdate >= DISPLAY_UPDATE_INTERVAL_MS) {

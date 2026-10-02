@@ -34,7 +34,7 @@ class FleetRegistry:
     def __init__(self, store: Store):
         self.store = store
         self.devices: dict[str, dict[str, Any]] = {}
-        self.queue: asyncio.Queue[TelemetryIn] = asyncio.Queue(maxsize=20_000)
+        self.queue: asyncio.Queue[tuple[TelemetryIn, float]] = asyncio.Queue(maxsize=20_000)
         self._recent_ts: deque[float] = deque(maxlen=20_000)
         self._writer_task: asyncio.Task | None = None
         self._pruner_task: asyncio.Task | None = None
@@ -117,10 +117,13 @@ class FleetRegistry:
         d["msg_count"] = d.get("msg_count", 0) + 1
         d.pop("sleeping_until", None)
         self._recent_ts.append(now)
-        self._emit("on_telemetry", d, t.metrics, t.at())
+        # Effective time of the reading: server receive time, backdated by the
+        # board's age_ms when it replays its offline buffer (fw >= 2.0.1).
+        eff = t.at(now)
+        self._emit("on_telemetry", d, t.metrics, eff)
 
         try:
-            self.queue.put_nowait(t)
+            self.queue.put_nowait((t, eff))
         except asyncio.QueueFull:
             self.dropped += 1
             if self.dropped % 500 == 1:
@@ -168,7 +171,7 @@ class FleetRegistry:
                     first = await asyncio.wait_for(self.queue.get(), 0.25)
                 except asyncio.TimeoutError:
                     continue
-                batch: list[TelemetryIn] = [first]
+                batch: list[tuple[TelemetryIn, float]] = [first]
                 deadline = time.monotonic() + FLUSH_S
                 while len(batch) < BATCH and time.monotonic() < deadline:
                     try:
@@ -177,10 +180,12 @@ class FleetRegistry:
                     except asyncio.TimeoutError:
                         break
 
-                for t in batch:
-                    await self.store.upsert_device(t)
-                    await self.store.insert_telemetry(t)
-                    await self._evaluate_alerts(t)
+                # Two executemany round trips for the whole batch instead of
+                # three awaits per reading; alerts still run per reading (rare writes).
+                await self.store.upsert_devices_batch(batch)
+                await self.store.insert_telemetry_batch(batch)
+                for t, eff in batch:
+                    await self._evaluate_alerts(t, eff)
                 await self.store.commit()
             except asyncio.CancelledError:
                 break
@@ -202,8 +207,9 @@ class FleetRegistry:
                 log.exception("pruner error")
 
     # -- alert engine ------------------------------------------------------
-    async def _evaluate_alerts(self, t: TelemetryIn) -> None:
-        now = t.at()
+    async def _evaluate_alerts(self, t: TelemetryIn, now: float | None = None) -> None:
+        if now is None:
+            now = t.at()
         m = t.metrics
         checks = [
             ("low_rssi", "warning", "rssi_dbm",
@@ -376,11 +382,9 @@ class FleetRegistry:
                     log.debug("sink %s.%s failed", type(sink).__name__, hook, exc_info=True)
 
     # -- outbound commands -------------------------------------------------
-    _seq = 0
-
     def _new_cmd_id(self) -> str:
-        FleetRegistry._seq = (FleetRegistry._seq + 1) % 1000
-        return f"c{int(time.time()*1000)}{FleetRegistry._seq:03d}"
+        self._seq = (getattr(self, "_seq", 0) + 1) % 1000      # per registry, not per class
+        return f"c{int(time.time()*1000)}{self._seq:03d}"
 
     async def call_device(self, device_id: str, rpc: dict, timeout_s: float) -> dict:
         """Send one JSON-RPC request to a board's own MCP server over MQTT and

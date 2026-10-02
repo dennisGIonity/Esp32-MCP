@@ -74,6 +74,9 @@ class Settings(BaseSettings):
     dns_upstreams: str = "1.1.1.1,8.8.8.8"
     dns_timeout_s: float = 3.0
     dns_retention_days: int = 14
+    # Clients the resolver answers (comma-separated CIDRs). Everything else is
+    # dropped silently so this host can never be used as an open resolver.
+    dns_allow_from: str = "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,127.0.0.0/8"
 
     # --- Datadog (fleet host forwards; boards never hold the key) --------
     dd_enabled: bool = False

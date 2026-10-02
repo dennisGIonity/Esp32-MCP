@@ -1,9 +1,8 @@
 import time
 import math
 import random
-import asyncio
 import logging
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any
 import aiohttp
 
 logger = logging.getLogger("sentinel.mikrotik")

@@ -1,7 +1,25 @@
-from fastapi import APIRouter, HTTPException, Request, Body
-from typing import Dict, Any, Optional
+import hmac
+import os
+from typing import Any, Dict
+
+from fastapi import APIRouter, Body, Header, HTTPException, Request
 
 router = APIRouter(prefix="/api")
+
+# Same convention as the fleet host: empty token = open (lab), otherwise
+# "Authorization: Bearer <t>" / "X-Ionity-Token: <t>" for operator actions and
+# "X-Fleet-Token: <t>" for the ESP32 sentinel's hardware feed.
+ADMIN_TOKEN = os.getenv("SENTINEL_ADMIN_TOKEN", "")
+FEED_TOKEN = os.getenv("SENTINEL_FEED_TOKEN", "")
+
+
+def _require(token_wanted: str, authorization: str | None, x_token: str | None) -> None:
+    if not token_wanted:
+        return
+    auth = authorization or ""
+    got = auth[7:].strip() if auth.lower().startswith("bearer ") else (x_token or "")
+    if not hmac.compare_digest(got, token_wanted):
+        raise HTTPException(status_code=401, detail="token required")
 
 @router.get("/telemetry/live")
 async def get_live_telemetry(request: Request):
@@ -35,10 +53,11 @@ async def get_speedtest_metrics(request: Request):
     return speedtest.last_result
 
 @router.post("/telemetry/speedtest/run")
-async def trigger_active_speedtest(request: Request):
-    speedtest = request.app.state.speedtest_engine
-    res = await speedtest.run_active_speedtest()
-    return res
+async def trigger_active_speedtest(request: Request,
+                                   authorization: str | None = Header(default=None),
+                                   x_ionity_token: str | None = Header(default=None)):
+    _require(ADMIN_TOKEN, authorization, x_ionity_token)
+    return await request.app.state.speedtest_engine.run_active_speedtest()
 
 @router.get("/telemetry/loadshedding")
 async def get_loadshedding(request: Request):
@@ -64,13 +83,12 @@ async def get_security_threats(request: Request):
     }
 
 @router.post("/telemetry/hardware-feed")
-async def receive_esp32_hardware_feed(request: Request, payload: Dict[str, Any] = Body(...)):
-    """
-    Ingests telemetry from physical ESP32-S3 CoreBoard sentinels over HTTP.
-    """
-    analyzer = request.app.state.traffic_analyzer
-    mains_ok = payload.get("mains_power_ok", True)
-    analyzer.update_hardware_sentinel_state(mains_ok=mains_ok)
+async def receive_esp32_hardware_feed(request: Request, payload: Dict[str, Any] = Body(...),
+                                      x_fleet_token: str | None = Header(default=None)):
+    """Ingests telemetry from physical ESP32-S3 sentinels over HTTP."""
+    _require(FEED_TOKEN, None, x_fleet_token)
+    mains_ok = bool(payload.get("mains_power_ok", True))
+    request.app.state.traffic_analyzer.update_hardware_sentinel_state(mains_ok=mains_ok)
     return {"status": "ACK", "received_score": payload.get("stability_score")}
 
 @router.post("/mcp/rpc")
@@ -78,5 +96,7 @@ async def mcp_json_rpc_endpoint(request: Request, body: Dict[str, Any] = Body(..
     """
     HTTP JSON-RPC 2.0 endpoint for MCP requests.
     """
-    mcp_server = request.app.state.mcp_server
-    return await mcp_server.handle_request(body)
+    if not isinstance(body.get("params", {}), dict):
+        return {"jsonrpc": "2.0", "id": body.get("id"),
+                "error": {"code": -32600, "message": "params must be an object"}}
+    return await request.app.state.mcp_server.handle_request(body)

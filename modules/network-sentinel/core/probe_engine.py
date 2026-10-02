@@ -4,7 +4,6 @@ import random
 import statistics
 import logging
 from typing import Dict, List, Any
-import socket
 
 logger = logging.getLogger("sentinel.probes")
 

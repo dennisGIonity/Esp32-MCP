@@ -228,9 +228,13 @@ class DatadogForwarder:
                 await self._post("/api/v1/events", ev)
                 self._events.popleft()
                 sent["events"] += 1
-            for did, chk in list(self._checks.items()):
-                await self._post("/api/v1/check_run", chk)
-                sent["checks"] += 1
+            # /api/v1/check_run accepts an array: one POST for the whole fleet,
+            # not one per board (1000 boards was 1000 requests per flush).
+            checks = list(self._checks.values())
+            for i in range(0, len(checks), MAX_SERIES_PER_POST):
+                chunk = checks[i:i + MAX_SERIES_PER_POST]
+                await self._post("/api/v1/check_run", chunk)
+                sent["checks"] += len(chunk)
             self._checks.clear()
         except Exception as e:
             self.errors += 1

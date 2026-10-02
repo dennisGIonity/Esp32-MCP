@@ -248,12 +248,23 @@ async function triggerSpeedtest() {
 
     try {
         const res = await fetch('/api/telemetry/speedtest/run', { method: 'POST' });
+        if (res.status === 401) { label.innerText = 'Token required'; return; }
         const data = await res.json();
-        
-        document.getElementById('st-dl-val').innerText = data.download_mbps.toFixed(1);
-        document.getElementById('st-ul-val').innerText = data.upload_mbps.toFixed(1);
-        document.getElementById('st-ping-val').innerText = `${data.ping_ms.toFixed(1)} ms`;
-        document.getElementById('speed-bar-fill').style.width = `${data.speed_bar_level}%`;
+        const fmt = (v, d = 1) => (typeof v === 'number' ? v.toFixed(d) : '—');
+
+        document.getElementById('st-dl-val').innerText = fmt(data.download_mbps);
+        document.getElementById('st-ul-val').innerText = fmt(data.upload_mbps);
+        document.getElementById('st-ping-val').innerText = `${fmt(data.ping_ms)} ms`;
+        document.getElementById('speed-bar-fill').style.width = `${data.speed_bar_level || 0}%`;
+        // Never let a synthetic number pass as a measurement.
+        const tag = document.getElementById('st-source') || (() => {
+            const s = document.createElement('span'); s.id = 'st-source';
+            s.style.cssText = 'margin-left:.5rem;font-size:.75rem;padding:.1rem .4rem;border-radius:4px;';
+            document.getElementById('st-ping-val').parentElement.appendChild(s); return s;
+        })();
+        tag.innerText = data.simulated ? 'SIMULATED' : `measured · ${data.source}`;
+        tag.style.background = data.simulated ? 'rgba(255,80,80,.18)' : 'rgba(80,220,120,.18)';
+        tag.title = data.note || data.server_location || '';
     } catch (e) {
         console.error('Speedtest error:', e);
     } finally {

@@ -96,7 +96,7 @@ void oledDetect() {
       // so the next boot goes straight to them. The actuator pins are left
       // out: driving them open-drain here could click a relay at every boot.
 #if defined(CONFIG_IDF_TARGET_ESP32S3)
-      const int8_t pool[] = {1,2,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,21,38,39,40,41,42,45,46,47,48};
+      const int8_t pool[] = {1,2,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,21,38,39,40,41,42,47,48};   // 45/46 are strapping pins (see pinIsSafe)
 #elif defined(CONFIG_IDF_TARGET_ESP32C3)
       const int8_t pool[] = {1,2,3,4,5,6,7,8,10};
 #else

@@ -1,0 +1,18 @@
+[pi-deploy] copying image + provision.py to wabapi@192.168.124.3:~/ionity-flash
+[pi-deploy] board on /dev/serial/by-id/usb-1a86_USB_Serial-if00-port0
+[pi-deploy]   Chip is ESP32-S3 (QFN56) (revision v0.2)
+[pi-deploy]   MAC: 98:a3:16:e5:d1:8c
+[pi-deploy] erasing flash
+[pi-deploy] writing esp32s3_uart.bin
+[pi-deploy]   Wrote 1298432 bytes (818921 compressed) at 0x00000000 in 18.6 seconds (effective 559.2 kbit/s)...
+[pi-deploy]   Hash of data verified.
+[pi-deploy] provisioning (host='' site=lab group=bench) and testing WiFi
+[pi-deploy]   >> hello 
+[pi-deploy]   == esp32-98a316e5d18c fw 2.0.0 chip ESP32-S3 wifi=down provisioned=True
+[pi-deploy]   >> set {"server": "", "site": "lab", "group": "bench", "label": "lab-node-01 (S3 16MB, CH340, on Pi)"}
+[pi-deploy]   == stored: server, site, group, label
+[pi-deploy]   >> test {"timeout_ms": 20000}
+[pi-deploy]   !! SSID not found (off, hidden on another band, or 5 GHz only - ESP32 is 2.4 GHz) (reason 201)
+[pi-deploy]   >> reboot 
+[pi-deploy]   == rebooted
+[pi-deploy] done

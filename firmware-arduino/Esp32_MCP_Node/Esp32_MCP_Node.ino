@@ -251,6 +251,10 @@ String buildTelemetryJson(const Sample &s) {
   doc["product"]   = FW_PRODUCT;
   doc["uptime_s"]  = millis() / 1000;
   doc["seq"]       = gTxOk + gTxFail;
+  // How old this reading is. Live samples: a few ms. Replayed buffer entries:
+  // up to ~7 min. The host subtracts it so history keeps its real shape.
+  // Unsigned subtraction is wrap-safe across the 49-day millis() rollover.
+  doc["age_ms"]    = (uint32_t)(millis() - s.ts_ms);
 
   JsonObject m = doc["metrics"].to<JsonObject>();
   if (!isnan(s.temp_c))          m["temp_c"]          = round(s.temp_c * 10) / 10.0;
@@ -311,9 +315,24 @@ String buildStatusJson(const char *state) {
 // cache, no fallback server - so the answer is exactly what that resolver (the
 // Gate^Flame box) said, which is the whole point of the test.
 // Returns a dotted address, "0.0.0.0" when a blocker answers with the null
-// address, or NXDOMAIN / SERVFAIL / REFUSED / NOANSWER / TIMEOUT / BADNAME.
+// address, or NXDOMAIN / SERVFAIL / REFUSED / NOANSWER / TIMEOUT / BADNAME /
+// BADREPLY. Every read of the reply is bounds-checked against `got`: a hostile
+// or truncated reply must never make the parser read outside the bytes received.
 // ---------------------------------------------------------------------------
 #include <WiFiUdp.h>
+
+static bool dnsSkipName(const uint8_t *r, int got, int &p) {
+  int hops = 0;
+  while (p < got) {
+    uint8_t len = r[p];
+    if (len == 0) { p += 1; return true; }
+    if ((len & 0xC0) == 0xC0) { p += 2; return p <= got; }   // compression pointer ends the name
+    if (len > 63 || ++hops > 128) return false;
+    p += 1 + len;
+  }
+  return false;
+}
+
 String dnsProbe(const IPAddress &server, const String &name, uint32_t &elapsedMs) {
   uint8_t q[300];
   uint16_t id = (uint16_t)esp_random();
@@ -337,7 +356,7 @@ String dnsProbe(const IPAddress &server, const String &name, uint32_t &elapsedMs
   q[len++] = 0; q[len++] = 1;                  // QCLASS IN
 
   WiFiUDP udp;
-  udp.begin(0);
+  if (!udp.begin(0)) { elapsedMs = 0; return "NOSOCKET"; }
   uint32_t t0 = millis();
   udp.beginPacket(server, 53); udp.write(q, len); udp.endPacket();
   uint8_t r[512];
@@ -345,7 +364,7 @@ String dnsProbe(const IPAddress &server, const String &name, uint32_t &elapsedMs
   while (millis() - t0 < DNS_PROBE_TIMEOUT_MS) {
     if (udp.parsePacket() > 0) {
       got = udp.read(r, sizeof(r));
-      if (got >= 12 && r[0] == q[0] && r[1] == q[1]) break;
+      if (got >= 12 && r[0] == q[0] && r[1] == q[1] && (r[2] & 0x80)) break;  // our id, a response
       got = 0;
     }
     delay(2);
@@ -359,21 +378,61 @@ String dnsProbe(const IPAddress &server, const String &name, uint32_t &elapsedMs
   if (rcode == 2) return "SERVFAIL";
   if (rcode == 5) return "REFUSED";
   if (rcode != 0) return "RCODE" + String(rcode);
+
+  uint16_t qd = (r[4] << 8) | r[5];
   uint16_t an = (r[6] << 8) | r[7];
-  // skip the question section
   int p = 12;
-  while (p < got && r[p] != 0) { if ((r[p] & 0xc0) == 0xc0) { p += 1; break; } p += r[p] + 1; }
-  p += 1 + 4;
-  for (uint16_t i = 0; i < an && p + 10 < got; i++) {
-    if ((r[p] & 0xc0) == 0xc0) p += 2; else { while (p < got && r[p] != 0) p += r[p] + 1; p += 1; }
-    uint16_t type = (r[p] << 8) | r[p + 1];
+  for (uint16_t i = 0; i < qd; i++) {               // skip the question section
+    if (!dnsSkipName(r, got, p)) return "BADREPLY";
+    p += 4;                                           // QTYPE + QCLASS
+    if (p > got) return "BADREPLY";
+  }
+  for (uint16_t i = 0; i < an; i++) {
+    if (!dnsSkipName(r, got, p)) return "BADREPLY";
+    if (p + 10 > got) return "BADREPLY";              // TYPE CLASS TTL RDLEN
+    uint16_t type  = (r[p] << 8) | r[p + 1];
     uint16_t rdlen = (r[p + 8] << 8) | r[p + 9];
     p += 10;
-    if (type == 1 && rdlen == 4 && p + 4 <= got)
+    if (p + rdlen > got) return "BADREPLY";
+    if (type == 1 && rdlen == 4)
       return String(r[p]) + "." + String(r[p + 1]) + "." + String(r[p + 2]) + "." + String(r[p + 3]);
-    p += rdlen;                                 // CNAME etc. - keep walking
+    p += rdlen;                                       // CNAME etc. - keep walking
   }
   return "NOANSWER";
+}
+
+// dns_probe runs as a job driven from loop(): one name (<= 1.5 s) per pass,
+// so MQTT keepalive, /mcp, the OLED and serial provisioning keep running
+// instead of freezing for up to 18 s inside the MQTT callback.
+struct DnsProbeJob {
+  bool      active = false;
+  String    cmdId, server;
+  IPAddress srv;
+  String    names[DNS_PROBE_MAX_NAMES];
+  uint8_t   count = 0, next = 0;
+  int       blocked = 0, resolved = 0;
+  JsonDocument res;
+} gDnsJob;
+
+void dnsProbeTick() {
+  if (!gDnsJob.active) return;
+  if (gDnsJob.next < gDnsJob.count) {
+    const String &name = gDnsJob.names[gDnsJob.next++];
+    uint32_t ms = 0;
+    String ans = dnsProbe(gDnsJob.srv, name, ms);
+    JsonObject o = gDnsJob.res["answers"].as<JsonArray>().add<JsonObject>();
+    o["n"] = name; o["a"] = ans; o["ms"] = ms;
+    if (ans == "0.0.0.0" || ans == "::") gDnsJob.blocked++;
+    else if (ans[0] >= '0' && ans[0] <= '9') gDnsJob.resolved++;
+    logln("dns_probe " + name + " @" + gDnsJob.server + " -> " + ans + " (" + String(ms) + "ms)");
+    return;
+  }
+  gDnsJob.res["blocked"]  = gDnsJob.blocked;
+  gDnsJob.res["resolved"] = gDnsJob.resolved;
+  gDnsJob.res["asked"]    = gDnsJob.count;
+  String out; serializeJson(gDnsJob.res, out);
+  publishCmdResult(gDnsJob.cmdId, true, out);
+  gDnsJob.active = false;
 }
 
 // ---------------------------------------------------------------------------
@@ -455,6 +514,7 @@ void onMqttMessage(char *topic, byte *payload, unsigned int len) {
     publishCmdResult(cmdId, true, "pong");
   } else if (action == "dns_probe") {
     // {"names":["doubleclick.net","ionity.today"], "dns_server":"192.168.124.3"}
+    if (gDnsJob.active) { publishCmdResult(cmdId, false, "a dns_probe is already running"); return; }
     String server = doc["dns_server"] | "";
     if (server.length() == 0) {
       prefs.begin("ionity", true);
@@ -463,29 +523,20 @@ void onMqttMessage(char *topic, byte *payload, unsigned int len) {
     } else if (doc["remember"] | false) {
       prefs.begin("ionity", false); prefs.putString("gf_dns", server); prefs.end();
     }
-    IPAddress srv;
-    if (!srv.fromString(server)) { publishCmdResult(cmdId, false, "dns_server is not an IPv4 address"); return; }
-    if (WiFi.status() != WL_CONNECTED) { publishCmdResult(cmdId, false, "WiFi not connected"); return; }
-
-    JsonDocument res;
-    res["server"] = server;
-    res["from"]   = WiFi.localIP().toString();
-    JsonArray arr = res["answers"].to<JsonArray>();
-    int blocked = 0, resolved = 0, n = 0;
+    if (!gDnsJob.srv.fromString(server)) { publishCmdResult(cmdId, false, "dns_server is not an IPv4 address"); return; }
+    if (WiFi.status() != WL_CONNECTED)   { publishCmdResult(cmdId, false, "WiFi not connected"); return; }
+    gDnsJob.cmdId = cmdId; gDnsJob.server = server;
+    gDnsJob.count = gDnsJob.next = 0; gDnsJob.blocked = gDnsJob.resolved = 0;
+    gDnsJob.res.clear();
+    gDnsJob.res["server"] = server;
+    gDnsJob.res["from"]   = WiFi.localIP().toString();
+    gDnsJob.res["answers"].to<JsonArray>();
     for (JsonVariant v : doc["names"].as<JsonArray>()) {
-      if (n++ >= DNS_PROBE_MAX_NAMES) break;
-      String name = v.as<String>();
-      uint32_t ms = 0;
-      String ans = dnsProbe(srv, name, ms);
-      JsonObject o = arr.add<JsonObject>();
-      o["n"] = name; o["a"] = ans; o["ms"] = ms;
-      if (ans == "0.0.0.0" || ans == "::") blocked++;
-      else if (ans[0] >= '0' && ans[0] <= '9') resolved++;
-      logln("dns_probe " + name + " @" + server + " -> " + ans + " (" + String(ms) + "ms)");
+      if (gDnsJob.count >= DNS_PROBE_MAX_NAMES) break;
+      gDnsJob.names[gDnsJob.count++] = v.as<String>();
     }
-    res["blocked"] = blocked; res["resolved"] = resolved; res["asked"] = arr.size();
-    String out; serializeJson(res, out);
-    publishCmdResult(cmdId, true, out);
+    if (gDnsJob.count == 0) { publishCmdResult(cmdId, false, "dns_probe needs 1-12 names"); return; }
+    gDnsJob.active = true;             // dnsProbeTick() does one name per loop()
   } else {
     publishCmdResult(cmdId, false, "unknown action");
   }
@@ -633,7 +684,7 @@ void flushBuffer() {
 void pushTelemetry() {
   String json = buildTelemetryJson(gLatest);
   if (transmit(json)) {
-    if (gUseHeartbeatLed) {
+    if (gUseHeartbeatLed && gAct[0] < 0) {           // an agent-set LED level wins over the pulse
       digitalWrite(PIN_LED_HEARTBEAT, HIGH); delay(25);
       digitalWrite(PIN_LED_HEARTBEAT, LOW);
     }
@@ -765,6 +816,7 @@ void loop() {
   if (mqtt.connected()) mqtt.loop();
   if (gMcpHttpUp) mcpHttp.handleClient();
   mcpAfterReply();
+  dnsProbeTick();
 #if OTA_ENABLED
   ArduinoOTA.handle();
 #endif

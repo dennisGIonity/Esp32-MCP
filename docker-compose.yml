@@ -1,6 +1,9 @@
 # AEDI - IONITY GLOBAL | ESP32-MCP stack
 # docker compose up -d   ->   broker on 1883/9001, fleet server on 8099
 # Policy 986 AED | (c) 2018-2026 Antwerp Designs | Ionity (Pty) Ltd
+#
+# Secrets come from .env (git-ignored): IONITY_FLEET_TOKEN, IONITY_ADMIN_TOKEN,
+# IONITY_MQTT_USERNAME / IONITY_MQTT_PASSWORD (once the broker ACL is enabled).
 
 services:
   mosquitto:
@@ -11,9 +14,15 @@ services:
       - "1883:1883"
       - "9001:9001"
     volumes:
-      - ./infra/mosquitto/config:/mosquitto/config
+      - ./infra/mosquitto/config:/mosquitto/config:ro
       - mosquitto-data:/mosquitto/data
       - mosquitto-log:/mosquitto/log
+    healthcheck:
+      # Works with and without auth: a refused SUB still proves the listener is up.
+      test: ["CMD-SHELL", "mosquitto_sub -h 127.0.0.1 -p 1883 -t '$$SYS/broker/uptime' -C 1 -W 3 >/dev/null 2>&1 || nc -z 127.0.0.1 1883"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
 
   fleet-server:
     build:
@@ -22,17 +31,32 @@ services:
     container_name: ionity-fleet-server
     restart: unless-stopped
     depends_on:
-      - mosquitto
+      mosquitto:
+        condition: service_healthy
     ports:
       - "8099:8099"
+      - "53:5353/udp"              # LAN DNS visibility (resolver runs unprivileged on 5353)
     environment:
       IONITY_MQTT_HOST: mosquitto
       IONITY_MQTT_PORT: "1883"
+      IONITY_MQTT_USERNAME: ${IONITY_MQTT_USERNAME:-}
+      IONITY_MQTT_PASSWORD: ${IONITY_MQTT_PASSWORD:-}
       IONITY_SQLITE_PATH: /data/fleet.db
       IONITY_FLEET_TOKEN: ${IONITY_FLEET_TOKEN:-dev-fleet-token-change-me}
       IONITY_REQUIRE_TOKEN: ${IONITY_REQUIRE_TOKEN:-false}
+      IONITY_ADMIN_TOKEN: ${IONITY_ADMIN_TOKEN:-}
+      IONITY_DNS_ENABLED: ${IONITY_DNS_ENABLED:-false}
+      IONITY_DNS_PORT: "5353"
+      IONITY_MDNS_ENABLED: ${IONITY_MDNS_ENABLED:-false}   # mDNS needs host networking; off in the container by default
+      IONITY_CORS_ORIGINS: ${IONITY_CORS_ORIGINS:-*}
     volumes:
       - fleet-data:/data
+      - ./firmware/dist:/app/firmware/dist:ro   # images built by firmware/build.py / CI
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8099/api/v1/health', timeout=3).status==200 else 1)"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
 
 volumes:
   mosquitto-data:

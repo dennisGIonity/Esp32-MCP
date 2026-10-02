@@ -8,7 +8,7 @@
 
 // Device Identity
 #define SENTINEL_DEVICE_ID      "ESP32-S3-IONITY-01"
-#define SENTINEL_FIRMWARE_VER   "v2.5.0-oled"
+#define SENTINEL_FIRMWARE_VER   "v2.5.1-oled"   // 2.5.1: NTP on every WiFi (re)join, alternating probes, ArduinoJson payload, X-Fleet-Token
 #define SITE_NAME               "Kelvin Drive HQ"
 
 // Hardware Pin Definitions (ESP32-S3)

@@ -1,12 +1,17 @@
-fastapi>=0.115.0
-uvicorn[standard]>=0.30.0
-pydantic>=2.8.0
-pydantic-settings>=2.4.0
-aiosqlite>=0.20.0
-aiomqtt>=2.3.0
-zeroconf>=0.132.0
-python-dotenv>=1.0.1
-httpx>=0.27.0
-pytest>=8.0.0
-pytest-asyncio>=0.23.0
-pyserial>=3.5
+# Pinned (audit 2026-10-02): the lab host runs Python 3.14 and CI runs 3.12 -
+# ">=" floors let the two resolve different trees. Maintain with
+#   pip install pip-tools && pip-compile server/requirements.in   (or uv pip compile)
+fastapi==0.142.2
+uvicorn[standard]==0.54.0
+pydantic==2.13.5
+pydantic-settings==2.15.0
+aiosqlite==0.22.1
+paho-mqtt==2.1.0
+zeroconf==0.151.5
+python-dotenv==1.1.1
+httpx==0.28.1
+pyserial==3.5
+
+# dev / test
+pytest==9.1.1
+pytest-asyncio==1.4.0

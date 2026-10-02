@@ -272,18 +272,30 @@ static void corsHeaders() {
   mcpHttp.sendHeader("Access-Control-Allow-Methods", "POST, GET, OPTIONS");
 }
 
+static bool tokenEquals(const String &a, const String &b) {   // constant-time for equal lengths
+  if (a.length() != b.length()) return false;
+  uint8_t diff = 0;
+  for (size_t i = 0; i < a.length(); i++) diff |= (uint8_t)a[i] ^ (uint8_t)b[i];
+  return diff == 0;
+}
+
 static int httpAuth() {             // 0 = none, 1 = read, 2 = read+write
   if (gCfg.mcpToken.length() == 0) return 1;
   String h = mcpHttp.header("Authorization");
-  return (h == "Bearer " + gCfg.mcpToken) ? 2 : 0;
+  return (h.startsWith("Bearer ") && tokenEquals(h.substring(7), gCfg.mcpToken)) ? 2 : 0;
 }
 
 static void handleMcpPost() {
   corsHeaders();
   int auth = httpAuth();
   if (auth == 0) { mcpHttp.send(401, "application/json", "{\"error\":\"bearer token required\"}"); return; }
+  const String &body = mcpHttp.arg("plain");
+  if (body.length() > MCP_HTTP_MAX_BODY) {
+    mcpHttp.send(413, "application/json", "{\"jsonrpc\":\"2.0\",\"id\":null,\"error\":{\"code\":-32600,\"message\":\"request too large\"}}");
+    return;
+  }
   JsonDocument req;
-  if (deserializeJson(req, mcpHttp.arg("plain"))) {
+  if (deserializeJson(req, body)) {
     mcpHttp.send(400, "application/json", "{\"jsonrpc\":\"2.0\",\"id\":null,\"error\":{\"code\":-32700,\"message\":\"Parse error\"}}");
     return;
   }
@@ -310,6 +322,9 @@ void mcpHttpBegin() {
   });
   mcpHttp.on("/info", HTTP_GET, []() {
     corsHeaders();
+    // Same rule as /mcp: open when no token is provisioned, otherwise it needs
+    // the token too (it reveals site / label / host / IP).
+    if (httpAuth() == 0) { mcpHttp.send(401, "application/json", "{\"error\":\"bearer token required\"}"); return; }
     JsonDocument d; fillInfo(d);
     String out; serializeJson(d, out);
     mcpHttp.send(200, "application/json", out);

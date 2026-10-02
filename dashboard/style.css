@@ -204,12 +204,13 @@ input:focus,select:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(40
   max-height:340px;overflow:auto;white-space:pre-wrap;word-break:break-word;margin:0}
 
 /* ---- drawer ---- */
-.scrim{position:fixed;inset:0;background:rgba(3,6,11,.5);opacity:0;pointer-events:none;transition:opacity .2s;z-index:39}
-.scrim.open{opacity:1;pointer-events:auto}
-.drawer{position:fixed;top:0;right:0;width:min(480px,94vw);height:100vh;
-  background:#0b111c;border-left:1px solid var(--line2);box-shadow:-20px 0 60px rgba(0,0,0,.45);
-  transform:translateX(102%);transition:transform .25s ease;z-index:40;display:flex;flex-direction:column}
-.drawer.open{transform:translateX(0)}
+.drawer{position:fixed;inset:0 0 0 auto;margin:0;max-height:100vh;height:100vh;width:min(480px,94vw);
+  padding:0;border:0;border-left:1px solid var(--line2);background:#0b111c;color:inherit;
+  box-shadow:-20px 0 60px rgba(0,0,0,.45);z-index:40;display:none;flex-direction:column;
+  transform:translateX(102%);transition:transform .25s ease}
+.drawer[open]{display:flex;transform:translateX(0)}
+.drawer::backdrop{background:rgba(3,6,11,.5)}
+@media (prefers-reduced-motion:reduce){.drawer{transition:none}}
 .drawer-h{display:flex;justify-content:space-between;align-items:center;gap:10px;
   padding:16px 18px;border-bottom:1px solid var(--line)}
 .drawer-h strong{font-family:var(--mono);font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}

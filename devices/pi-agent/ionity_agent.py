@@ -47,7 +47,7 @@ try:
 except Exception:                              # noqa: BLE001
     paho = None
 
-FW_VERSION = "1.0.0"
+FW_VERSION = "1.0.1"   # 1.0.1: commands run off paho's thread; Will re-armed after set_meta
 PRODUCT_FALLBACK = "linux-sbc"
 DEFAULT_CONF = "/etc/ionity-agent.conf"
 DNS_PROBE_MAX_NAMES = 12
@@ -442,8 +442,16 @@ class Agent:
         if self.mqtt and self.mqtt_ok:
             self.mqtt.unsubscribe(old_cmd)
             self.mqtt.subscribe(self.topic("cmd"), 1)
-            self.mqtt.will_set(self.topic("status"), json.dumps(self.status("offline")), 1, True)
             self.mqtt.publish(self.topic("status"), json.dumps(self.status("online")), qos=1, retain=True)
+            # A Will is only registered at CONNECT, so will_set() on a live
+            # session changes nothing until the next connect. Re-arm it on the
+            # new topic by bouncing the session; paho's loop thread reconnects.
+            self.mqtt.will_set(self.topic("status"), json.dumps(self.status("offline")), qos=1, retain=True)
+            try:
+                self.mqtt.disconnect()
+                self.mqtt.reconnect()
+            except Exception:                      # noqa: BLE001 - loop_start() keeps retrying
+                log.debug("reconnect after set_meta deferred to paho", exc_info=True)
 
     # -- MQTT -------------------------------------------------------------
     def _on_connect(self, client, userdata, flags, rc, properties=None):
@@ -469,9 +477,15 @@ class Agent:
         if not isinstance(doc, dict):
             return
         log.info("cmd <- %s", doc.get("action"))
+        # Never block paho's network thread: a dns_probe can take 18 s, during
+        # which no PINGREQ/PUBLISH would be processed.
+        threading.Thread(target=self._run_command, args=(client, doc), daemon=True,
+                         name=f"cmd-{doc.get('cmd_id', '')}").start()
+
+    def _run_command(self, client, doc: dict) -> None:
         try:
             ok, detail, after = self.handle_command(doc)
-        except Exception as e:                     # noqa: BLE001 - never kill paho's thread
+        except Exception as e:                     # noqa: BLE001 - never kill the worker
             ok, detail, after = False, f"agent error: {e}", None
         reply = {"device_id": self.device_id, "cmd_id": doc.get("cmd_id", ""), "ok": ok, "detail": detail}
         info = client.publish(self.topic("cmd/result"), json.dumps(reply), qos=1)
@@ -479,7 +493,7 @@ class Agent:
             try:
                 info.wait_for_publish(2)
             except Exception:                      # noqa: BLE001
-                pass
+                log.debug("result publish not confirmed before after-action", exc_info=True)
             after()
 
     def start_mqtt(self) -> None:

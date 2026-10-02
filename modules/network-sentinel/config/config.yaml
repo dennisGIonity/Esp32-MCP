@@ -111,6 +111,13 @@ security:
       protocol: "TCP"
       action: "DROP_AND_FLAG"
 
+speedtest:
+  committed_download_mbps: 200
+  committed_upload_mbps: 200
+  # With speedtest-cli installed the test is real. Without it, results are
+  # only produced when this is true - and every result is labelled simulated.
+  simulate_if_unavailable: true
+
 sentinel:
   mode: "ALONGSIDE_PASSIVE"
   polling_interval_seconds: 2

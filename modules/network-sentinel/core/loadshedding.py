@@ -64,9 +64,9 @@ class LoadSheddingEngine:
 
     def _parse_api_response(self, raw: Dict[str, Any]) -> Dict[str, Any]:
         events = raw.get("events", [])
-        schedule = raw.get("schedule", {})
-        info = raw.get("info", {})
-        
+        info = raw.get("info", {}) or {}
+        area_name = info.get("name") or self.area_name     # EskomSePush reports the area's own name
+
         current_stage = 0
         is_active = False
         next_event = None
@@ -91,7 +91,7 @@ class LoadSheddingEngine:
 
         return {
             "area_id": self.area_id,
-            "area_name": self.area_name,
+            "area_name": area_name,
             "current_stage": current_stage,
             "is_currently_loadshedding": is_active,
             "next_event": next_event,

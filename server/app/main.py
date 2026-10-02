@@ -6,9 +6,9 @@ Doc ID: DOC-2026-09-ESP32MCP-SRV | Policy 986 AED
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from contextlib import asynccontextmanager
-from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -40,11 +40,12 @@ async def broadcaster(app: FastAPI) -> None:
     while True:
         try:
             if ws_clients:
-                payload = app.state.registry.dashboard_payload()
+                # Serialise once, not once per client.
+                frame = json.dumps(app.state.registry.dashboard_payload(), default=str)
                 dead = set()
                 for ws in list(ws_clients):
                     try:
-                        await ws.send_json(payload)
+                        await ws.send_text(frame)
                     except Exception:
                         dead.add(ws)
                 for d in dead:
@@ -144,14 +145,16 @@ app = FastAPI(
         "Telemetry ingest, fleet registry, alerting and Model Context Protocol "
         "gateway for 1000+ ESP32 edge nodes. Policy 986 AED."
     ),
-    version="2.0.0",
+    version="2.0.1",
     lifespan=lifespan,
 )
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_list,
-    allow_credentials=True,
+    # Bearer tokens travel in a header, not a cookie: credentials mode is not
+    # needed, and "*" + credentials is an invalid combination per Fetch spec.
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )

@@ -251,7 +251,8 @@ def test_firmware_and_provisioning_routes(tmp_path, monkeypatch):
         assert d["admin"] is True and "fleet_token" in d
         assert c.get("/api/v1/integrations").json()["datadog"]["enabled"] is False
         h = c.get("/api/v1/health").json()
-        assert h["mcp"]["server"] == "2.0.0" and "datadog" in h
+        from app.mcp import protocol as _proto
+        assert h["mcp"]["server"] == _proto.SERVER_VERSION and "datadog" in h
 
 
 def test_stale_pinned_advertise_ip_falls_back():

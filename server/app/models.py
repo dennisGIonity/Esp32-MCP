@@ -6,7 +6,7 @@ is stored, charted and MCP-queryable with no server change.
 from __future__ import annotations
 
 import time
-from typing import Any, Literal
+from typing import Any, ClassVar, Literal
 from pydantic import BaseModel, Field
 
 
@@ -30,10 +30,25 @@ class TelemetryIn(BaseModel):
     metrics: dict[str, float | int | bool | str] = Field(default_factory=dict)
     net: NetInfo = Field(default_factory=NetInfo)
     ts: float | None = None          # server fills if device has no RTC
+    # fw >= 2.0.1: how old this reading is relative to the moment the board
+    # sent it. A board with no RTC that replays its offline buffer sets this,
+    # so 40 buffered samples land at their real times instead of one burst.
+    age_ms: int | None = Field(default=None, ge=0, le=7 * 86400 * 1000)
     mode: str | None = None          # fw >= 2.0 state mode
 
-    def at(self) -> float:
-        return self.ts if self.ts else time.time()
+    # A device clock may be unset (1970) or wrong; never let it write history
+    # more than this far from the server's clock.
+    MAX_SKEW_S: ClassVar[float] = 600.0
+
+    def at(self, received_at: float | None = None) -> float:
+        now = received_at if received_at is not None else time.time()
+        if self.ts and abs(self.ts - now) <= self.MAX_SKEW_S:
+            base = self.ts
+        else:
+            base = now
+        if self.age_ms:
+            base -= self.age_ms / 1000.0
+        return base
 
 
 class StatusIn(BaseModel):
