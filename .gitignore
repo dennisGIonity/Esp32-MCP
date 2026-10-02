@@ -73,3 +73,5 @@ fwbuild*.txt
 fwbuild*.err
 warn_*.txt
 .ruff_cache/
+pideploy*.txt
+pideploy*.err
