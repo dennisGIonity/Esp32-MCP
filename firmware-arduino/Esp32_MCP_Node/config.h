@@ -38,7 +38,7 @@
 #endif
 
 // --- Firmware identity -----------------------------------------------------
-#define FW_VERSION            "2.0.1"   // 2.0.1: age_ms on every reading (buffered samples keep their time), bounds-checked dns_probe parser run from loop(), MCP HTTP body cap + constant-time token check; 2.0.0: NVS/serial provisioning, on-device MCP server, edge inference, actuators, state modes; 1.2.0: dns_probe against Gate^Flame; 1.1.0: OLED auto-detect + set_display
+#define FW_VERSION            "2.1.1"   // 2.1.1: non-blocking USB-CDC log writes (native-USB boards stalled loop() by 8 s when no host read the port); 2.1.0: WiFi rescue (known networks) + set_wifi command; 2.0.1: age_ms on every reading (buffered samples keep their time), bounds-checked dns_probe parser run from loop(), MCP HTTP body cap + constant-time token check; 2.0.0: NVS/serial provisioning, on-device MCP server, edge inference, actuators, state modes; 1.2.0: dns_probe against Gate^Flame; 1.1.0: OLED auto-detect + set_display
 // Gate^Flame box the dns_probe command asks by default (lab Pi, eth0). Overridable
 // per unit without reflashing: the command's "dns_server" field, or NVS key "gf_dns".
 #define GF_DNS_DEFAULT        "192.168.124.3"
@@ -89,6 +89,9 @@
 #define SENSOR_SAMPLE_MS      2000
 #define HEARTBEAT_STATUS_MS   30000
 #define WIFI_RETRY_MS         12000   // one association attempt can take ~8 s
+// After this many consecutive "SSID not found" results (~1 min) the board
+// scans and joins any network it has joined before (WifiRescue tab).
+#define WIFI_RESCUE_AFTER     5
 #define MQTT_RETRY_MS         5000
 
 // --- ICMP probing ----------------------------------------------------------

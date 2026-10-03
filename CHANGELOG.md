@@ -5,6 +5,31 @@ AEDI - IONITY GLOBAL | DOC-2026-09-ESP32MCP-CHG | Policy 986 AED
 
 # Changelog
 
+## 2.1.0 — 2026-10-03
+
+### Firmware 2.1.0
+- **WiFi rescue.** Every network a board has joined is remembered (3, NVS). After ~1 min of "SSID not
+  found" the board scans and joins any known network it can see, so a renamed or reset router no longer
+  strands the fleet - the board comes back on its previous network and can be re-pointed from the host.
+- **`set_wifi` command** (host → board over MQTT, admin token): rotate one board or the whole fleet
+  (`broadcast`) to a new SSID/password *before* the router changes. The old network is kept as a fallback.
+  Nothing is reflashed. The host never writes the password to its command log.
+- `hello`/`get` report `known_networks` (names only).
+
+### Firmware 2.1.1
+- **Native-USB boards stalled.** On USB-CDC (CDCOnBoot=cdc) every `Serial.print` waited up to 2 s when a
+  host had opened the port and stopped reading: loop() stretched to 8 s and MCP replies with it (seen on
+  lab-node-02 on the Pi). TX timeout now 5 ms: read_telemetry 8 s → 150 ms, loop max 2 s → 28 ms.
+
+### Host / MCP 2.1.0
+- `send_command` accepts `set_wifi {ssid, pass}`; password redacted in the `commands` table.
+
+### Lab (2026-10-03)
+- Both lab ESP32-S3s online on the lab WiFi, fw 2.0.1 → 2.1.0, MCP tools answering in ~100 ms through the host.
+- Root cause of "boards never show up": the H3C factory reset (09-29) renamed the 2.4 GHz network; the boards
+  kept asking for the old SSID. Password was unchanged, so renaming the SSID on the boards was enough.
+
+
 ## 2.0.1 — 2026-10-02 (A-to-Z audit; see `docs/AUDIT-2026-10-02.md`)
 
 ### Fixed

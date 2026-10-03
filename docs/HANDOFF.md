@@ -112,3 +112,15 @@ Policy 986 AED | (c) 2018-2026 Antwerp Designs | Ionity (Pty) Ltd | www.ionity.t
 - Pi 5: eth0 192.168.124.3 (lab, no default route; DHCP static entry added on the H3C), wlan0 Afrihost (household
   internet, default route). Internet + NTP OK. Laptop lab NIC = 192.168.124.2 (host adapts; pin .4 or update lab.json).
 - lab-node-02 (native USB) was online on the household WiFi on 09-29; currently unplugged/offline.
+
+## 2026-10-03 (night): both boards online, fw 2.1.0 WiFi rescue
+- lab-node-01 esp32-98a316e5d18c: laptop COM3 (CH340), 192.168.124.4. lab-node-02 esp32-fc012cd8ea14: Pi /dev/ttyACM0
+  (native USB), 192.168.124.5. Both on **Ionity-LAB_2.4G**, host 192.168.124.2, MQTT, MCP answering (read_telemetry
+  85-114 ms, run_inference, identify). secrets.h + lab.json SSIDs updated to Ionity-LAB_2.4G / Ionity-LAB_5G.
+- Why they were not picked up: the router reset renamed the SSID. Fix going forward = fw 2.1.0 WiFi rescue
+  (known networks) + `set_wifi` broadcast before any router change. See CHANGELOG 2.1.0.
+- H3C: DHCP static entry for the Pi's eth0 (192.168.124.3) was added on 09-29 (confirm under Interface → DHCP Static
+  List); laptop is .2 (lab.json still says .4 - pin it or change lab.json).
+- Pi: wlan0 = household internet (default route), eth0 = lab only. Pi flash toolchain in ~/ionity-flash (offline wheels).
+- fw 2.1.1: USB-CDC TX timeout 5 ms (native-USB board stalled 8 s per MCP call while a closed serial session
+  left the CDC "connected"). Both boards answer MCP in ~100-150 ms through the host.

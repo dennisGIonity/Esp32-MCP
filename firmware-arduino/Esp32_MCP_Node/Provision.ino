@@ -95,6 +95,7 @@ static void provFillInfo(JsonDocument &d) {
   d["has_mcp_token"] = gCfg.mcpToken.length() > 0;
   d["has_ota_pass"]  = gCfg.otaPass.length() > 0;
   d["mode"]       = modeName(gMode);
+  knownNetworksToJson(d["known_networks"].to<JsonArray>());
   bool up = WiFi.status() == WL_CONNECTED;
   d["wifi"]       = up ? "connected" : "down";
   if (!up && gWifiReason) { d["wifi_reason"] = gWifiReason; d["wifi_error"] = wifiReasonText(gWifiReason); }

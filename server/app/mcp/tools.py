@@ -114,7 +114,9 @@ MCP_TOOLS: list[dict[str, Any]] = [
             "for each of up to 12 'names' and reports the answer: an address, "
             "0.0.0.0 = blocked, NXDOMAIN, SERVFAIL or TIMEOUT; read the reply "
             "with get_command_results), set_state_mode (fw >= 2.0: mode STANDBY|ACTIVE|"
-            "INFERENCE_ACTIVE|LOW_POWER_SLEEP|FAILSAFE, duration_s for sleep). Requires MQTT."
+            "INFERENCE_ACTIVE|LOW_POWER_SLEEP|FAILSAFE, duration_s for sleep), set_wifi (fw >= 2.1: "
+            "move the board - or 'broadcast' the whole fleet - to a new WiFi ssid/pass without "
+            "reflashing; the old network is kept as a fallback). Requires MQTT."
         ),
         "inputSchema": {
             "type": "object",
@@ -122,7 +124,9 @@ MCP_TOOLS: list[dict[str, Any]] = [
                 "device_id": {"type": "string"},
                 "action": {"type": "string",
                            "enum": ["reboot", "identify", "ping", "set_meta", "set_display",
-                                    "dns_probe", "set_state_mode"]},
+                                    "dns_probe", "set_state_mode", "set_wifi"]},
+                "ssid": {"type": "string", "description": "set_wifi: new network name (2.4 GHz)"},
+                "pass": {"type": "string", "description": "set_wifi: its WPA2 password (never logged)"},
                 "mode": {"type": "string",
                          "enum": ["STANDBY", "ACTIVE", "INFERENCE_ACTIVE", "LOW_POWER_SLEEP", "FAILSAFE"]},
                 "duration_s": {"type": "integer", "maximum": 86400},
@@ -496,9 +500,13 @@ async def execute(name: str, args: dict, registry, store, dns=None, integrations
     if name == "send_command":
         payload = {k: v for k, v in args.items()
                    if k in ("site", "group", "label", "driver", "sda", "scl",
-                            "dns_server", "names", "mode", "duration_s") and v is not None}
+                            "dns_server", "names", "mode", "duration_s", "ssid", "pass") and v is not None}
         if args.get("action") == "set_state_mode" and not payload.get("mode"):
             raise ToolArgError("set_state_mode needs mode")
+        if args.get("action") == "set_wifi":
+            if not payload.get("ssid"):
+                raise ToolArgError("set_wifi needs ssid (and pass unless the network is open)")
+            payload.setdefault("pass", "")
         if args.get("action") == "dns_probe":
             names = payload.get("names") or []
             if not names or len(names) > 12:

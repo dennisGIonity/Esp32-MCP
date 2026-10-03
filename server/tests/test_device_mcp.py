@@ -271,3 +271,16 @@ def test_pinned_ip_prefers_same_subnet(monkeypatch):
     assert ip == "192.168.124.2" and "same network" in warn
     ip, warn = d.choose_advertise_ip("10.9.9.9")              # other network entirely
     assert ip == "192.168.0.2" and "not on any adapter" in warn
+
+
+async def test_set_wifi_command_redacts_password(stack):
+    store, reg, mcp, board = stack
+    res = await call(mcp, "send_command", {"device_id": "esp32-aabbccddeeff", "action": "set_wifi"})
+    assert res["isError"]
+    res = await call(mcp, "send_command", {"device_id": "esp32-aabbccddeeff", "action": "set_wifi",
+                                           "ssid": "Ionity-LAB_2.4G", "pass": "s3cretpass"})
+    assert not res["isError"]
+    assert board.seen[-1]["ssid"] == "Ionity-LAB_2.4G" and board.seen[-1]["pass"] == "s3cretpass"
+    async with store.db.execute("SELECT payload FROM commands ORDER BY id DESC LIMIT 1") as cur:
+        row = await cur.fetchone()
+    assert "s3cretpass" not in row[0] and '"pass": "***"' in row[0]

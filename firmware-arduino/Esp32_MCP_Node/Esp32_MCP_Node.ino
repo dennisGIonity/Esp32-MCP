@@ -78,6 +78,7 @@ unsigned long lastSample = 0, lastTelemetry = 0, lastStatus = 0;
 unsigned long lastWifiTry = 0, lastMqttTry = 0, lastProbe = 0, lastFast = 0;
 bool gWifiKick = true;          // next ensureWifi() tries immediately (boot, new credentials)
 uint8_t gWifiReason = 0;        // last STA disconnect reason from the WiFi driver (0 = none)
+volatile bool gWifiJoined = false;   // set by the GOT_IP event; loop() records the network
 
 // Human text for the disconnect reasons that matter when a board won't join.
 const char *wifiReasonText(uint8_t r) {
@@ -510,6 +511,14 @@ void onMqttMessage(char *topic, byte *payload, unsigned int len) {
     String err;
     bool ok = applyStateMode(mode, 0, err, cmdId);
     publishCmdResult(cmdId, ok, ok ? String("mode ") + modeName(gMode) : err);
+  } else if (action == "set_wifi") {
+    // Rotate to a new network without reflashing (host enforces the admin token).
+    String err = applySetWifi(doc.as<JsonVariantConst>());
+    if (err.length()) { publishCmdResult(cmdId, false, err); return; }
+    publishCmdResult(cmdId, true, "wifi stored: " + gCfg.wifiSsid + " (previous kept as fallback); reconnecting");
+    mqtt.loop(); delay(200);
+    WiFi.disconnect(false, false);
+    gWifiKick = true;
   } else if (action == "ping") {
     publishCmdResult(cmdId, true, "pong");
   } else if (action == "dns_probe") {
@@ -562,10 +571,13 @@ void ensureWifi() {
         // retry - keep the reason that actually explains the failure.
         if (r != 8 && r != 36) gWifiReason = r;
       }
-      if (e == ARDUINO_EVENT_WIFI_STA_GOT_IP) gWifiReason = 0;
+      if (e == ARDUINO_EVENT_WIFI_STA_GOT_IP) { gWifiReason = 0; gWifiJoined = true; }
     });
   }
-  if (gWifiReason) logln("WiFi: last attempt failed - reason " + String(gWifiReason) + " " + wifiReasonText(gWifiReason));
+  if (gWifiReason) {
+    logln("WiFi: last attempt failed - reason " + String(gWifiReason) + " " + wifiReasonText(gWifiReason));
+    wifiRescueTick(gWifiReason);                 // may switch to a known network
+  }
   logln("WiFi connecting to \"" + gCfg.wifiSsid + "\" ...");
   WiFi.mode(WIFI_STA);
   WiFi.setHostname((String(OTA_HOSTNAME_PREFIX) + macSuffix()).c_str());
@@ -741,6 +753,15 @@ void onWifiUp() {
 void setup() {
   Serial.setRxBufferSize(1024);    // before begin(): core 3.x ignores it afterwards
   Serial.begin(SERIAL_BAUD);
+#if ARDUINO_USB_CDC_ON_BOOT
+  // Native USB (HWCDC / USBCDC, CDCOnBoot=cdc). Once a host has opened the
+  // port and gone away, every Serial.print blocks until its TX timeout - on
+  // lab-node-02 that stretched loop() to 8 s and MCP replies with it (the
+  // core waits up to 20 x tx_timeout per write under host back-pressure,
+  // 100 ms default). 5 ms bounds a stuck write to ~100 ms; 0 would also drop
+  // provisioning replies queued before the host attaches.
+  Serial.setTxTimeoutMs(5);
+#endif
   delay(1200);                      // let native-USB CDC enumerate
   Serial.println();
   logln("=========================================================");
@@ -755,6 +776,7 @@ void setup() {
 
   loadIdentity();
   loadConfig();                     // Provision tab: NVS, seeded once from secrets.h
+  loadKnownNetworks();              // WifiRescue tab
   loadStateMode();                  // EdgeAI tab: FAILSAFE survives a reboot
   loadActuatorPins();
 
@@ -809,6 +831,7 @@ void loop() {
 
   ensureWifi();
   bool up = (WiFi.status() == WL_CONNECTED);
+  if (gWifiJoined) { gWifiJoined = false; rememberNetwork(gCfg.wifiSsid, gCfg.wifiPass); }
   if (up && !gWasUp) onWifiUp();                    // (re)joined after boot
   if (!up) gWasUp = false;
 

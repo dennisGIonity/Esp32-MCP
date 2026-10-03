@@ -138,8 +138,12 @@ async def device_command(request: Request, device_id: str, cmd: CommandIn,
                          x_fleet_token: str | None = Header(default=None)):
     if not _is_admin(request):
         raise HTTPException(status_code=401, detail="admin token required (Authorization: Bearer ...)")
-    payload = {k: v for k, v in cmd.model_dump().items()
+    payload = {k: v for k, v in cmd.model_dump(by_alias=True).items()
                if k != "action" and v is not None}
+    if cmd.action == "set_wifi":
+        if not payload.get("ssid"):
+            raise HTTPException(status_code=422, detail="set_wifi needs ssid")
+        payload.setdefault("pass", "")
     return await request.app.state.registry.send_command(device_id, cmd.action, payload)
 
 

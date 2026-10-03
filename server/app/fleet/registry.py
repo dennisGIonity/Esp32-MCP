@@ -431,5 +431,7 @@ class FleetRegistry:
             return {"ok": False, "error": "MQTT publisher unavailable - commands need the broker"}
         body = {"action": action, "cmd_id": self._new_cmd_id(), **payload}
         ok = await self.command_publisher(device_id, action, body)
-        await self.store.log_command(device_id, action, json.dumps(body))
+        # Never persist a WiFi / MQTT password in the command log.
+        logged = {k: ("***" if k in ("pass", "mqtt_pass") else v) for k, v in body.items()}
+        await self.store.log_command(device_id, action, json.dumps(logged))
         return {"ok": ok, "device_id": device_id, "command": body}

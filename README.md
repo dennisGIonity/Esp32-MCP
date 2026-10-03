@@ -113,7 +113,7 @@ Local models (Ollama through any MCP client, e.g. `mcphost` or Open WebUI's MCP 
 | `list_devices`, `get_device` | Filter / page the fleet; one board plus history (shows `mode`, `mcp_url`, `sleeping_until`). |
 | `query_telemetry`, `aggregate_metric` | Time series, or mean/min/max + top-10 for a metric. |
 | `get_alerts` | Open or historical alerts. |
-| `send_command` ⚠ | reboot / identify / ping / set_meta / set_display / dns_probe / **set_state_mode**; one board or `broadcast`. |
+| `send_command` ⚠ | reboot / identify / ping / set_meta / set_display / dns_probe / **set_state_mode** / **set_wifi** (rotate the fleet to a new SSID before the router changes); one board or `broadcast`. |
 | `get_command_results` | Replies to commands, and edge-inference events. |
 | **`device_list_tools`** | Ask one board which MCP tools it has (goes to the board). |
 | **`device_call_tool`** ⚠* | Call a tool on the board's own MCP server and get its answer (~5 ms on the LAN). |
@@ -122,6 +122,10 @@ Local models (Ollama through any MCP client, e.g. `mcphost` or Open WebUI's MCP 
 
 ⚠ = changes hardware; needs the admin token when one is set. \* only the write tools
 (`set_actuator`, `set_state_mode`, `identify`); `read_telemetry`, `get_device_info`, `run_inference` are open.
+
+**WiFi rescue (fw 2.1):** a board remembers the networks it has joined; if its configured SSID disappears
+(router reset / rename) it joins any known network it can see, so it stays reachable and can be re-pointed
+with `set_wifi` instead of a cable.
 
 ### 2 · On-device MCP (every fw 2.0 board)
 

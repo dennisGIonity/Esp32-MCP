@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import time
 from typing import Any, ClassVar, Literal
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class NetInfo(BaseModel):
@@ -100,8 +100,11 @@ class Alert(BaseModel):
 
 
 class CommandIn(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
     action: Literal["reboot", "identify", "ping", "set_meta", "set_display", "dns_probe",
-                    "set_state_mode"]
+                    "set_state_mode", "set_wifi"]
+    ssid: str | None = Field(default=None, min_length=1, max_length=32)
+    pass_: str | None = Field(default=None, alias="pass", max_length=63)
     mode: Literal["STANDBY", "ACTIVE", "INFERENCE_ACTIVE", "LOW_POWER_SLEEP", "FAILSAFE"] | None = None
     duration_s: int | None = Field(default=None, ge=5, le=86400)
     # dns_probe: ask a resolver (default: Gate^Flame at the node's configured
