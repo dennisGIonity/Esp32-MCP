@@ -479,8 +479,8 @@ refreshAlerts();
 pollHealth();
 tickClock();
 setInterval(tickClock, 1000);
-setInterval(refreshAlerts, 10000);
-setInterval(pollHealth, 10000);
+setInterval(() => { if (!document.hidden) refreshAlerts(); }, 10000);
+setInterval(() => { if (!document.hidden) pollHealth(); }, 10000);
 window.addEventListener("resize", () => drawSpark($("rateChart"), RATE));
 
 /* ----------------------------------------------------------------- */
@@ -514,6 +514,8 @@ async function refreshDns() {
     ]);
 
     const res = sum.resolver || {};
+    DNS_RUNNING = !!res.running;
+    DNS_LAST_Q = sum.queries ?? 0;
     if (res.running) {
       $("dnsState").textContent = `resolver up on ${res.bind} → ${(res.upstreams || []).join(", ")}`;
     } else if (res.bind_error) {
@@ -579,5 +581,19 @@ $("dnsWindow").onchange = (e) => {
   DNS_QUERY ? runDnsSearch() : refreshDns();
 };
 
-refreshDns();
-setInterval(() => { if (!DNS_QUERY) refreshDns(); }, 5000);
+/* Adaptive poll: 5 s while the resolver is up and seeing traffic, 15 s when it is
+   up but idle, 30 s when it is down/disabled (nothing can change), and nothing at
+   all while the tab is hidden - the WebSocket keeps the fleet view live anyway. */
+let DNS_RUNNING = false, DNS_LAST_Q = 0;
+function dnsPollMs() {
+  if (!DNS_RUNNING) return 30000;
+  return DNS_LAST_Q > 0 ? 5000 : 15000;
+}
+async function dnsTick() {
+  if (!DNS_QUERY && !document.hidden) await refreshDns();
+  setTimeout(dnsTick, dnsPollMs());
+}
+refreshDns().then(() => setTimeout(dnsTick, dnsPollMs()));
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden) { refreshAlerts(); pollHealth(); if (!DNS_QUERY) refreshDns(); }
+});

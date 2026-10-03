@@ -39,7 +39,7 @@ Copy-Tree 'flasher\dist' 'flasher\dist' -excludeFiles @('*.map')
 Copy-Tree 'firmware\dist' 'firmware\dist'
 Copy-Tree 'devices\pi-agent' 'devices\pi-agent'
 New-Item -ItemType Directory -Force "$Out\scripts", "$Out\broker", "$Out\docs" | Out-Null
-Copy-Item "$Root\scripts\device_emulator.py", "$Root\scripts\purge_devices.py" "$Out\scripts\"
+Copy-Item "$Root\scripts\device_emulator.py", "$Root\scripts\purge_devices.py", "$Root\scripts\smoke_live.py" "$Out\scripts\"
 Copy-Item "$Root\packaging\broker\run_broker.py", "$Root\packaging\broker\requirements.txt" "$Out\broker\"
 foreach ($doc in 'DEPLOYABLES.md') { if (Test-Path "$Root\docs\$doc") { Copy-Item "$Root\docs\$doc" "$Out\docs\" } }
 Copy-Item "$Root\CHANGELOG.md" "$Out\" -ErrorAction SilentlyContinue

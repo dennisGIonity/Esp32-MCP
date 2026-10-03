@@ -88,6 +88,13 @@ async def test_missing_and_bad_args_are_tool_errors(mcp):
                                                 "arguments": {"device_id": "esp32-aaa",
                                                               "action": "set_meta"}}))
     assert r["result"]["isError"] and "set_meta needs" in text(r)
+    # unknown device id is a tool-level failure, not a successful answer
+    r = await srv.handle(rpc(5, "tools/call", {"name": "get_device",
+                                                "arguments": {"device_id": "nope-000"}}))
+    assert r["result"]["isError"] and "unknown device" in text(r)
+    r = await srv.handle(rpc(6, "tools/call", {"name": "device_list_tools",
+                                                "arguments": {"device_id": "nope-000"}}))
+    assert r["result"]["isError"]
 
 
 def test_limits_are_clamped_not_rejected():

@@ -37,7 +37,7 @@ full illustrated manual.
 | `STOP.cmd` | Stops only the processes this package started |
 | `OPEN-DASHBOARD.cmd` | Opens the dashboard |
 | `FLASH-BOARD.cmd` | Opens the web flasher (`/flasher/`) |
-| `RUN-TESTS.cmd` | Runs the server test suite (pytest) |
+| `RUN-TESTS.cmd` | Unit suite (pytest) + live A-Z smoke of the running stack (REST, MCP, WebSocket, MQTT round-trip); evidence in `logs\smoke_live.json` |
 | `DEMO-DEVICE.cmd` / `PURGE-DEMO.cmd` | Add / remove one simulated device |
 
 ## What to test (checklist)
@@ -51,7 +51,7 @@ full illustrated manual.
 - [ ] **Identify all** asks for confirmation, then blinks every online board
 - [ ] MCP console: `fleet_summary`, `list_devices`, `get_device` return live JSON (Ctrl+Enter runs)
 - [ ] Unplug a board: it turns *stale* then *offline* (Last Will) and the KPIs update
-- [ ] RUN-TESTS: all tests pass
+- [ ] RUN-TESTS: unit tests pass AND live smoke reports 0 failed
 
 ## Use with Claude Desktop (MCP)
 

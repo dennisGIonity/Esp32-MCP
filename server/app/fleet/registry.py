@@ -424,6 +424,34 @@ class FleetRegistry:
                 "elapsed_ms": round((time.monotonic() - t0) * 1000),
                 "response": resp}
 
+    async def forget_device(self, device_id: str) -> dict:
+        """Drop a device from the live registry AND the store (telemetry, alerts,
+        command log). For demo/emulated boards and decommissioned hardware.
+        Does not touch the broker: clear any retained status there separately
+        or a Last-Will will re-create the device on its next reconnect."""
+        if device_id not in self.devices:
+            return {"ok": False, "error": f"unknown device '{device_id}'"}
+        # Flush pending writes for it first so the delete is not raced by the writer.
+        pending = []
+        while not self.queue.empty():
+            try:
+                pending.append(self.queue.get_nowait())
+            except asyncio.QueueEmpty:
+                break
+        kept = [p for p in pending if p[0].device_id != device_id]
+        for p in kept:
+            self.queue.put_nowait(p)
+        self.devices.pop(device_id, None)
+        self.cmd_results = deque((r for r in self.cmd_results if r.get("device_id") != device_id),
+                                 maxlen=self.cmd_results.maxlen)
+        try:
+            counts = await self.store.delete_device(device_id)
+        except NotImplementedError:
+            counts = {}
+        log.info("forgot device %s (%s)", device_id, counts)
+        return {"ok": True, "device_id": device_id, "deleted": counts,
+                "dropped_pending_writes": len(pending) - len(kept)}
+
     async def send_command(self, device_id: str, action: str, payload: dict) -> dict:
         if device_id not in self.devices and device_id != "broadcast":
             return {"ok": False, "error": f"unknown device '{device_id}'"}

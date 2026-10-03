@@ -55,7 +55,7 @@ footer a{color:var(--muted)}
 <header>
   <div class="mark" aria-hidden="true">◈</div>
   <div><h1>ESP32-MCP Testers Manual</h1>
-  <div class="sub">Ionity Fleet Monitor · MCP server 2.0.1 · firmware 2.1 · DOC-2026-10-TESTERS · v1.0 · 03 Oct 2026</div></div>
+  <div class="sub">Ionity Fleet Monitor · MCP server 2.0.2 · firmware 2.1 · DOC-2026-10-TESTERS · v1.0 · 03 Oct 2026</div></div>
 </header>
 <nav aria-label="Sections">
   <a href="#what">What it is</a><a href="#start">Quick start</a><a href="#files">.cmd files</a><a href="#flash">Flash a board</a>
@@ -72,7 +72,7 @@ the only simulated device is the one you add yourself with <code>DEMO-DEVICE.cmd
   <div><b>MQTT broker</b>:1883 (bundled)</div>
   <div><b>Fleet server</b>:8099 REST · WebSocket · MCP</div>
   <div><b>Dashboard</b>live view + controls</div>
-  <div><b>Claude / MCP</b>17 fleet tools</div>
+  <div><b>Claude / MCP</b>18 fleet tools</div>
 </div>
 </section>
 
@@ -98,7 +98,7 @@ No admin rights.</p>
 <tr><td><code>STOP.cmd</code></td><td>Stops only the processes this package started.</td></tr>
 <tr><td><code>OPEN-DASHBOARD.cmd</code></td><td>Opens the dashboard in your browser.</td></tr>
 <tr><td><code>FLASH-BOARD.cmd</code></td><td>Opens the web flasher with the bundled firmware images.</td></tr>
-<tr><td><code>RUN-TESTS.cmd</code></td><td>Runs the server test suite. Expect every test to pass.</td></tr>
+<tr><td><code>RUN-TESTS.cmd</code></td><td>Runs the unit suite, then (if the stack is up) the live A&ndash;Z smoke: every REST route, every MCP tool, the WebSocket feed and a real MQTT command round-trip on a throw-away emulated board. Expect <em>0 failed</em>; the evidence matrix lands in <code>logs\smoke_live.json</code>.</td></tr>
 <tr><td><code>DEMO-DEVICE.cmd</code></td><td>Adds one simulated board, labelled <i>DEMO &ndash; simulated</i>, group <i>emulated</i>.</td></tr>
 <tr><td><code>PURGE-DEMO.cmd</code></td><td>Stops and deletes the demo board from the database.</td></tr>
 </table></div>
@@ -130,7 +130,7 @@ and Windows Firewall must allow ports 8099 and 1883 on a Private network.</p>
   <b>Identify</b>, <b>Ping</b> (shows the real reply and round-trip time) and <b>Reboot</b> (asks first). Close with ✕, Escape or a click outside.</td></tr>
 <tr><td>Open alerts</td><td>Threshold and offline alerts raised by the server.</td></tr>
 <tr><td>LAN DNS</td><td>Which device looked up which domain. Empty until the router hands out this PC as DNS (see <code>IONITY_DNS_PORT</code>).</td></tr>
-<tr><td>MCP console</td><td>Pick any of the 17 tools, edit the JSON arguments, <b>Run</b> (or Ctrl+Enter). Same calls an AI assistant makes.</td></tr>
+<tr><td>MCP console</td><td>Pick any of the 18 tools, edit the JSON arguments, <b>Run</b> (or Ctrl+Enter). Same calls an AI assistant makes.</td></tr>
 </table></div>
 </section>
 
@@ -146,7 +146,7 @@ HTTP clients can call JSON-RPC directly at <code>POST /api/v1/mcp/rpc</code>.</p
 <section id="test"><h2>Test checklist</h2>
 <p class="sub">Tick as you go (kept only in this page while it is open). Send results with STATUS.cmd output and the <code>logs</code> folder.</p>
 <div class="chk">
-<label><input type="checkbox"> STATUS shows <code>server UP</code>, <code>mqtt=True</code>, <code>mcp=2.0.1 (17 tools)</code></label>
+<label><input type="checkbox"> STATUS shows <code>server UP</code>, <code>mqtt=True</code>, <code>mcp=2.0.2 (18 tools)</code></label>
 <label><input type="checkbox"> KPIs match the real number of boards; clock and ingest chart move</label>
 <label><input type="checkbox"> Search and the three filters narrow the device grid; "N of M shown" updates</label>
 <label><input type="checkbox"> Drawer opens by click and by Tab + Enter; closes by ✕, Escape and outside click</label>

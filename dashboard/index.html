@@ -8,7 +8,7 @@
 <meta name="copyright" content="(c) 2018-2026 Antwerp Designs | Ionity (Pty) Ltd">
 <meta name="description" content="Live monitoring for the Ionity ESP32-MCP edge fleet. Policy 986 AED.">
 <meta name="color-scheme" content="dark">
-<link rel="stylesheet" href="/static/style.css?v=3">
+<link rel="stylesheet" href="/static/style.css?v=4">
 </head>
 <body>
 <div class="wrap">
@@ -64,15 +64,15 @@
   </div>
   <div class="toolbar">
     <input id="search" type="search" placeholder="Search device id, label or IP…">
-    <select id="fHealth">
+    <select id="fHealth" aria-label="Filter by health">
       <option value="">All health</option>
       <option value="online">Online</option>
       <option value="stale">Stale</option>
       <option value="offline">Offline</option>
       <option value="alerting">Alerting</option>
     </select>
-    <select id="fSite"><option value="">All sites</option></select>
-    <select id="fGroup"><option value="">All groups</option></select>
+    <select id="fSite" aria-label="Filter by site"><option value="">All sites</option></select>
+    <select id="fGroup" aria-label="Filter by group"><option value="">All groups</option></select>
     <button id="btnBroadcast" class="btn ghost">Identify all</button>
   </div>
   <div id="grid" class="grid" role="list" aria-label="Devices" aria-live="off"></div>
@@ -103,7 +103,7 @@
 
   <div class="toolbar">
     <input id="dnsSearch" type="search" placeholder="Search domains across the LAN… (e.g. tiktok)">
-    <select id="dnsWindow">
+    <select id="dnsWindow" aria-label="DNS time window">
       <option value="60">Last hour</option>
       <option value="360">Last 6 hours</option>
       <option value="1440" selected>Last 24 hours</option>
@@ -133,8 +133,8 @@
     <span class="muted"><code>POST /api/v1/mcp/rpc</code></span>
   </div>
   <div class="mcpbar">
-    <select id="mcpTool"></select>
-    <input id="mcpArgs" value="{}" spellcheck="false">
+    <select id="mcpTool" aria-label="MCP tool"></select>
+    <input id="mcpArgs" value="{}" spellcheck="false" aria-label="MCP tool arguments (JSON) - Ctrl+Enter to run" placeholder="{} - Ctrl+Enter runs">
     <button id="mcpRun" class="btn">Call tool</button>
   </div>
   <pre id="mcpOut" class="out">Pick a tool and call it. This is the exact surface Claude / AEDi sees.</pre>
@@ -155,6 +155,6 @@
   <div id="dBody" class="drawer-b"></div>
 </dialog>
 
-<script src="/static/app.js?v=3"></script>
+<script src="/static/app.js?v=4"></script>
 </body>
 </html>

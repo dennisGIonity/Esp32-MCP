@@ -159,6 +159,20 @@ MCP_TOOLS: list[dict[str, Any]] = [
             },
         },
     },
+    {
+        "name": "forget_device",
+        "description": (
+            "Remove a device from the fleet: live registry plus every stored row "
+            "(telemetry, alerts, command log). For emulated/demo boards and "
+            "decommissioned hardware. Irreversible - confirm with the user first. "
+            "If the board is still publishing it will simply re-register."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "required": ["device_id"],
+            "properties": {"device_id": {"type": "string"}},
+        },
+    },
 ]
 
 # ---------------------------------------------------------------------------
@@ -315,10 +329,10 @@ _TITLES = {
     "dns_top_domains": "Top domains", "dns_search": "Search DNS",
     "dns_recent": "Recent DNS queries", "list_lan_devices": "LAN devices",
     "device_list_tools": "Board's MCP tools", "device_call_tool": "Call a board's MCP tool",
-    "integrations_status": "Integrations (Datadog)",
+    "integrations_status": "Integrations (Datadog)", "forget_device": "Forget a device",
 }
 for _t in MCP_TOOLS:
-    _write = _t["name"] in ("send_command", "device_call_tool")
+    _write = _t["name"] in ("send_command", "device_call_tool", "forget_device")
     _t["title"] = _TITLES.get(_t["name"], _t["name"])
     _t["annotations"] = {
         "title": _t["title"],
@@ -331,7 +345,7 @@ for _t in MCP_TOOLS:
 TOOL_INDEX: dict[str, dict[str, Any]] = {t["name"]: t for t in MCP_TOOLS}
 # Always need the admin token. device_call_tool is checked per call instead
 # (see needs_admin): reading a board's telemetry is not a write.
-WRITE_TOOLS = {"send_command"}
+WRITE_TOOLS = {"send_command", "forget_device"}
 # Tools that CAN change hardware (annotated readOnlyHint=false).
 MAY_WRITE_TOOLS = WRITE_TOOLS | {"device_call_tool"}
 
@@ -554,6 +568,9 @@ async def execute(name: str, args: dict, registry, store, dns=None, integrations
         integrations = integrations or {}
         return {k: (v.stats() if hasattr(v, "stats") else v) for k, v in integrations.items()} \
             or {"datadog": {"enabled": False}}
+
+    if name == "forget_device":
+        return await registry.forget_device(args["device_id"])
 
     if name == "get_command_results":
         return {"results": registry.list_cmd_results(

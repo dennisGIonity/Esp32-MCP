@@ -73,3 +73,8 @@ class Store(ABC):
 
     @abstractmethod
     async def prune(self, older_than_s: float) -> int: ...
+
+    async def delete_device(self, device_id: str) -> dict[str, int]:
+        """Remove a device and everything recorded about it. Returns rows
+        deleted per table. Default: not supported."""
+        raise NotImplementedError

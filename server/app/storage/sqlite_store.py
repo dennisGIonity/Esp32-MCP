@@ -345,6 +345,14 @@ class SQLiteStore(DnsStoreMixin, Store):
         await self.checkpoint()
         return (c1.rowcount or 0) + (c2.rowcount or 0)
 
+    async def delete_device(self, device_id: str) -> dict[str, int]:
+        counts: dict[str, int] = {}
+        for table in ("telemetry", "telemetry_metric", "alerts", "commands", "devices"):
+            cur = await self.db.execute(f"DELETE FROM {table} WHERE device_id = ?", (device_id,))
+            counts[table] = cur.rowcount or 0
+        await self.db.commit()
+        return counts
+
     async def commit(self) -> None:
         await self.db.commit()
 

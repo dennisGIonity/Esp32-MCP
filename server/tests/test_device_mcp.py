@@ -13,6 +13,7 @@ from app.models import TelemetryIn, StatusIn
 from app.storage.sqlite_store import SQLiteStore
 from app.fleet.registry import FleetRegistry
 from app.mcp.server import FleetMCPServer
+from app.mcp import tools as T
 from app.integrations.datadog import DatadogForwarder
 
 
@@ -77,6 +78,36 @@ async def call(mcp, name, args, authorized=True):
     r = await mcp.handle({"jsonrpc": "2.0", "id": 7, "method": "tools/call",
                           "params": {"name": name, "arguments": args}}, authorized=authorized)
     return r["result"]
+
+
+async def test_forget_device_drops_registry_and_store(stack):
+    store, reg, mcp, _ = stack
+    did = "esp32-aabbccddeeff"
+    await asyncio.sleep(0.3)                                 # let the writer land the first row
+    for _ in range(40):
+        if await store.query_telemetry(device_id=did, limit=1):
+            break
+        await asyncio.sleep(0.05)
+    assert await store.query_telemetry(device_id=did, limit=1)
+    # needs the admin token
+    res = await call(mcp, "forget_device", {"device_id": did}, authorized=False)
+    assert res["isError"] and did in reg.devices
+    # unknown id is a tool error, nothing deleted
+    res = await call(mcp, "forget_device", {"device_id": "nope-000"})
+    assert res["isError"]
+    # the real thing
+    res = await call(mcp, "forget_device", {"device_id": did})
+    assert not res["isError"] and res["structuredContent"]["ok"] is True
+    assert did not in reg.devices
+    assert await store.query_telemetry(device_id=did, limit=5) == []
+    assert all(d["device_id"] != did for d in await store.list_devices())
+    assert res["structuredContent"]["deleted"]["devices"] == 1
+    # tool is advertised as a destructive write
+    t = next(t for t in T.MCP_TOOLS if t["name"] == "forget_device")
+    assert t["annotations"]["destructiveHint"] and not t["annotations"]["readOnlyHint"]
+    # a board that keeps publishing simply re-registers
+    reg.ingest(TelemetryIn(device_id=did, site="lab", group="bench", fw="2.0.0", metrics={"temp_c": 41.0}))
+    assert did in reg.devices
 
 
 async def test_device_list_tools_round_trip(stack):
@@ -253,6 +284,14 @@ def test_firmware_and_provisioning_routes(tmp_path, monkeypatch):
         h = c.get("/api/v1/health").json()
         from app.mcp import protocol as _proto
         assert h["mcp"]["server"] == _proto.SERVER_VERSION and "datadog" in h
+        # malformed / empty JSON bodies are the caller's fault: 400, never 500
+        for path in ("/api/v1/telemetry", "/api/v1/devices/register", "/api/v1/devices/x/mcp"):
+            r = c.post(path, content=b"{not json", headers={"Content-Type": "application/json"})
+            assert r.status_code == 400 and r.json()["detail"], path
+            r = c.post(path, content=b"", headers={"Content-Type": "application/json"})
+            assert r.status_code == 400, path
+        r = c.post("/api/v1/mcp/rpc", content=b'{"jsonrpc":', headers={"Content-Type": "application/json"})
+        assert r.status_code == 200 and r.json()["error"]["code"] == -32700
 
 
 def test_stale_pinned_advertise_ip_falls_back():

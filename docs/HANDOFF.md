@@ -144,3 +144,10 @@ Policy 986 AED | (c) 2018-2026 Antwerp Designs | Ionity (Pty) Ltd | www.ionity.t
   moved to `logs\archive-2026-10-03\`. Stale `bundle/revamp-v2` remote ref removed. `main` == `revamp/v2`.
   GateFlame's `tools\fw-flash.ps1` still starts the bridge with output to `E:\.ESP32-MCP\bridge_out.txt` - harmless
   (ignored), but point it at `logs\` next time GateFlame is edited.
+
+- **A-to-Z test pass (2026-10-03, later)**: see `docs/TEST-REPORT-2026-10-03.md`. Host 2.1.3 / MCP server 2.0.2
+  (18 tools: + `forget_device`). 44 unit + 70 live checks green on the lab and on a cold testers-package run
+  (ports 8199/1983 beside the lab). New `scripts\smoke_live.py` is the one command to re-prove the stack
+  (`RUN-TESTS.cmd` runs it). Fixed: isError on error-only tool results; 400 not 500 on malformed JSON; Listening()
+  false negatives (duplicate brokers); START hang under output capture; purge without restart; log bloat; DNS poll
+  backoff; a11y labels. Still pending: `.env` `.124.4` -> `.124.2`; real-board flash test when the bench is on.

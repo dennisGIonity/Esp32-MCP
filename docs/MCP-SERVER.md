@@ -48,7 +48,7 @@ device. Forwarding means MCP always reflects reality.
 If the fleet server is down, the bridge returns a clear JSON-RPC error
 (`-32001`) naming the problem, instead of hanging until the client times out.
 
-## The 17 tools
+## The 18 tools
 
 **Fleet**
 
@@ -64,6 +64,8 @@ If the fleet server is down, the bridge returns a clear JSON-RPC error
 | `device_list_tools` | fw 2.0: the board's own MCP tools and schemas, fetched from the board over MQTT. |
 | `device_call_tool` | fw 2.0: call `read_telemetry`, `run_inference`, `get_device_info` (open) or `set_actuator`, `set_state_mode`, `identify` (admin token) on the board itself. See [DEVICE-MCP.md](DEVICE-MCP.md). |
 | `integrations_status` | Datadog forwarder + MQTT bridge stats. See [DATADOG.md](DATADOG.md). |
+| `get_command_results` | Replies boards sent to commands, by device and/or `cmd_id`. |
+| `forget_device` | Remove a device (registry + every stored row). Admin token. Irreversible - confirm first. Also `DELETE /api/v1/devices/{id}`. |
 
 **LAN DNS**
 

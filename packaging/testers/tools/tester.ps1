@@ -24,7 +24,27 @@ Set-Location $Root
 New-Item -ItemType Directory -Force -Path $Logs, (Join-Path $Root 'data') | Out-Null
 
 function Say($m, $c = 'Gray') { Write-Host "[ionity] $m" -ForegroundColor $c }
-function Listening($p) { [bool](Get-NetTCPConnection -LocalPort $p -State Listen -ErrorAction SilentlyContinue) }
+function Listening($p) {
+  # Real connect test. Get-NetTCPConnection -State Listen misses some Python
+  # sockets on Windows (they show up with an empty State), which made
+  # RUN-TESTS think the stack was down while the dashboard was serving.
+  $c = New-Object Net.Sockets.TcpClient
+  try { $ar = $c.BeginConnect('127.0.0.1', $p, $null, $null)
+        if ($ar.AsyncWaitHandle.WaitOne(400) -and $c.Connected) { return $true } ; return $false }
+  catch { return $false } finally { $c.Dispose() }
+}
+function Start-Detached($exe, $argLine, $outFile, $errFile) {
+  # Launch a long-running service with NO inherited handles. Start-Process (even
+  # with -Redirect*) lets the child inherit this shell's own stdout pipe, so any
+  # wrapper that captures our output (CI, a parent script, "START.cmd | tee")
+  # blocks until the server exits. WMI Create + cmd redirection avoids that.
+  $cl = "cmd.exe /d /c `"`"$exe`" $argLine > `"$outFile`" 2> `"$errFile`"`""
+  $si = New-CimInstance -ClassName Win32_ProcessStartup -ClientOnly -Property @{ ShowWindow = [uint16]0 }
+  $r  = Invoke-CimMethod -ClassName Win32_Process -MethodName Create `
+          -Arguments @{ CommandLine = $cl; CurrentDirectory = $Root; ProcessStartupInformation = $si }
+  if ($r.ReturnValue -ne 0) { throw "could not start $exe (Win32_Process.Create rc=$($r.ReturnValue))" }
+  return $r.ProcessId
+}
 function Ours($pattern) {
   @(Get-CimInstance Win32_Process -Filter "Name like 'python%'" -ErrorAction SilentlyContinue |
     Where-Object { $_.CommandLine -like "*$Root*" -and $_.CommandLine -like $pattern })
@@ -97,15 +117,13 @@ function Do-Start {
   if (Listening $MqttPort) { Say "MQTT broker   already listening on :$MqttPort" }
   else {
     Say "MQTT broker   starting on :$MqttPort"
-    Start-Process -FilePath $BrPy -ArgumentList "`"$Root\broker\run_broker.py`" 0.0.0.0:$MqttPort" -WorkingDirectory $Root `
-      -RedirectStandardOutput "$Logs\broker_out.txt" -RedirectStandardError "$Logs\broker_err.txt" -WindowStyle Hidden
+    Start-Detached $BrPy "`"$Root\broker\run_broker.py`" 0.0.0.0:$MqttPort" "$Logs\broker_out.txt" "$Logs\broker_err.txt" | Out-Null
     for ($i = 0; $i -lt 20 -and -not (Listening $MqttPort); $i++) { Start-Sleep -Milliseconds 500 }
   }
   if (Listening $Port) { Say "fleet server  already listening on :$Port" }
   else {
     Say "fleet server  starting on :$Port"
-    Start-Process -FilePath $Py -ArgumentList "`"$Root\server\run.py`"" -WorkingDirectory $Root `
-      -RedirectStandardOutput "$Logs\server_out.txt" -RedirectStandardError "$Logs\server_err.txt" -WindowStyle Hidden
+    Start-Detached $Py "`"$Root\server\run.py`"" "$Logs\server_out.txt" "$Logs\server_err.txt" | Out-Null
     for ($i = 0; $i -lt 40 -and -not (Listening $Port); $i++) { Start-Sleep 1 }
   }
   Do-Status
@@ -135,9 +153,20 @@ function Do-Status {
 
 function Do-Tests {
   Need-Setup
-  Say 'running the server test suite'
-  & $Py -m pytest -q (Join-Path $Root 'server\tests')
-  if ($LASTEXITCODE -eq 0) { Say 'all tests passed' Green } else { Say "tests failed (exit $LASTEXITCODE)" Red }
+  Say 'running the server unit test suite'
+  & $Py -m pytest -q -p no:warnings (Join-Path $Root 'server\tests')
+  $unit = $LASTEXITCODE
+  if ($unit -eq 0) { Say 'unit tests passed' Green } else { Say "unit tests failed (exit $unit)" Red }
+  if (Listening $Port) {
+    Say "running the live A-Z smoke against $Base (REST, MCP, WebSocket, MQTT round-trip)"
+    & $Py (Join-Path $Root 'scripts\smoke_live.py') --base $Base --mqtt-port $MqttPort --json (Join-Path $Logs 'smoke_live.json')
+    $live = $LASTEXITCODE
+    if ($live -eq 0) { Say "live smoke passed - evidence in logs\smoke_live.json" Green } else { Say "live smoke failed (exit $live)" Red }
+  } else {
+    Say 'stack not running - START.cmd first to also run the live smoke' Yellow
+    $live = 0
+  }
+  if (($unit + $live) -ne 0) { exit 1 }
 }
 
 function Do-Demo {
@@ -145,8 +174,7 @@ function Do-Demo {
   if (-not (Listening $MqttPort)) { Say 'start the stack first (START.cmd)' Yellow; exit 1 }
   if ((Ours '*device_emulator.py*').Count) { Say 'demo device already running' ; return }
   Say 'starting ONE simulated device (esp32-emu000000001, group "emulated") - for testers without hardware'
-  Start-Process -FilePath $Py -ArgumentList "`"$Root\scripts\device_emulator.py`" --mqtt-port $MqttPort --label `"DEMO - simulated`"" `
-    -WorkingDirectory $Root -RedirectStandardOutput "$Logs\demo_out.txt" -RedirectStandardError "$Logs\demo_err.txt" -WindowStyle Hidden
+  Start-Detached $Py "`"$Root\scripts\device_emulator.py`" --mqtt-port $MqttPort --label `"DEMO - simulated`"" "$Logs\demo_out.txt" "$Logs\demo_err.txt" | Out-Null
   Say 'it appears on the dashboard within ~10 s. Remove it later with PURGE-DEMO.cmd' Green
 }
 
@@ -159,12 +187,22 @@ function Do-PurgeDemo {
              "[c.publish(f'ionity/lab/esp32-emu000000001/{t}',b'',qos=1,retain=True).wait_for_publish(3) for t in ('status','telemetry')];c.loop_stop();c.disconnect()"
     & $Py -c $clear
   }
-  & $Py (Join-Path $Root 'scripts\purge_devices.py') --pattern 'esp32-emu%' --db (Join-Path $Root 'data\fleet.db') --commit
-  if (Listening $Port) {   # the server caches the registry in memory - restart it so the purge shows
-    Ours '*server\run.py*' | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
-    Start-Sleep 2; Do-Start
+  if (Listening $Port) {
+    # Live server: ask it to forget the device (registry + DB) - no restart needed.
+    $hdr = @{}; $tok = Env-Value 'IONITY_ADMIN_TOKEN' ''; if ($tok) { $hdr['Authorization'] = "Bearer $tok" }
+    try {
+      $ids = (Invoke-RestMethod "$Base/api/v1/devices").devices | Where-Object { $_.device_id -like 'esp32-emu*' } | ForEach-Object device_id
+      foreach ($id in $ids) {
+        $r = Invoke-RestMethod -Method Delete "$Base/api/v1/devices/$id" -Headers $hdr
+        Say ("forgot {0}: {1}" -f $id, (($r.deleted.PSObject.Properties | ForEach-Object { "$($_.Name)=$($_.Value)" }) -join ' '))
+      }
+      if (-not $ids) { Say 'no demo devices registered' }
+    } catch { Say "server refused the purge: $($_.Exception.Message)" Red; exit 1 }
+  } else {
+    # Server down: edit the database directly.
+    & $Py (Join-Path $Root 'scripts\purge_devices.py') --pattern 'esp32-emu%' --db (Join-Path $Root 'data\fleet.db') --commit
   }
-  Say 'demo devices removed (refresh the dashboard)' Green
+  Say 'demo devices removed (the dashboard updates itself)' Green
 }
 
 switch ($Action) {

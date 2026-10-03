@@ -16,7 +16,7 @@ Classification: PUBLIC | Building Tomorrow, Today. | Anything is Possible with G
 
 ```
  Claude / Ollama / AEDi ──MCP──►  Fleet host (FastAPI :8099)  ──MQTT (compact JSON-RPC)──►  ESP32 node (fw 2.0)
-                                   · 17 fleet tools                                           · own MCP server:
+                                   · 18 fleet tools                                           · own MCP server:
                                    · device_call_tool bridge  ◄──telemetry / status / LWT───   read_telemetry, run_inference,
                                    · dashboard  · flasher                                      set_actuator, set_state_mode …
                                    · Datadog forwarder ──► Datadog (metrics, events, checks)   · http://<board>/mcp on the LAN
@@ -28,7 +28,7 @@ Classification: PUBLIC | Building Tomorrow, Today. | Anything is Possible with G
 | **Firmware 2.0** (`firmware-arduino/Esp32_MCP_Node`) | One image for any network: WiFi, MCP host and tokens live in NVS, written over USB by the flasher. MQTT primary / HTTP fallback, LWT, offline buffer, OTA. **On-device MCP server** over HTTP (`:80/mcp`) and MQTT. Edge inference, actuators, state modes. |
 | **Flasher** (`flasher/`) | React + esptool-js + Web Serial. Identifies the chip, picks the right image, flashes, provisions WiFi + MCP host, checks the board joined and its MCP tools answer. Served at `/flasher/`, also built for GitHub Pages. |
 | **Fleet host** (`server/`) | FastAPI. MQTT bridge + HTTP ingest → registry → batched SQLite. Alerts, WebSocket dashboard, firmware images for the flasher. |
-| **MCP gateway** (`server/app/mcp/`) | JSON-RPC 2.0 over HTTP and stdio, protocol 2025-06-18. 17 tools, incl. `device_call_tool` which reaches each board's own MCP server through the broker. |
+| **MCP gateway** (`server/app/mcp/`) | JSON-RPC 2.0 over HTTP and stdio, protocol 2025-06-18. 18 tools, incl. `device_call_tool` which reaches each board's own MCP server through the broker. |
 | **Datadog** (`server/app/integrations/datadog.py`) | The host forwards every metric, alert, online/offline event and a per-board service check. Boards never hold the key. |
 | **Dashboard** (`dashboard/`) | Live fleet monitor, MCP console, link to the flasher. |
 | **Emulator / simulator** (`scripts/`) | `device_emulator.py` = one fw 2.0 board incl. its MCP tools; `fleet_simulator.py` = N boards for load. |

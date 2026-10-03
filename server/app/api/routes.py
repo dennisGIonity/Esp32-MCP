@@ -44,6 +44,18 @@ def _check_token(token: str | None) -> None:
         raise HTTPException(status_code=401, detail="invalid or missing X-Fleet-Token")
 
 
+async def _json_body(request: Request):
+    """Parse the JSON body or answer 400 - never let a malformed byte stream
+    surface as a 500 (the board bridges send hand-rolled JSON)."""
+    raw = await request.body()
+    if not raw:
+        raise HTTPException(status_code=400, detail="empty body, JSON expected")
+    try:
+        return json.loads(raw)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=f"malformed JSON: {e}") from None
+
+
 def _is_admin(request: Request) -> bool:
     """True when no admin token is configured, or the caller presented it as
     'Authorization: Bearer <t>' or 'X-Ionity-Token: <t>'."""
@@ -61,7 +73,7 @@ def _is_admin(request: Request) -> bool:
 @router.post("/api/v1/telemetry")
 async def ingest(request: Request, x_fleet_token: str | None = Header(default=None)):
     _check_token(x_fleet_token)
-    body = await request.json()
+    body = await _json_body(request)
     registry = request.app.state.registry
 
     items = body if isinstance(body, list) else [body]
@@ -90,7 +102,7 @@ async def register(request: Request, x_fleet_token: str | None = Header(default=
     """Optional first-boot handshake. Returns the effective config a node
     should adopt, so a batch can be re-tagged centrally."""
     _check_token(x_fleet_token)
-    body = await request.json()
+    body = await _json_body(request)
     return {
         "ok": True,
         "device_id": body.get("device_id"),
@@ -145,6 +157,19 @@ async def device_command(request: Request, device_id: str, cmd: CommandIn,
             raise HTTPException(status_code=422, detail="set_wifi needs ssid")
         payload.setdefault("pass", "")
     return await request.app.state.registry.send_command(device_id, cmd.action, payload)
+
+
+@router.delete("/api/v1/devices/{device_id}")
+async def forget_device(request: Request, device_id: str):
+    """Forget a device: live registry + every stored row (telemetry, alerts,
+    command log). Admin-gated when a token is configured. Used by PURGE-DEMO
+    and the smoke test so no server restart is needed to drop an emulator."""
+    if not _is_admin(request):
+        raise HTTPException(status_code=401, detail="admin token required (Authorization: Bearer ...)")
+    res = await request.app.state.registry.forget_device(device_id)
+    if not res.get("ok"):
+        raise HTTPException(status_code=404, detail=res.get("error", "unknown device"))
+    return res
 
 
 @router.get("/api/v1/commands/results")
@@ -234,7 +259,7 @@ async def lan_devices(request: Request, limit: int = Query(100, le=1000)):
 @router.post("/api/v1/mcp/rpc")
 async def mcp_rpc(request: Request) -> Any:
     try:
-        body = await request.json()
+        body = await _json_body(request)
     except Exception:
         return {"jsonrpc": "2.0", "id": None, "error": {"code": -32700, "message": "Parse error"}}
     server = request.app.state.mcp
@@ -313,7 +338,7 @@ async def device_mcp(request: Request, device_id: str):
     """Relay one JSON-RPC request to a board's own MCP server over MQTT.
     Write tools need the admin token, same as /cmd."""
     try:
-        rpc = await request.json()
+        rpc = await _json_body(request)
     except Exception:
         raise HTTPException(status_code=400, detail="body must be a JSON-RPC object") from None
     if not isinstance(rpc, dict):

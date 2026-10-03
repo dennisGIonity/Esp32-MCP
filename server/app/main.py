@@ -145,7 +145,7 @@ app = FastAPI(
         "Telemetry ingest, fleet registry, alerting and Model Context Protocol "
         "gateway for 1000+ ESP32 edge nodes. Policy 986 AED."
     ),
-    version="2.0.1",
+    version="2.0.2",
     lifespan=lifespan,
 )
 

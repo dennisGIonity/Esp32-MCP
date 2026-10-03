@@ -126,8 +126,13 @@ class MqttBridge:
             elif topic.endswith("/cmd/result"):
                 self.cmd_results += 1
                 self.registry.record_cmd_result(data)
+                # detail can be a multi-KB MCP reply: keep the log line short, the
+                # full payload is in the DB / commands/results API.
+                detail = str(data.get("detail", ""))
+                if len(detail) > 160:
+                    detail = detail[:157] + f"...(+{len(detail) - 157} B)"
                 log.info("cmd result from %s: %s (ok=%s)",
-                         data.get("device_id"), data.get("detail"), data.get("ok"))
+                         data.get("device_id"), detail, data.get("ok"))
         except Exception:
             self.errors += 1
             log.debug("bad payload on %s", topic, exc_info=True)

@@ -111,7 +111,12 @@ class FleetMCPServer:
                                                  integrations=self.integrations)
                 body = {
                     "content": [{"type": "text", "text": json.dumps(result, indent=2, default=str)}],
-                    "isError": bool(isinstance(result, dict) and result.get("ok") is False),
+                    # MCP: a tool-level failure MUST set isError so clients do not
+                    # treat {"error": ...} as a successful answer.
+                    "isError": bool(isinstance(result, dict) and (
+                        result.get("ok") is False
+                        or (("error" in result) and result.get("ok") is not True
+                            and not any(k for k in result if k not in ("error", "device_id", "ok"))))),
                 }
                 if isinstance(result, dict):
                     body["structuredContent"] = json.loads(json.dumps(result, default=str))

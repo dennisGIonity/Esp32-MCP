@@ -109,8 +109,10 @@ def main() -> int:
     print("\ndeleted:")
     for t, n in counts.items():
         print(f"   {t:<20} {n:>8,} rows")
-    print("\nRestart the fleet server so its in-memory registry reloads:")
-    print("   the dashboard will then show only what is really reporting.")
+    print("\nIf the fleet server is RUNNING it still holds these devices in memory:")
+    print("   restart it, or (better) use the live API instead of this script -")
+    print("   DELETE /api/v1/devices/{id}  or the MCP tool forget_device - which")
+    print("   drops the device from the registry and the database at once.")
     return 0
 
 

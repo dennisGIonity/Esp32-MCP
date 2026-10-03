@@ -23,7 +23,24 @@ Set-Location $root
 $logs = Join-Path $root 'logs'   # runtime logs live here (git-ignored), not in the repo root
 New-Item -ItemType Directory -Force $logs | Out-Null
 function Say($m) { if (-not $Quiet) { Write-Host "[lab] $m" } }
-function Listening($port) { [bool](Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue) }
+function Start-Detached($exe, $argLine, $outFile, $errFile, $cwd) {
+  # No inherited handles: Start-Process lets children inherit this shell's stdout
+  # pipe, so any wrapper capturing our output blocks until the service exits.
+  $cl = "cmd.exe /d /c `"`"$exe`" $argLine > `"$outFile`" 2> `"$errFile`"`""
+  $si = New-CimInstance -ClassName Win32_ProcessStartup -ClientOnly -Property @{ ShowWindow = [uint16]0 }
+  $r  = Invoke-CimMethod -ClassName Win32_Process -MethodName Create `
+          -Arguments @{ CommandLine = $cl; CurrentDirectory = $cwd; ProcessStartupInformation = $si }
+  if ($r.ReturnValue -ne 0) { throw "could not start $exe (Win32_Process.Create rc=$($r.ReturnValue))" }
+  return $r.ProcessId
+}
+function Listening($p) {
+  # Real connect test: Get-NetTCPConnection -State Listen misses some Python sockets
+  # on Windows (empty State), which started duplicate brokers/servers.
+  $c = New-Object Net.Sockets.TcpClient
+  try { $ar = $c.BeginConnect('127.0.0.1', [int]$p, $null, $null)
+        if ($ar.AsyncWaitHandle.WaitOne(400) -and $c.Connected) { return $true } ; return $false }
+  catch { return $false } finally { $c.Dispose() }
+}
 function ProcLike($pattern) {
   @(Get-CimInstance Win32_Process -Filter "Name like 'python%'" -ErrorAction SilentlyContinue |
     Where-Object { $_.CommandLine -like $pattern })
@@ -53,9 +70,7 @@ else {
   # python.exe with BOTH streams redirected, not pythonw: under pythonw sys.stdout is
   # None and uvicorn's log formatter dies at startup ("Unable to configure formatter
   # 'default'") - the server then never listens and the MCP tools go dark.
-  Start-Process -FilePath "$root\.venv\Scripts\python.exe" -ArgumentList "$root\server\run.py" `
-    -WorkingDirectory $root -RedirectStandardOutput "$logs\fleet_out.txt" `
-    -RedirectStandardError "$logs\fleet_err.txt" -WindowStyle Hidden
+  Start-Detached "$root\.venv\Scripts\python.exe" "`"$root\server\run.py`"" "$logs\fleet_out.txt" "$logs\fleet_err.txt" $root | Out-Null
   for ($i = 0; $i -lt 40 -and -not (Listening 8099); $i++) { Start-Sleep 1 }
 }
 
@@ -63,8 +78,7 @@ else {
 if ((ProcLike '*serial_bridge.py*').Count -gt 0) { Say 'serial bridge already running' }
 else {
   Say 'serial bridge starting'
-  Start-Process -FilePath "$root\.venv\Scripts\pythonw.exe" -ArgumentList "$root\scripts\serial_bridge.py" `
-    -WorkingDirectory $root -RedirectStandardOutput "$logs\bridge_out.txt" -WindowStyle Hidden
+  Start-Detached "$root\.venv\Scripts\python.exe" "`"$root\scripts\serial_bridge.py`"" "$logs\bridge_out.txt" "$logs\bridge_err.txt" $root | Out-Null
 }
 
 if (-not $Quiet) {
