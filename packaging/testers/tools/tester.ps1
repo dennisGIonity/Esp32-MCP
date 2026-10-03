@@ -153,6 +153,12 @@ function Do-Demo {
 function Do-PurgeDemo {
   Need-Setup
   Ours '*device_emulator.py*' | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+  if (Listening $MqttPort) {
+    # The demo's Last Will is RETAINED on the broker; clear it or the server re-creates the device on restart.
+    $clear = "import paho.mqtt.client as m;c=m.Client(m.CallbackAPIVersion.VERSION2);c.connect('127.0.0.1',$MqttPort);c.loop_start();" +
+             "[c.publish(f'ionity/lab/esp32-emu000000001/{t}',b'',qos=1,retain=True).wait_for_publish(3) for t in ('status','telemetry')];c.loop_stop();c.disconnect()"
+    & $Py -c $clear
+  }
   & $Py (Join-Path $Root 'scripts\purge_devices.py') --pattern 'esp32-emu%' --db (Join-Path $Root 'data\fleet.db') --commit
   if (Listening $Port) {   # the server caches the registry in memory - restart it so the purge shows
     Ours '*server\run.py*' | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }

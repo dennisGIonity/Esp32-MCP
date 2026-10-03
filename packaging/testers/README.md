@@ -42,7 +42,7 @@ full illustrated manual.
 
 ## What to test (checklist)
 
-- [ ] STATUS shows `server UP`, `mqtt=True`, `mcp=1.3.0`
+- [ ] STATUS shows `server UP`, `mqtt=True`, `mcp=2.0.1 (17 tools)`
 - [ ] Dashboard KPIs match the real number of boards; live clock and ingest chart move
 - [ ] Search, Health / Site / Group filters narrow the device grid
 - [ ] Click a device (or Tab + Enter): drawer opens; Escape, ✕ and backdrop close it

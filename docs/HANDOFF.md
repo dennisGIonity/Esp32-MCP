@@ -126,7 +126,7 @@ Policy 986 AED | (c) 2018-2026 Antwerp Designs | Ionity (Pty) Ltd | www.ionity.t
   left the CDC "connected"). Both boards answer MCP in ~100-150 ms through the host.
 
 ## 2026-10-03 (early): final check, dashboard polish, testers package
-- **Server**: health OK, MQTT connected, MCP 1.3.0 (17 tools). Live fleet: `esp32-98a316e5d18c` fw 2.1.0 @ .124.4 and
+- **Server**: health OK, MQTT connected, MCP server 2.0.1 (protocol 2025-06-18, 17 tools). Live fleet: `esp32-98a316e5d18c` fw 2.1.0 @ .124.4 and
   `esp32-fc012cd8ea14` fw 2.1.1 @ .124.5 online, Pico offline. Fake devices (`esp32-emu%`, `pi-e2e%`) purged. Tests 43/43.
 - **Dashboard audit**: every control exercised against the live fleet (search, health/site/group filters, card click and
   Enter, drawer ✕/Escape/backdrop, Ping/Identify, DNS search + window, MCP console, flasher link). No console errors,
