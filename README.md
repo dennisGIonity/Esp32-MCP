@@ -229,9 +229,13 @@ E:\.ESP32-MCP
 ├── modules/network-sentinel/  Kelvin Drive network sentinel service (:8000)
 ├── dashboard/               fleet dashboard served at /
 ├── scripts/                 start_lab, add_device, provision, device_emulator, fleet_simulator, serial bridge
+├── packaging/               testers package sources (.cmd, MANUAL.html, tools/, bundled broker)
 ├── infra/                   Dockerfile + mosquitto.conf
 ├── .github/workflows/       CI (tests, firmware matrix, flasher) + Pages/release
 └── docs/                    architecture, flasher, device MCP, Datadog, schema, provisioning, lab, roadmap
+
+git-ignored, local only:  .venv/  data/ (fleet.db)  logs/ (fleet_*, bridge_out, archives)
+                          dist/ (testers zip)  firmware/dist*/  flasher/dist/  .build-*/  secrets.h  .env
 ```
 
 What changed in 2.0 and why: **[CHANGELOG.md](CHANGELOG.md)**.

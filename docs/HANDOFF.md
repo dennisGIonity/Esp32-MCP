@@ -138,3 +138,9 @@ Policy 986 AED | (c) 2018-2026 Antwerp Designs | Ionity (Pty) Ltd | www.ionity.t
   (only its own processes; the lab on :8099 stayed up).
 - **Note**: `.env` still advertises `IONITY_MDNS_ADVERTISE_IP=192.168.124.4` but the laptop's lab IP is now .124.2 (a board
   holds .4). The server logs/uses .124.2 and boards connect, but set the .env value to .124.2 (or blank) at the next restart.
+- **Repo tidy (2026-10-03)**: runtime logs moved out of the repo root. `scripts\start_lab.ps1` now writes
+  `logs\fleet_out.txt`, `logs\fleet_err.txt`, `logs\bridge_out.txt` (`logs/` is git-ignored). The 24 old root logs
+  (logs_*, bridge_out, broker_*, emu_*, sim_*, warn_*, fwbuild*, pideploy*, firmware-arduino\flash.log 38 MB) were
+  moved to `logs\archive-2026-10-03\`. Stale `bundle/revamp-v2` remote ref removed. `main` == `revamp/v2`.
+  GateFlame's `tools\fw-flash.ps1` still starts the bridge with output to `E:\.ESP32-MCP\bridge_out.txt` - harmless
+  (ignored), but point it at `logs\` next time GateFlame is edited.

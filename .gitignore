@@ -78,3 +78,6 @@ pideploy*.err
 
 # testers package build output (scripts\build_testers_package.ps1)
 dist/
+
+# runtime + build logs (scripts write here; old root logs archived 2026-10-03)
+logs/

@@ -20,6 +20,8 @@ param([switch]$Restart, [switch]$Quiet)
 $root = 'E:\.ESP32-MCP'
 $labHome = if ($env:IONITY_LAB_HOME) { $env:IONITY_LAB_HOME } else { 'E:\.IONITY-LAB' }
 Set-Location $root
+$logs = Join-Path $root 'logs'   # runtime logs live here (git-ignored), not in the repo root
+New-Item -ItemType Directory -Force $logs | Out-Null
 function Say($m) { if (-not $Quiet) { Write-Host "[lab] $m" } }
 function Listening($port) { [bool](Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue) }
 function ProcLike($pattern) {
@@ -52,8 +54,8 @@ else {
   # None and uvicorn's log formatter dies at startup ("Unable to configure formatter
   # 'default'") - the server then never listens and the MCP tools go dark.
   Start-Process -FilePath "$root\.venv\Scripts\python.exe" -ArgumentList "$root\server\run.py" `
-    -WorkingDirectory $root -RedirectStandardOutput "$root\logs_out.txt" `
-    -RedirectStandardError "$root\logs_err.txt" -WindowStyle Hidden
+    -WorkingDirectory $root -RedirectStandardOutput "$logs\fleet_out.txt" `
+    -RedirectStandardError "$logs\fleet_err.txt" -WindowStyle Hidden
   for ($i = 0; $i -lt 40 -and -not (Listening 8099); $i++) { Start-Sleep 1 }
 }
 
@@ -62,7 +64,7 @@ if ((ProcLike '*serial_bridge.py*').Count -gt 0) { Say 'serial bridge already ru
 else {
   Say 'serial bridge starting'
   Start-Process -FilePath "$root\.venv\Scripts\pythonw.exe" -ArgumentList "$root\scripts\serial_bridge.py" `
-    -WorkingDirectory $root -RedirectStandardOutput "$root\bridge_out.txt" -WindowStyle Hidden
+    -WorkingDirectory $root -RedirectStandardOutput "$logs\bridge_out.txt" -WindowStyle Hidden
 }
 
 if (-not $Quiet) {
@@ -75,5 +77,5 @@ if (-not $Quiet) {
     Say ("fleet: total={0} online={1} stale={2} offline={3} alerting={4}" -f `
          $s.total_devices, $s.online, $s.stale, $s.offline, $s.alerting)
     Say ("dashboard  http://{0}:8099/" -f $h.discovery.advertised_ip)
-  } catch { Say "fleet server did not answer - see $root\logs_err.txt" }
+  } catch { Say "fleet server did not answer - see $logs\fleet_err.txt" }
 }
