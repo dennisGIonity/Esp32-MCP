@@ -124,3 +124,17 @@ Policy 986 AED | (c) 2018-2026 Antwerp Designs | Ionity (Pty) Ltd | www.ionity.t
 - Pi: wlan0 = household internet (default route), eth0 = lab only. Pi flash toolchain in ~/ionity-flash (offline wheels).
 - fw 2.1.1: USB-CDC TX timeout 5 ms (native-USB board stalled 8 s per MCP call while a closed serial session
   left the CDC "connected"). Both boards answer MCP in ~100-150 ms through the host.
+
+## 2026-10-03 (early): final check, dashboard polish, testers package
+- **Server**: health OK, MQTT connected, MCP 1.3.0 (17 tools). Live fleet: `esp32-98a316e5d18c` fw 2.1.0 @ .124.4 and
+  `esp32-fc012cd8ea14` fw 2.1.1 @ .124.5 online, Pico offline. Fake devices (`esp32-emu%`, `pi-e2e%`) purged. Tests 43/43.
+- **Dashboard audit**: every control exercised against the live fleet (search, health/site/group filters, card click and
+  Enter, drawer ✕/Escape/backdrop, Ping/Identify, DNS search + window, MCP console, flasher link). No console errors,
+  no horizontal scroll at 375 px, no fake data. DNS panel is empty because the router does not hand out the server as DNS.
+- **Dashboard 2.1.2**: Ping/Identify/Reboot show the board's actual reply + round-trip (`pong · 398 ms`) and a toast;
+  Reboot and Identify-all confirm first; focus rings, toasts, Ctrl+Enter in the MCP console.
+- **Testers package**: `scripts\build_testers_package.ps1` → `dist\Ionity-ESP32-MCP-Testers-v<ver>.zip`. Verified on this
+  PC in a copy on alt ports (8199/1993, mDNS off): SETUP → START → demo device + ping round trip → RUN-TESTS 43/43 → STOP
+  (only its own processes; the lab on :8099 stayed up).
+- **Note**: `.env` still advertises `IONITY_MDNS_ADVERTISE_IP=192.168.124.4` but the laptop's lab IP is now .124.2 (a board
+  holds .4). The server logs/uses .124.2 and boards connect, but set the .env value to .124.2 (or blank) at the next restart.

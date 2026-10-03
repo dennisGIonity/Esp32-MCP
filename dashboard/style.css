@@ -227,3 +227,25 @@ input:focus,select:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(40
 ::-webkit-scrollbar{width:8px;height:8px}
 ::-webkit-scrollbar-thumb{background:rgba(148,178,220,.20);border-radius:6px}
 ::-webkit-scrollbar-track{background:transparent}
+
+/* ---- v2.1 polish: focus, numbers, toasts, scrollbars ---- */
+:where(a,button,select,input,textarea,.card,[tabindex]):focus-visible{
+  outline:2px solid var(--accent);outline-offset:2px;border-radius:var(--r2)}
+.kpi b,.kpi .v,.metric b,.card .m b,td{font-variant-numeric:tabular-nums}
+.btn{transition:filter .15s,background .15s,transform .1s}
+.btn:active:not(:disabled){transform:translateY(1px)}
+select,input,textarea{transition:border-color .15s,box-shadow .15s}
+select:focus,input:focus,textarea:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(40,211,245,.15)}
+*{scrollbar-width:thin;scrollbar-color:#2a3a55 transparent}
+::-webkit-scrollbar{width:9px;height:9px}
+::-webkit-scrollbar-thumb{background:#2a3a55;border-radius:9px}
+#toasts{position:fixed;right:18px;bottom:18px;z-index:100;display:flex;flex-direction:column;gap:8px;
+  max-width:min(420px,calc(100vw - 32px));pointer-events:none}
+.toast{pointer-events:auto;padding:10px 14px 10px 12px;border-radius:var(--r2);font-size:13px;
+  background:rgba(14,21,34,.96);border:1px solid var(--line2);border-left:3px solid var(--ok);
+  box-shadow:0 10px 30px rgba(0,0,0,.45);animation:tin .22s ease-out;transition:opacity .3s,transform .3s}
+.toast.warn{border-left-color:var(--warn)}
+.toast.bad{border-left-color:var(--crit)}
+.toast.out{opacity:0;transform:translateY(6px)}
+@keyframes tin{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+@media(prefers-reduced-motion:reduce){.toast{animation:none;transition:none}.btn{transition:none}}

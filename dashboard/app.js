@@ -263,6 +263,32 @@ function drawGrid(devices) {
 /* ----------------------------------------------------------------- */
 /* Device drawer                                                      */
 /* ----------------------------------------------------------------- */
+/* Poll the live command-result stream for the device's reply to cmd_id. */
+async function waitReply(deviceId, cmdId, timeoutMs = 6000) {
+  if (!cmdId) return null;
+  const until = Date.now() + timeoutMs;
+  while (Date.now() < until) {
+    await new Promise((r) => setTimeout(r, 350));
+    try {
+      const { results } = await fetch(
+        `${API}/api/v1/commands/results?device_id=${encodeURIComponent(deviceId)}&limit=10`).then((r) => r.json());
+      const hit = (results || []).find((x) => x.cmd_id === cmdId);
+      if (hit) return hit;
+    } catch { /* keep polling */ }
+  }
+  return null;
+}
+
+function toast(msg, kind = "ok") {
+  let box = $("toasts");
+  if (!box) { box = document.createElement("div"); box.id = "toasts"; box.setAttribute("role", "status");
+    box.setAttribute("aria-live", "polite"); document.body.appendChild(box); }
+  const el = document.createElement("div");
+  el.className = `toast ${kind}`; el.textContent = msg;
+  box.appendChild(el);
+  setTimeout(() => { el.classList.add("out"); setTimeout(() => el.remove(), 300); }, 4200);
+}
+
 let lastFocus = null;
 function closeDrawer() { const dlg = $("drawer"); if (dlg.open) dlg.close(); }
 $("drawer").addEventListener("close", () => { lastFocus?.focus?.(); lastFocus = null; });
@@ -300,11 +326,28 @@ async function openDevice(id) {
 
   $("dBody").querySelectorAll("[data-cmd]").forEach((b) =>
     b.onclick = async () => {
+      const action = b.dataset.cmd;
+      const name = d.label || d.device_id;
+      if (action === "reboot" && !window.confirm(`Reboot ${name}? It will drop offline for ~10 s.`)) return;
       const label = b.textContent;
-      b.disabled = true;
-      const res = await postCmd(`${API}/api/v1/devices/${encodeURIComponent(d.device_id)}/cmd`, { action: b.dataset.cmd });
-      b.textContent = res.ok ? "sent ✓" : "failed";
-      setTimeout(() => { b.disabled = false; b.textContent = label; }, 1800);
+      b.disabled = true; b.textContent = "sending…";
+      const t0 = performance.now();
+      const res = await postCmd(`${API}/api/v1/devices/${encodeURIComponent(d.device_id)}/cmd`, { action });
+      if (!res.ok) {
+        b.textContent = "failed"; toast(`${action} → ${name}: ${res.error || res.detail || "not delivered"}`, "bad");
+      } else {
+        b.textContent = "waiting…";
+        const reply = await waitReply(d.device_id, res.command?.cmd_id);
+        const ms = Math.round(performance.now() - t0);
+        if (reply) {
+          b.textContent = reply.ok ? `${reply.detail || "ok"} · ${ms} ms` : "error";
+          toast(`${name}: ${action} → ${reply.detail || (reply.ok ? "ok" : "error")} (${ms} ms)`, reply.ok ? "ok" : "bad");
+        } else {
+          b.textContent = "sent ✓";
+          toast(`${action} sent to ${name} - no reply yet${action === "reboot" ? " (rebooting)" : ""}`, "warn");
+        }
+      }
+      setTimeout(() => { b.disabled = false; b.textContent = label; }, 2600);
     });
 
   lastFocus = document.activeElement;
@@ -385,12 +428,16 @@ $("dClose").onclick = closeDrawer;
 $("drawer").onclick = (e) => { if (e.target === $("drawer")) closeDrawer(); };   // click on the backdrop
 
 $("btnBroadcast").onclick = async () => {
+  const n = (LAST.devices || []).filter((x) => x.health === "online").length;
+  if (!window.confirm(`Blink the identify LED on all ${n} online device(s)?`)) return;
   const res = await postCmd(`${API}/api/v1/devices/broadcast/cmd`, { action: "identify" });
   $("btnBroadcast").textContent = res.ok ? "sent ✓" : (res.error || "failed");
+  toast(res.ok ? `Identify broadcast to ${n} online device(s)` : `Broadcast failed: ${res.error || "error"}`, res.ok ? "ok" : "bad");
   setTimeout(() => ($("btnBroadcast").textContent = "Identify all"), 2200);
 };
 
 $("mcpTool").onchange = () => { $("mcpArgs").value = defaultArgs($("mcpTool").value); };
+$("mcpArgs").onkeydown = (e) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); $("mcpRun").click(); } };
 $("mcpRun").onclick = async () => {
   let args;
   try { args = JSON.parse($("mcpArgs").value || "{}"); }

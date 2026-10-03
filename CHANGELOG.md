@@ -5,6 +5,25 @@ AEDI - IONITY GLOBAL | DOC-2026-09-ESP32MCP-CHG | Policy 986 AED
 
 # Changelog
 
+## 2.1.2 — 2026-10-03 (dashboard + testers package)
+
+### Dashboard
+- Device-drawer commands now show the board's **real reply** (polled from `/api/v1/commands/results`
+  by `cmd_id`) with round-trip time, e.g. `pong · 398 ms`, plus a toast. No reply in 6 s → warning toast.
+- **Reboot** and **Identify all** ask for confirmation first.
+- Toast area (`aria-live`), visible keyboard focus rings, tabular numbers, input focus states, thin scrollbars.
+- MCP console: Ctrl+Enter runs the selected tool.
+- Audit 2026-10-03: every control click-tested against the live fleet (search, 3 filters, card click +
+  Enter, drawer ✕ / Escape / backdrop, Identify / Ping, DNS search + window, MCP console, flasher link);
+  no console errors; no horizontal scroll at 375 px; no fake data anywhere in the UI.
+
+### Testers package
+- `scripts/build_testers_package.ps1` → `dist/Ionity-ESP32-MCP-Testers-v<ver>.zip`: bundled MQTT broker,
+  fleet server, dashboard, flasher + public firmware images, Pi agent, `MANUAL.html`, `README.md` and
+  SETUP / START / STOP / STATUS / OPEN-DASHBOARD / FLASH-BOARD / RUN-TESTS / DEMO-DEVICE / PURGE-DEMO `.cmd`.
+  Sources in `packaging/`. A safety gate refuses to zip `.env`, `secrets.h`, `fleet.db`, `dist-lab` or a
+  hard-coded password.
+
 ## 2.1.0 — 2026-10-03
 
 ### Firmware 2.1.0

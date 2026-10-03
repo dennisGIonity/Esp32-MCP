@@ -67,6 +67,13 @@ The lab path with the broker: `scripts\start_lab.ps1` (amqtt :1883 + host + seri
 
 Start / restart it all: `scripts\start_lab.ps1` (broker :1883 + fleet server :8099 + serial bridge; idempotent).
 
+### Testers package
+
+`powershell -ExecutionPolicy Bypass -File scripts\build_testers_package.ps1` builds
+`dist\Ionity-ESP32-MCP-Testers-v<ver>.zip` — a standalone bench kit (own MQTT broker, server, dashboard,
+flasher + public firmware, `MANUAL.html`, `README.md`, and SETUP / START / STOP / STATUS / FLASH-BOARD /
+RUN-TESTS / DEMO-DEVICE `.cmd` files). Sources live in `packaging/`. Testers need only Python 3.11+.
+
 ---
 
 ## Flash and provision a board (no recompiling)

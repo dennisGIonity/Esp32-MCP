@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="author" content="Johan Wilhelm van Antwerp | Ionity (Pty) Ltd | AEDI">
+<meta name="description" content="Testers manual for the Ionity ESP32-MCP fleet stack. Policy 986 AED.">
+<title>ESP32-MCP Testers Manual</title>
+<style>
+:root{--bg:#070b12;--panel:#0e1522;--panel2:#121b2b;--line:rgba(148,178,220,.14);--txt:#e8eef7;--muted:#8a9bb4;
+  --accent:#28d3f5;--accent2:#7b61ff;--ok:#25d07a;--warn:#f2b94b;--crit:#ff4d6d;--mono:ui-monospace,"Cascadia Mono",Consolas,monospace}
+@media (prefers-color-scheme:light){:root:not([data-theme="dark"]){--bg:#f5f7fb;--panel:#fff;--panel2:#eef2f8;--line:#dbe2ec;--txt:#141b26;--muted:#5a6678;--accent:#0a8fb0;--accent2:#5b45d6}}
+:root[data-theme="light"]{--bg:#f5f7fb;--panel:#fff;--panel2:#eef2f8;--line:#dbe2ec;--txt:#141b26;--muted:#5a6678;--accent:#0a8fb0;--accent2:#5b45d6}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--txt);font:15px/1.6 "Segoe UI",system-ui,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:0 16px 48px}
+header{display:flex;align-items:center;gap:14px;padding:26px 0 18px;border-bottom:1px solid var(--line);margin-bottom:22px}
+.mark{width:44px;height:44px;flex:0 0 44px;border-radius:12px;display:grid;place-items:center;font-size:22px;color:#04121a;
+  background:linear-gradient(135deg,var(--accent),var(--accent2))}
+h1{margin:0;font-size:20px;letter-spacing:.12em;text-transform:uppercase}
+.sub{color:var(--muted);font-size:13px}
+nav{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 22px}
+nav a{font-size:13px;color:var(--txt);text-decoration:none;border:1px solid var(--line);border-radius:999px;padding:4px 12px;background:var(--panel)}
+nav a:hover{border-color:var(--accent)}
+section{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:18px 20px;margin-bottom:16px}
+h2{margin:0 0 10px;font-size:16px;color:var(--accent)}
+h3{margin:16px 0 6px;font-size:14px}
+a{color:var(--accent)}
+code,pre{font-family:var(--mono);font-size:13px}
+code{background:var(--panel2);padding:1px 6px;border-radius:5px;overflow-wrap:anywhere}
+pre{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:12px;overflow:auto}
+table{width:100%;border-collapse:collapse;font-size:14px}
+th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+th{color:var(--muted);font-weight:600;font-size:12px;text-transform:uppercase;letter-spacing:.06em}
+.tw{overflow-x:auto}
+ol li,ul li{margin:4px 0}
+.steps{counter-reset:s;list-style:none;padding:0;margin:0;display:grid;gap:10px}
+.steps li{counter-increment:s;display:flex;gap:12px;align-items:flex-start;background:var(--panel2);border-radius:10px;padding:10px 12px}
+.steps li::before{content:counter(s);flex:0 0 28px;height:28px;border-radius:50%;display:grid;place-items:center;font-weight:700;
+  color:#04121a;background:linear-gradient(135deg,var(--accent),var(--accent2))}
+.note{border-left:3px solid var(--warn);background:var(--panel2);padding:10px 12px;border-radius:8px;font-size:14px}
+.ok{color:var(--ok)}.bad{color:var(--crit)}
+.chk label{display:flex;gap:10px;align-items:flex-start;padding:6px 0;border-bottom:1px solid var(--line);cursor:pointer}
+.chk input{margin-top:5px;accent-color:var(--accent)}
+.diag{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;text-align:center;font-size:13px}
+.diag div{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:12px}
+.diag b{display:block;color:var(--accent);font-size:14px}
+footer{color:var(--muted);font-size:12px;text-align:center;margin-top:26px;line-height:1.7}
+footer a{color:var(--muted)}
+@media print{nav{display:none}section{break-inside:avoid}}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+  <div class="mark" aria-hidden="true">◈</div>
+  <div><h1>ESP32-MCP Testers Manual</h1>
+  <div class="sub">Ionity Fleet Monitor · MCP 1.3.0 · firmware 2.1 · DOC-2026-10-TESTERS · v1.0 · 03 Oct 2026</div></div>
+</header>
+<nav aria-label="Sections">
+  <a href="#what">What it is</a><a href="#start">Quick start</a><a href="#files">.cmd files</a><a href="#flash">Flash a board</a>
+  <a href="#dash">Dashboard</a><a href="#mcp">MCP</a><a href="#test">Test checklist</a><a href="#trouble">Troubleshooting</a>
+</nav>
+
+<section id="what"><h2>What it is</h2>
+<p>A self-contained copy of the Ionity ESP32-MCP fleet stack. ESP32 boards report telemetry over MQTT;
+the fleet server stores it, streams it live to the dashboard, and exposes the whole fleet to AI assistants
+through the Model Context Protocol (MCP). Everything shown on the dashboard comes from real devices &mdash;
+the only simulated device is the one you add yourself with <code>DEMO-DEVICE.cmd</code>.</p>
+<div class="diag" role="img" aria-label="ESP32 boards send MQTT to the broker, the fleet server stores and serves the dashboard and MCP">
+  <div><b>ESP32 boards</b>telemetry · status · cmd replies</div>
+  <div><b>MQTT broker</b>:1883 (bundled)</div>
+  <div><b>Fleet server</b>:8099 REST · WebSocket · MCP</div>
+  <div><b>Dashboard</b>live view + controls</div>
+  <div><b>Claude / MCP</b>17 fleet tools</div>
+</div>
+</section>
+
+<section id="start"><h2>Quick start</h2>
+<p>Needs Windows 10/11, <a href="https://www.python.org/downloads/">Python 3.11+</a> (tick <i>Add to PATH</i>), and Chrome or Edge.
+No admin rights.</p>
+<ol class="steps">
+  <li><div>Unzip the package anywhere, for example <code>C:\Ionity\ESP32-MCP-Testers</code>.</div></li>
+  <li><div>Double-click <b>SETUP.cmd</b> once. It creates two private Python environments and a <code>.env</code> config (1&ndash;3 minutes).</div></li>
+  <li><div>Double-click <b>START.cmd</b>. The broker and server start in the background and the dashboard opens at
+    <code>http://127.0.0.1:8099/</code>. If Windows Firewall asks, allow <b>Private networks</b>.</div></li>
+  <li><div>Flash a board with <b>FLASH-BOARD.cmd</b> (next section), or click <b>DEMO-DEVICE.cmd</b> if you have no hardware.</div></li>
+  <li><div>When finished, <b>STOP.cmd</b>. Your data stays in <code>data\fleet.db</code> for next time.</div></li>
+</ol>
+</section>
+
+<section id="files"><h2>The .cmd files</h2>
+<div class="tw"><table>
+<tr><th>File</th><th>What it does</th></tr>
+<tr><td><code>SETUP.cmd</code></td><td>Finds Python, creates <code>.venv</code> and <code>.venv-broker</code>, installs pinned packages, writes <code>.env</code>. Safe to rerun.</td></tr>
+<tr><td><code>START.cmd</code></td><td>Starts the MQTT broker (:1883) and the fleet server (:8099), prints status, opens the dashboard.</td></tr>
+<tr><td><code>STATUS.cmd</code></td><td>Broker, server, MQTT link, MCP version and tool count, device counts, and the LAN address other PCs can use.</td></tr>
+<tr><td><code>STOP.cmd</code></td><td>Stops only the processes this package started.</td></tr>
+<tr><td><code>OPEN-DASHBOARD.cmd</code></td><td>Opens the dashboard in your browser.</td></tr>
+<tr><td><code>FLASH-BOARD.cmd</code></td><td>Opens the web flasher with the bundled firmware images.</td></tr>
+<tr><td><code>RUN-TESTS.cmd</code></td><td>Runs the server test suite. Expect every test to pass.</td></tr>
+<tr><td><code>DEMO-DEVICE.cmd</code></td><td>Adds one simulated board, labelled <i>DEMO &ndash; simulated</i>, group <i>emulated</i>.</td></tr>
+<tr><td><code>PURGE-DEMO.cmd</code></td><td>Stops and deletes the demo board from the database.</td></tr>
+</table></div>
+</section>
+
+<section id="flash"><h2>Flash a board</h2>
+<ol class="steps">
+  <li><div>Plug the ESP32 in with a <b>data</b> USB cable. ESP32-S3 boards with two ports: use either; the flasher has an image for each.</div></li>
+  <li><div>Run <b>FLASH-BOARD.cmd</b> (Chrome/Edge). <b>Step 1 &ndash; MCP host</b> is pre-filled; click <b>Check</b> to confirm it answers.</div></li>
+  <li><div><b>Step 2 &ndash; Board &amp; firmware:</b> <b>Select USB port</b>, then <b>Identify chip</b>. Keep <i>From host</i> firmware and tick
+    <i>Erase the whole flash first</i> for a new board.</div></li>
+  <li><div><b>Step 3 &ndash; WiFi &amp; MCP:</b> pick the 2.4&nbsp;GHz network (<b>Scan</b> helps), enter its password, role <i>Node</i>.
+    Optionally set Site, Group and Label &ndash; they show on the dashboard. Leave the MCP host empty to use mDNS.</div></li>
+  <li><div><b>Step 4:</b> click <b>Flash &amp; provision</b> and watch the log. WiFi details go to the board over USB; the server never stores them.</div></li>
+  <li><div>The board reboots, joins WiFi, finds the server (<code>ionity-fleet.local</code>) and appears on the dashboard within ~30&nbsp;s.</div></li>
+</ol>
+<p class="note">ESP32 boards use <b>2.4&nbsp;GHz</b> WiFi only. The board and this PC must be on the same network,
+and Windows Firewall must allow ports 8099 and 1883 on a Private network.</p>
+</section>
+
+<section id="dash"><h2>Dashboard</h2>
+<div class="tw"><table>
+<tr><th>Area</th><th>What you can do</th></tr>
+<tr><td>Header</td><td>Live link state, MQTT broker, mDNS name, clock, and the <b>Flasher</b> shortcut.</td></tr>
+<tr><td>KPIs</td><td>Devices, online / stale / offline / alerting, messages per second, write queue &ndash; updated every 2&nbsp;s over WebSocket.</td></tr>
+<tr><td>Ingest rate &amp; fleet health</td><td>Messages over the last minute and the share of boards reporting.</td></tr>
+<tr><td>Devices</td><td>Search by name / ID / IP; filter by health, site and group. <b>Identify all</b> blinks every online board (asks first).</td></tr>
+<tr><td>Device drawer</td><td>Click a card, or Tab to it and press Enter. Shows details, latest metrics and recent readings.
+  <b>Identify</b>, <b>Ping</b> (shows the real reply and round-trip time) and <b>Reboot</b> (asks first). Close with ✕, Escape or a click outside.</td></tr>
+<tr><td>Open alerts</td><td>Threshold and offline alerts raised by the server.</td></tr>
+<tr><td>LAN DNS</td><td>Which device looked up which domain. Empty until the router hands out this PC as DNS (see <code>IONITY_DNS_PORT</code>).</td></tr>
+<tr><td>MCP console</td><td>Pick any of the 17 tools, edit the JSON arguments, <b>Run</b> (or Ctrl+Enter). Same calls an AI assistant makes.</td></tr>
+</table></div>
+</section>
+
+<section id="mcp"><h2>Use with Claude Desktop (MCP)</h2>
+<p>Add this to <code>%APPDATA%\Claude\claude_desktop_config.json</code>, adjusting the folder, then restart Claude Desktop:</p>
+<pre>{ "mcpServers": { "ionity-esp32-fleet": {
+    "command": "C:\\Ionity\\ESP32-MCP-Testers\\.venv\\Scripts\\python.exe",
+    "args": ["C:\\Ionity\\ESP32-MCP-Testers\\server\\mcp_stdio_proxy.py"] } } }</pre>
+<p>Try: <i>&ldquo;Give me a fleet health check&rdquo;</i>, <i>&ldquo;Ping lab-node-01 and tell me the reply&rdquo;</i>.
+HTTP clients can call JSON-RPC directly at <code>POST /api/v1/mcp/rpc</code>.</p>
+</section>
+
+<section id="test"><h2>Test checklist</h2>
+<p class="sub">Tick as you go (kept only in this page while it is open). Send results with STATUS.cmd output and the <code>logs</code> folder.</p>
+<div class="chk">
+<label><input type="checkbox"> STATUS shows <code>server UP</code>, <code>mqtt=True</code>, <code>mcp=1.3.0</code></label>
+<label><input type="checkbox"> KPIs match the real number of boards; clock and ingest chart move</label>
+<label><input type="checkbox"> Search and the three filters narrow the device grid; "N of M shown" updates</label>
+<label><input type="checkbox"> Drawer opens by click and by Tab + Enter; closes by ✕, Escape and outside click</label>
+<label><input type="checkbox"> Ping shows <code>pong · NN ms</code> and a toast</label>
+<label><input type="checkbox"> Identify blinks the LED; Reboot and Identify all ask for confirmation</label>
+<label><input type="checkbox"> MCP console returns live JSON for fleet_summary, list_devices, get_device</label>
+<label><input type="checkbox"> Unplugging a board turns it stale, then offline</label>
+<label><input type="checkbox"> Dashboard works on a phone on the same WiFi (<code>http://&lt;PC IP&gt;:8099/</code>)</label>
+<label><input type="checkbox"> RUN-TESTS.cmd: all tests pass</label>
+</div>
+</section>
+
+<section id="trouble"><h2>Troubleshooting</h2>
+<div class="tw"><table>
+<tr><th>Symptom</th><th>Fix</th></tr>
+<tr><td>&ldquo;Python 3.11+ was not found&rdquo;</td><td>Install Python with <i>Add to PATH</i>, close the window, run SETUP.cmd again.</td></tr>
+<tr><td>Server shows <span class="bad">down</span></td><td>Read <code>logs\server_err.txt</code>. If the port is busy, change <code>IONITY_PORT</code> in <code>.env</code>.</td></tr>
+<tr><td>Board never appears</td><td>Same 2.4&nbsp;GHz network as the PC; firewall allows 8099 and 1883 (Private); check the flasher log for the server address found.</td></tr>
+<tr><td>Commands return 401</td><td><code>IONITY_ADMIN_TOKEN</code> is set &ndash; enter it when the dashboard asks.</td></tr>
+<tr><td>Flasher has no ports</td><td>Use Chrome or Edge, a data cable, and install the CH340/CP210x driver if the board uses one.</td></tr>
+<tr><td>Windows blocks a program</td><td>Smart App Control: setup already avoids compiled packages; rerun SETUP.cmd and report the message.</td></tr>
+</table></div>
+</section>
+
+<footer>
+AEDI &middot; Ionity (Pty) Ltd &middot; Policy 986 AED &middot; License AED 900 &middot; Classification: TESTERS<br>
+&copy; 2018-2026 Antwerp Designs | Ionity (Pty) Ltd &mdash; All rights reserved &mdash; TM2<br>
+<a href="https://www.ionity.today">www.ionity.today</a> &middot; Ref <a href="https://www.ionity.co.za">www.ionity.co.za</a> &middot; info@ionity.today<br>
+Building Tomorrow, Today. &middot; Anything is Possible with God.
+</footer>
+</div>
+</body>
+</html>
