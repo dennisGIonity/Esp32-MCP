@@ -28,7 +28,7 @@ Nothing that varies per *unit* is compiled in. Only things that vary per
 ## Step 1 — build once
 
 ```powershell
-cd E:\.ESP32-MCP\firmware
+cd E:\.claude\Ionity\.ESP32-MCP\firmware
 copy include\secrets.h.example include\secrets.h
 # edit: WIFI_SSID, WIFI_PASSWORD, MQTT_USERNAME/PASSWORD, FLEET_TOKEN, OTA_PASSWORD
 pio run -e esp32s3

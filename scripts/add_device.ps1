@@ -24,8 +24,8 @@ param(
 
 $ErrorActionPreference = "Stop"
 $acli = 'E:\Program Files (x86)\ArduinoIDE\Arduino IDE\resources\app\lib\backend\resources\arduino-cli.exe'
-$sk   = 'E:\.ESP32-MCP\firmware-arduino\Esp32_MCP_Node'
-$root = 'E:\.ESP32-MCP\firmware-arduino'
+$sk   = 'E:\.claude\Ionity\.ESP32-MCP\firmware-arduino\Esp32_MCP_Node'
+$root = 'E:\.claude\Ionity\.ESP32-MCP\firmware-arduino'
 
 function Say($m) { Write-Host "[add-device] $m" }
 

@@ -47,4 +47,4 @@ Only in git-ignored files: `firmware-arduino/*/secrets.h` (write them all at onc
 ## Verifying a node
 - MCP: `get_device {"device_id": "..."}` → `health: online`, `fw`, `transport`, `metrics`
 - `send_command {"device_id": "...", "action": "ping"}` → `get_command_results` shows `pong`
-- Lab health check: `E:\.IONITY-LAB\LAB-STATUS.cmd`
+- Lab health check: `E:\.claude\Ionity\.IONITY-LAB\LAB-STATUS.cmd`

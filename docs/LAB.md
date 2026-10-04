@@ -9,7 +9,7 @@ A live bench of real boards reporting to the fleet server, isolated from
 production by `site=lab`.
 
 > **The lab itself is its own project now: [Ionity-2nd-Router-Test-Lab](https://github.com/dennisGIonity/Ionity-2nd-Router-Test-Lab)
-> (private) at `E:\.IONITY-LAB`.** It owns the network (household TP-Link on 2.4 GHz, H3C lab on
+> (private) at `E:\.claude\Ionity\.IONITY-LAB`.** It owns the network (household TP-Link on 2.4 GHz, H3C lab on
 > 5 GHz + a low-power 2.4 GHz board network), the laptop dual-network setup, the shared MQTT broker,
 > the Pi 5 tools (GateFlame pause/resume, screen kiosk), the Arduino bench files and the health
 > check. ESP32-MCP is registered in its `lab.json`. This page covers only what ESP32-MCP runs in it.
@@ -30,10 +30,10 @@ unit is ever compiled in.
 It starts itself at logon (Startup shortcut **Ionity Lab**). By hand:
 
 ```powershell
-E:\.IONITY-LAB\lab.ps1 start                    # the whole lab: broker + every registered project
-E:\.ESP32-MCP\scripts\start_lab.ps1            # just this project (asks the lab for the broker)
-E:\.ESP32-MCP\scripts\start_lab.ps1 -Restart   # restart this project's services
-E:\.IONITY-LAB\lab.ps1 status                   # health check - every line OK before a demo
+E:\.claude\Ionity\.IONITY-LAB\lab.ps1 start                    # the whole lab: broker + every registered project
+E:\.claude\Ionity\.ESP32-MCP\scripts\start_lab.ps1            # just this project (asks the lab for the broker)
+E:\.claude\Ionity\.ESP32-MCP\scripts\start_lab.ps1 -Restart   # restart this project's services
+E:\.claude\Ionity\.IONITY-LAB\lab.ps1 status                   # health check - every line OK before a demo
 ```
 
 That brings up, in order:
@@ -54,7 +54,7 @@ boards follow it). In the lab layout that is **http://192.168.124.4:8099/**.
 **ESP32 (any: S3, C3, classic):**
 
 ```powershell
-E:\.ESP32-MCP\scripts\add_device.ps1 -Port COM12 -Label "lab-node-04"
+E:\.claude\Ionity\.ESP32-MCP\scripts\add_device.ps1 -Port COM12 -Label "lab-node-04"
 ```
 
 Detects the chip with esptool, picks the FQBN and flash size, compiles
@@ -93,7 +93,7 @@ to forget pinned pins and scan again. Each reboots the node.
 
 ## The Pi 5 screen
 
-Lives in Ionity-Lab now: `E:\.IONITY-LAB\SETUP-PI-LAB.cmd` (double-click) pauses
+Lives in Ionity-Lab now: `E:\.claude\Ionity\.IONITY-LAB\SETUP-PI-LAB.cmd` (double-click) pauses
 GateFlame and puts the live fleet dashboard on the screen attached to the Pi. It detects the display from EDID
 (an ASUS reports maker `AUS`), then uses an autostart entry on Pi OS desktop,
 or `cage` + Chromium as a kiosk service on Lite. The URL lives in

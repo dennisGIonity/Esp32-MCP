@@ -5,9 +5,9 @@ Policy 986 AED | (c) 2018-2026 Antwerp Designs | Ionity (Pty) Ltd | www.ionity.t
 - fw 1.1.0 on both ESP32-S3s (COM8 esp32-98a316e5d18c, COM10 esp32-fc012cd8ea14), online via MQTT.
 - OLED auto-detect: common pins + full safe-GPIO I2C scan, NVS cache, `set_display` command (server restarted, tests 5/5).
 - Result: NO I2C display on either board -> OLED is on another board (one of the 2 not enumerating on USB) or is SPI/parallel.
-- GateFlame disabled on the Pi 5 (user confirmed). Resume: `E:\.IONITY-LAB\RESUME-GATEFLAME.cmd`.
-- Pi display script ready: `E:\.IONITY-LAB\SETUP-PI-LAB.cmd` (ASUS screen kiosk of the dashboard).
-- **2026-09-23: the lab moved into its own project, Ionity-Lab (`E:\.IONITY-LAB`).**
+- GateFlame disabled on the Pi 5 (user confirmed). Resume: `E:\.claude\Ionity\.IONITY-LAB\RESUME-GATEFLAME.cmd`.
+- Pi display script ready: `E:\.claude\Ionity\.IONITY-LAB\SETUP-PI-LAB.cmd` (ASUS screen kiosk of the dashboard).
+- **2026-09-23: the lab moved into its own project, Ionity-Lab (`E:\.claude\Ionity\.IONITY-LAB`).**
 
 ## Network target (user decision)
 - TP-Link / Afrihost main router: leave as is. Laptop **WiFi = Afrihost** (192.168.0.3, internet).
@@ -27,13 +27,13 @@ Policy 986 AED | (c) 2018-2026 Antwerp Designs | Ionity (Pty) Ltd | www.ionity.t
    (lab subnet route only), set Ethernet profile Private, add firewall rules 1883, 8099, 53/udp, 5353/udp.
 3. Pin laptop IP on the H3C (DHCP reservation) -> set `IONITY_MDNS_ADVERTISE_IP` to it.
 4. Get H3C WiFi SSID/password -> reflash ESPs (secrets.h) so the lab boards join the H3C.
-5. Move Pi 5 to H3C; run `E:\.IONITY-LAB\SETUP-PI-LAB.cmd`; read `E:\.IONITY-LAB\data\pi-lab-setup.log`.
+5. Move Pi 5 to H3C; run `E:\.claude\Ionity\.IONITY-LAB\SETUP-PI-LAB.cmd`; read `E:\.claude\Ionity\.IONITY-LAB\data\pi-lab-setup.log`.
 6. OLED: identify the OLED board (name/photo), get it on USB, flash with add_device.ps1.
 
 ## 2026-09-24: lab switched OFF (checkpoint)
 - All work committed and pushed (ESP32-MCP `575b394`, lab repo `6530ac9`).
 - Stopped: lab broker, fleet server + dashboard, serial bridge, MCP bridge. Nothing listens on 1883/8099/53.
-- Restarts at logon (Startup shortcut) or when an ionity-esp32-fleet MCP tool is called. By hand: `E:\.IONITY-LAB\START-LAB.cmd`.
+- Restarts at logon (Startup shortcut) or when an ionity-esp32-fleet MCP tool is called. By hand: `E:\.claude\Ionity\.IONITY-LAB\START-LAB.cmd`.
 - Full status and open items: https://github.com/dennisGIonity/Ionity-2nd-Router-Test-Lab/blob/main/docs/STATUS.md
 
 ## 2026-09-28: top-to-bottom review (MCP server + deployables)
@@ -142,7 +142,7 @@ Policy 986 AED | (c) 2018-2026 Antwerp Designs | Ionity (Pty) Ltd | www.ionity.t
   `logs\fleet_out.txt`, `logs\fleet_err.txt`, `logs\bridge_out.txt` (`logs/` is git-ignored). The 24 old root logs
   (logs_*, bridge_out, broker_*, emu_*, sim_*, warn_*, fwbuild*, pideploy*, firmware-arduino\flash.log 38 MB) were
   moved to `logs\archive-2026-10-03\`. Stale `bundle/revamp-v2` remote ref removed. `main` == `revamp/v2`.
-  GateFlame's `tools\fw-flash.ps1` still starts the bridge with output to `E:\.ESP32-MCP\bridge_out.txt` - harmless
+  GateFlame's `tools\fw-flash.ps1` still starts the bridge with output to `E:\.claude\Ionity\.ESP32-MCP\bridge_out.txt` - harmless
   (ignored), but point it at `logs\` next time GateFlame is edited.
 
 - **A-to-Z test pass (2026-10-03, later)**: see `docs/TEST-REPORT-2026-10-03.md`. Host 2.1.3 / MCP server 2.0.2

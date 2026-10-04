@@ -171,7 +171,7 @@ def forward(payload: dict) -> dict | None:
 
 UNREACHABLE = (
     "The Ionity fleet server is not running, so live fleet data is "
-    "unavailable. Start it with:  E:\\.ESP32-MCP\\scripts\\start_fleet.ps1"
+    "unavailable. Start it with:  E:\\.claude\\Ionity\\.ESP32-MCP\\scripts\\start_fleet.ps1"
 )
 
 

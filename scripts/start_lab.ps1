@@ -3,7 +3,7 @@
 # Policy 986 AED | (c) 2018-2026 Antwerp Designs | Ionity (Pty) Ltd
 # ---------------------------------------------------------------------------
 # The lab itself (network, shared MQTT broker, Pi tools) is its own project:
-# Ionity-Lab, E:\.IONITY-LAB (override with IONITY_LAB_HOME). This script:
+# Ionity-Lab, E:\.claude\Ionity\.IONITY-LAB (override with IONITY_LAB_HOME). This script:
 #   1. asks the lab for its MQTT broker   :1883   (lab.ps1 broker)
 #   2. starts the fleet server             :8099   server\run.py            (.venv)
 #   3. starts the serial bridge                    scripts\serial_bridge.py (.venv)
@@ -17,8 +17,8 @@
 # ===========================================================================
 param([switch]$Restart, [switch]$Quiet)
 
-$root = 'E:\.ESP32-MCP'
-$labHome = if ($env:IONITY_LAB_HOME) { $env:IONITY_LAB_HOME } else { 'E:\.IONITY-LAB' }
+$root = 'E:\.claude\Ionity\.ESP32-MCP'
+$labHome = if ($env:IONITY_LAB_HOME) { $env:IONITY_LAB_HOME } else { 'E:\.claude\Ionity\.IONITY-LAB' }
 Set-Location $root
 $logs = Join-Path $root 'logs'   # runtime logs live here (git-ignored), not in the repo root
 New-Item -ItemType Directory -Force $logs | Out-Null

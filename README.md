@@ -35,7 +35,7 @@ Classification: PUBLIC | Building Tomorrow, Today. | Anything is Possible with G
 
 > **Live lab:** 2× ESP32-S3 (MQTT) + 1× Pico 2 (serial bridge) in `site=lab`. The lab network is its own
 > project, **[Ionity-2nd-Router-Test-Lab](https://github.com/dennisGIonity/Ionity-2nd-Router-Test-Lab)**
-> (`E:\.IONITY-LAB`). Boards find the host as **`ionity-fleet.local`** over mDNS, or at the address the
+> (`E:\.claude\Ionity\.IONITY-LAB`). Boards find the host as **`ionity-fleet.local`** over mDNS, or at the address the
 > flasher wrote into them.
 
 ---
@@ -43,7 +43,7 @@ Classification: PUBLIC | Building Tomorrow, Today. | Anything is Possible with G
 ## Quick start
 
 ```powershell
-cd E:\.ESP32-MCP
+cd E:\.claude\Ionity\.ESP32-MCP
 python -m venv .venv; .\.venv\Scripts\Activate.ps1
 pip install -r server\requirements.txt
 python server\run.py                                   # dashboard, API, MCP, flasher on :8099
@@ -105,8 +105,8 @@ stdio for Claude Desktop / Claude Code / Cowork — the bridge keeps answering w
 {
   "mcpServers": {
     "ionity-esp32-fleet": {
-      "command": "E:\\.ESP32-MCP\\.venv\\Scripts\\python.exe",
-      "args": ["E:\\.ESP32-MCP\\server\\mcp_stdio_proxy.py"]
+      "command": "E:\\.claude\\Ionity\\.ESP32-MCP\\.venv\\Scripts\\python.exe",
+      "args": ["E:\\.claude\\Ionity\\.ESP32-MCP\\server\\mcp_stdio_proxy.py"]
     }
   }
 }
@@ -214,7 +214,7 @@ regardless of fleet size.
 ## Layout
 
 ```
-E:\.ESP32-MCP
+E:\.claude\Ionity\.ESP32-MCP
 ├── firmware-arduino/
 │   ├── Esp32_MCP_Node/      fw 2.0 node: main + Provision, DeviceMcp, EdgeAI, Actuators, Oled tabs
 │   ├── Pico_MCP_Node/       Pico / Pico 2 (serial or WiFi)
