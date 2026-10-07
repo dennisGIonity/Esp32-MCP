@@ -47,6 +47,9 @@ firmware-arduino/Pico_MCP_Node/secrets.h
 
 # --- lab runtime ---
 .venv-broker/
+.venv-mcpo/
+# demo clips / recordings (large media, kept out of git)
+Demo working/
 broker_*.txt
 bridge_*.txt
 server_boot.log

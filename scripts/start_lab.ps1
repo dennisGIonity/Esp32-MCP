@@ -7,6 +7,13 @@
 #   1. asks the lab for its MQTT broker   :1883   (lab.ps1 broker)
 #   2. starts the fleet server             :8099   server\run.py            (.venv)
 #   3. starts the serial bridge                    scripts\serial_bridge.py (.venv)
+#   4. starts mcpo (optional)              :8000   OpenAPI/REST for the MCP tools (.venv-mcpo)
+#      one-time setup:  python -m venv .venv-mcpo
+#                       .venv-mcpo\Scripts\python -m pip install mcpo "mcp>=1.24,<2"
+#      (mcp 2.x renamed streamablehttp_client and breaks mcpo 0.0.20)
+#      API key: IONITY_MCPO_API_KEY in .env (clients send Authorization: Bearer <key>),
+#      loaded in-process by scripts\run_mcpo.py so it never shows on a command line.
+#      Device writes on :8099 need IONITY_ADMIN_TOKEN (.env); the stdio proxy adds it.
 #
 # Order matters: broker first, so the fleet server's MQTT client connects on
 # its first attempt instead of after a back-off.
@@ -48,8 +55,9 @@ function ProcLike($pattern) {
 function Stop-Like($pattern) { ProcLike $pattern | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue } }
 
 if ($Restart) {
-  Say 'restarting ESP32-MCP services (fleet server + serial bridge)'
+  Say 'restarting ESP32-MCP services (fleet server + serial bridge + mcpo)'
   Stop-Like '*serial_bridge.py*'; Stop-Like '*server\run.py*'
+  Stop-Like '*run_mcpo.py*'; Get-Process mcpo -ErrorAction SilentlyContinue | Stop-Process -Force
   Start-Sleep 3
 }
 
@@ -81,6 +89,22 @@ else {
   Start-Detached "$root\.venv\Scripts\python.exe" "`"$root\scripts\serial_bridge.py`"" "$logs\bridge_out.txt" "$logs\bridge_err.txt" $root | Out-Null
 }
 
+# 4. mcpo - OpenAPI/REST front-end for the MCP tools (after the fleet server: its
+#    stdio proxy forwards every call to :8099). Optional: skipped if not installed.
+$mcpoPy = "$root\.venv-mcpo\Scripts\python.exe"
+if (Listening 8000) { Say 'mcpo          already up on :8000' }
+elseif (Test-Path $mcpoPy) {
+  Say 'mcpo          starting on :8000'
+  # scripts\run_mcpo.py reads IONITY_MCPO_API_KEY (environment or .env) and hands it to mcpo
+  # in-process, so the key never shows on a process command line. Clients send
+  # 'Authorization: Bearer <key>'. Writes then reach :8099 with IONITY_ADMIN_TOKEN, added by the stdio proxy.
+  if (-not ($env:IONITY_MCPO_API_KEY -or (Select-String -Path "$root\.env" -Pattern '^\s*IONITY_MCPO_API_KEY\s*=\s*\S' -Quiet -ErrorAction SilentlyContinue))) {
+    Say 'mcpo          WARNING: no IONITY_MCPO_API_KEY set - open to the whole LAN' }
+  Start-Detached $mcpoPy "`"$root\scripts\run_mcpo.py`"" "$logs\mcpo_out.txt" "$logs\mcpo_err.txt" $root | Out-Null
+  for ($i = 0; $i -lt 30 -and -not (Listening 8000); $i++) { Start-Sleep 1 }
+}
+else { Say 'mcpo          not installed (.venv-mcpo) - optional, see header' }
+
 if (-not $Quiet) {
   Start-Sleep 3
   try {
@@ -91,5 +115,6 @@ if (-not $Quiet) {
     Say ("fleet: total={0} online={1} stale={2} offline={3} alerting={4}" -f `
          $s.total_devices, $s.online, $s.stale, $s.offline, $s.alerting)
     Say ("dashboard  http://{0}:8099/" -f $h.discovery.advertised_ip)
+    if (Listening 8000) { Say ("mcpo       http://{0}:8000/docs" -f $h.discovery.advertised_ip) }
   } catch { Say "fleet server did not answer - see $logs\fleet_err.txt" }
 }
