@@ -20,6 +20,8 @@ from __future__ import annotations
 import asyncio
 import ipaddress
 import logging
+import socket
+import threading
 import struct
 import time
 from typing import Any
@@ -144,12 +146,40 @@ def min_ttl(pkt: bytes, default: int = 60) -> int:
 # ---------------------------------------------------------------------------
 # The resolver
 # ---------------------------------------------------------------------------
-class _ServerProtocol(asyncio.DatagramProtocol):
+class _SockSender:
+    """Reply side of the listener: plain sendto on the shared UDP socket.
+    A reply to a client that already left must never be fatal."""
+
+    def __init__(self, sock: socket.socket):
+        self.sock = sock
+
+    def sendto(self, data: bytes, addr) -> None:
+        try:
+            self.sock.sendto(data, addr)
+        except OSError:
+            pass
+
+    def is_closing(self) -> bool:
+        return self.sock.fileno() == -1
+
+    def close(self) -> None:
+        try:
+            self.sock.close()
+        except OSError:
+            pass
+
+
+class _ServerProtocol:
+    """Hands each received datagram to the service."""
+
     def __init__(self, svc: "DnsService"):
         self.svc = svc
 
-    def connection_made(self, transport):
-        self.svc.transport = transport
+    def error_received(self, exc):
+        # Windows reports an ICMP "port unreachable" (a client that already gave
+        # up, e.g. because another adapter's DNS answered first) as an error on
+        # the NEXT receive. Count it and keep serving.
+        self.svc.recv_errors += 1
 
     def datagram_received(self, data: bytes, addr):
         # Keep a reference: an un-referenced task can be garbage-collected
@@ -214,10 +244,13 @@ class DnsService:
         self.queries = 0
         self.cache_hits = 0
         self.upstream_fails = 0
+        self.recv_errors = 0      # Windows ICMP resets seen on the listener (harmless, counted)
+        self.rebinds = 0          # listener re-created after an unexpected close
+        self._stopping = False
+        self._reader: threading.Thread | None = None
 
     # -- lifecycle ---------------------------------------------------------
     async def start(self) -> None:
-        loop = asyncio.get_running_loop()
         # Same rule as mDNS: a pinned bind address this host no longer has
         # (DHCP gave .2 instead of .4) moves to the same network, else fails loudly.
         if self.s.dns_bind not in ("0.0.0.0", "", "127.0.0.1"):
@@ -228,10 +261,7 @@ class DnsService:
                     log.warning("LAN DNS: %s", warn.replace("IONITY_MDNS_ADVERTISE_IP", "IONITY_DNS_BIND"))
                     self.s.dns_bind = ip
         try:
-            await loop.create_datagram_endpoint(
-                lambda: _ServerProtocol(self),
-                local_addr=(self.s.dns_bind, self.s.dns_port),
-            )
+            await self._bind()
             self.running = True
             log.info("DNS resolver listening on %s:%s -> upstreams %s",
                      self.s.dns_bind, self.s.dns_port, self.upstreams)
@@ -245,7 +275,45 @@ class DnsService:
         self._arp = asyncio.create_task(self._arp_loop())
         self._pruner = asyncio.create_task(self._pruner_loop())
 
+    def _make_socket(self) -> socket.socket:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        if hasattr(socket, "SIO_UDP_CONNRESET"):      # Windows: fewer ICMP resets on reads
+            sock.ioctl(socket.SIO_UDP_CONNRESET, False)
+        sock.bind((self.s.dns_bind, self.s.dns_port))
+        sock.settimeout(1.0)                          # lets the reader notice stop()
+        return sock
+
+    async def _bind(self) -> None:
+        """Listener = plain socket + one reader thread, NOT an asyncio datagram
+        endpoint. On Windows the Proactor datagram transport stops reading for
+        good after a single receive error (port-unreachable from a client that
+        hung up) while still reporting itself open: the 2026-10-07 outage."""
+        loop = asyncio.get_running_loop()
+        sock = self._make_socket()
+        self.transport = _SockSender(sock)
+        proto = _ServerProtocol(self)
+        self._reader = threading.Thread(target=self._read_loop, args=(loop, sock, proto),
+                                        name="lan-dns-reader", daemon=True)
+        self._reader.start()
+
+    def _read_loop(self, loop, sock: socket.socket, proto: _ServerProtocol) -> None:
+        while not self._stopping:
+            try:
+                data, addr = sock.recvfrom(4096)
+            except socket.timeout:
+                continue
+            except OSError as e:
+                if self._stopping or sock.fileno() == -1:
+                    return
+                proto.error_received(e)               # e.g. WSAECONNRESET: keep reading
+                continue
+            try:
+                loop.call_soon_threadsafe(proto.datagram_received, data, addr)
+            except RuntimeError:                       # event loop closed: shutting down
+                return
+
     async def stop(self) -> None:
+        self._stopping = True
         for t in (self._writer, self._arp, self._pruner):
             if t:
                 t.cancel()
@@ -499,6 +567,8 @@ class DnsService:
             "inflight": len(self._inflight),
             "dropped_overload": self.dropped,
             "refused_clients": self.refused,
+            "recv_errors": self.recv_errors,
+            "rebinds": self.rebinds,
             "allow_from": [str(n) for n in self.allowed_nets],
         }
 
