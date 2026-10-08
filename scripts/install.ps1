@@ -1,6 +1,9 @@
 ﻿# ====================================================================================
 # AEDI - IONITY GLOBAL | ESP32-MCP one-step installer (Windows 10/11)
-# Policy 986 AED | (c) 2018-2026 Antwerp Designs | Ionity (Pty) Ltd
+# Author: Johan Wilhelm van Antwerp | Ionity (Pty) Ltd | Ionity Global (Pty) Ltd | AEDI
+# Governance: Policy 986 AED | License: AED 900 | CC BY-NC-SA 4.0 where stated
+# (c) 2018-2026 Antwerp Designs | Ionity (Pty) Ltd | Ionity Global (Pty) Ltd - All Rights Reserved - TM2
+# Owner: github.com/Ionity-Global | www.ionity.today | ai@ionity.today
 # ---------------------------------------------------------------------------
 # Creates the three Python environments, writes .env with fresh random secrets
 # and (unless -NoStart) starts everything. Safe to run again: existing

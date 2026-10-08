@@ -1,6 +1,9 @@
 """
 AEDI - IONITY GLOBAL | LAN DNS resolver: listener must survive clients that hang up
-Policy 986 AED | (c) 2018-2026 Antwerp Designs | Ionity (Pty) Ltd
+Author: Johan Wilhelm van Antwerp | Ionity (Pty) Ltd | Ionity Global (Pty) Ltd | AEDI
+Governance: Policy 986 AED | License: AED 900 | CC BY-NC-SA 4.0 where stated
+(c) 2018-2026 Antwerp Designs | Ionity (Pty) Ltd | Ionity Global (Pty) Ltd - All Rights Reserved - TM2
+Owner: github.com/Ionity-Global | www.ionity.today | ai@ionity.today
 
 Regression for 2026-10-07: on a multi-homed Windows host the DNS client asks
 every adapter and closes its socket as soon as one answers. Our late reply then

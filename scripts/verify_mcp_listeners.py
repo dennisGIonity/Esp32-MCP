@@ -2,7 +2,10 @@
 """
 AEDI - IONITY GLOBAL | MCP listener + data-source verification (evidence run)
 Doc ID: DOC-2026-10-ESP32MCP-VERIFY | Policy 986 AED
-(c) 2018-2026 Antwerp Designs | Ionity (Pty) Ltd
+Author: Johan Wilhelm van Antwerp | Ionity (Pty) Ltd | Ionity Global (Pty) Ltd | AEDI
+Governance: Policy 986 AED | License: AED 900 | CC BY-NC-SA 4.0 where stated
+(c) 2018-2026 Antwerp Designs | Ionity (Pty) Ltd | Ionity Global (Pty) Ltd - All Rights Reserved - TM2
+Owner: github.com/Ionity-Global | www.ionity.today | ai@ionity.today
 
 Proves against the RUNNING lab, with raw evidence saved as JSON:
   L0  listening sockets       netstat: :8099 host, :1883 broker, :53 resolver, :5353 mDNS

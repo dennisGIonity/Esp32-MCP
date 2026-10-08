@@ -1,10 +1,10 @@
 <!--
 ========================================================================================
 AEDI - IONITY GLOBAL - ESP32-MCP FLEET PLATFORM
-Author: Johan Wilhelm van Antwerp | Ionity (Pty) Ltd | AEDI
+Author: Johan Wilhelm van Antwerp | Ionity (Pty) Ltd | Ionity Global (Pty) Ltd | AEDI
 Document ID: DOC-2026-09-ESP32MCP-001 | Version: 2.0.1 | Updated: 2026-10-02 SAST
 Governance: Policy 986 AED | License: AED 900 | CC BY-NC-SA 4.0 where stated
-(c) 2018-2026 Antwerp Designs | Ionity (Pty) Ltd - All Rights Reserved - TM2
+(c) 2018-2026 Antwerp Designs | Ionity (Pty) Ltd | Ionity Global (Pty) Ltd - All Rights Reserved - TM2
 Web: https://www.ionity.today | https://www.ionity.world | Ref: https://www.ionity.co.za
 Classification: PUBLIC | Building Tomorrow, Today. | Anything is Possible with God.
 ========================================================================================

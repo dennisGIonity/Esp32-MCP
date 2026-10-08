@@ -1,5 +1,8 @@
 ﻿# AEDI - IONITY GLOBAL | ESP32-MCP status at a glance
-# Policy 986 AED | (c) 2018-2026 Antwerp Designs | Ionity (Pty) Ltd
+# Author: Johan Wilhelm van Antwerp | Ionity (Pty) Ltd | Ionity Global (Pty) Ltd | AEDI
+# Governance: Policy 986 AED | License: AED 900 | CC BY-NC-SA 4.0 where stated
+# (c) 2018-2026 Antwerp Designs | Ionity (Pty) Ltd | Ionity Global (Pty) Ltd - All Rights Reserved - TM2
+# Owner: github.com/Ionity-Global | www.ionity.today | ai@ionity.today
 function Up($p) { $c = New-Object Net.Sockets.TcpClient; try { $ar = $c.BeginConnect('127.0.0.1', $p, $null, $null); ($ar.AsyncWaitHandle.WaitOne(400) -and $c.Connected) } catch { $false } finally { $c.Dispose() } }
 function Line($n, $ok, $extra) { Write-Host ('  {0,-16}' -f $n) -NoNewline; Write-Host $(if ($ok) { 'UP  ' } else { 'DOWN' }) -ForegroundColor $(if ($ok) { 'Green' } else { 'Red' }) -NoNewline; Write-Host "  $extra" }
 Write-Host 'Ionity ESP32-MCP status'

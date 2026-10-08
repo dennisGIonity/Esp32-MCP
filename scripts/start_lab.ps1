@@ -1,6 +1,9 @@
 # ===========================================================================
 # AEDI - IONITY GLOBAL | Bring ESP32-MCP up inside the Ionity Lab (idempotent)
-# Policy 986 AED | (c) 2018-2026 Antwerp Designs | Ionity (Pty) Ltd
+# Author: Johan Wilhelm van Antwerp | Ionity (Pty) Ltd | Ionity Global (Pty) Ltd | AEDI
+# Governance: Policy 986 AED | License: AED 900 | CC BY-NC-SA 4.0 where stated
+# (c) 2018-2026 Antwerp Designs | Ionity (Pty) Ltd | Ionity Global (Pty) Ltd - All Rights Reserved - TM2
+# Owner: github.com/Ionity-Global | www.ionity.today | ai@ionity.today
 # ---------------------------------------------------------------------------
 # The lab itself (network, shared MQTT broker, Pi tools) is its own project:
 # Ionity-Lab, E:\.claude\Ionity\.IONITY-LAB (override with IONITY_LAB_HOME). This script:

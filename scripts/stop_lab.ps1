@@ -1,5 +1,8 @@
 ﻿# AEDI - IONITY GLOBAL | Stop every ESP32-MCP service started from this folder
-# Policy 986 AED | (c) 2018-2026 Antwerp Designs | Ionity (Pty) Ltd
+# Author: Johan Wilhelm van Antwerp | Ionity (Pty) Ltd | Ionity Global (Pty) Ltd | AEDI
+# Governance: Policy 986 AED | License: AED 900 | CC BY-NC-SA 4.0 where stated
+# (c) 2018-2026 Antwerp Designs | Ionity (Pty) Ltd | Ionity Global (Pty) Ltd - All Rights Reserved - TM2
+# Owner: github.com/Ionity-Global | www.ionity.today | ai@ionity.today
 # Stops the watcher, AI gateway, serial bridge, fleet server and this folder's own
 # MQTT broker. A broker owned by a separate Ionity Lab install is left alone.
 $root = Split-Path -Parent $PSScriptRoot
