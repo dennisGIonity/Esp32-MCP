@@ -12,7 +12,7 @@ KillLike '*net_watch.py*' 'alarm watcher'
 KillLike '*run_mcpo.py*' 'AI gateway'; Get-Process mcpo -ErrorAction SilentlyContinue | Stop-Process -Force
 KillLike '*serial_bridge.py*' 'serial bridge'
 KillLike '*server\run.py*' 'fleet server'
-KillLike "*$root\broker\run_broker.py*" 'MQTT broker'
+KillLike "*$root\packaging\broker\run_broker.py*" 'MQTT broker'
 $mine = @(Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue | ForEach-Object { $_.IPAddress })
 $dns = @(Get-DnsClientServerAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue | Where-Object { $_.ServerAddresses | Where-Object { $mine -contains $_ } })
 if ($dns.Count) { Say ('WARNING: ' + (($dns | ForEach-Object { $_.InterfaceAlias }) -join ', ') + ' still uses this PC as DNS. Reset it or this PC loses internet:') 'Yellow'

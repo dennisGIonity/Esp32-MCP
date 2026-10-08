@@ -4,7 +4,7 @@
 # ---------------------------------------------------------------------------
 # The lab itself (network, shared MQTT broker, Pi tools) is its own project:
 # Ionity-Lab, E:\.claude\Ionity\.IONITY-LAB (override with IONITY_LAB_HOME). This script:
-#   1. MQTT broker :1883 - the Ionity Lab's if installed, else the bundled one (broker\, .venv-broker)
+#   1. MQTT broker :1883 - the Ionity Lab's if installed, else the bundled one (packaging\broker\, .venv-broker)
 #   2. starts the fleet server             :8099   server\run.py            (.venv)
 #   3. starts the serial bridge                    scripts\serial_bridge.py (.venv)
 #   4. starts mcpo (optional)              :8000   OpenAPI/REST for the MCP tools (.venv-mcpo)
@@ -68,7 +68,7 @@ elseif (Test-Path "$labHome\lab.ps1") {
 }
 elseif (Test-Path "$root\.venv-broker\Scripts\python.exe") {
   Say 'broker        starting (bundled) on :1883'
-  Start-Detached "$root\.venv-broker\Scripts\python.exe" "`"$root\broker\run_broker.py`" 0.0.0.0:1883" "$logs\broker_out.txt" "$logs\broker_err.txt" $root | Out-Null
+  Start-Detached "$root\.venv-broker\Scripts\python.exe" "`"$root\packaging\broker\run_broker.py`" 0.0.0.0:1883" "$logs\broker_out.txt" "$logs\broker_err.txt" $root | Out-Null
   for ($i = 0; $i -lt 20 -and -not (Listening 1883); $i++) { Start-Sleep 1 }
   if (Listening 1883) { Say 'broker        up on :1883' } else { Say "broker        FAILED to start - see $logs\broker_err.txt" }
 }

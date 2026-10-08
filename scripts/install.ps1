@@ -42,7 +42,7 @@ function Venv($dir, $label, $req, [string[]]$pkgs) {
   Say "$label ready" 'Green'
 }
 Venv "$root\.venv" 'fleet server' "$root\server\requirements.txt"
-Venv "$root\.venv-broker" 'MQTT broker' "$root\broker\requirements.txt"
+Venv "$root\.venv-broker" 'MQTT broker' "$root\packaging\broker\requirements.txt"
 if (-not $NoMcpo) { Venv "$root\.venv-mcpo" 'AI gateway (mcpo)' $null @('mcpo', 'mcp>=1.24,<2') }
 
 # 3. .env with fresh secrets (never overwritten)
