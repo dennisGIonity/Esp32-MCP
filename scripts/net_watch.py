@@ -149,7 +149,8 @@ th{{background:#0d2137;color:#fff;font-size:13px}} small{{color:#8c9bab}}
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--base", default="http://127.0.0.1:8099")
-    ap.add_argument("--device", default="esp32-98a316e5d18c", help="board that shows the red light")
+    ap.add_argument("--device", default=(env_value("IONITY_ALARM_DEVICE") or "esp32-98a316e5d18c"),
+                    help="board that shows the red light (default: IONITY_ALARM_DEVICE in .env)")
     ap.add_argument("--channel", default="pwm0", choices=["pwm0", "pwm1", "relay0", "alert_led", "led"])
     ap.add_argument("--hold", type=float, default=20, help="seconds the light stays on after the last hit")
     ap.add_argument("--poll", type=float, default=1.5)

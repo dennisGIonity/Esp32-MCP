@@ -4,7 +4,7 @@
 # ---------------------------------------------------------------------------
 # The lab itself (network, shared MQTT broker, Pi tools) is its own project:
 # Ionity-Lab, E:\.claude\Ionity\.IONITY-LAB (override with IONITY_LAB_HOME). This script:
-#   1. asks the lab for its MQTT broker   :1883   (lab.ps1 broker)
+#   1. MQTT broker :1883 - the Ionity Lab's if installed, else the bundled one (broker\, .venv-broker)
 #   2. starts the fleet server             :8099   server\run.py            (.venv)
 #   3. starts the serial bridge                    scripts\serial_bridge.py (.venv)
 #   4. starts mcpo (optional)              :8000   OpenAPI/REST for the MCP tools (.venv-mcpo)
@@ -24,7 +24,7 @@
 # ===========================================================================
 param([switch]$Restart, [switch]$Quiet)
 
-$root = 'E:\.claude\Ionity\.ESP32-MCP'
+$root = if ($env:IONITY_ROOT) { $env:IONITY_ROOT } else { Split-Path -Parent $PSScriptRoot }   # works wherever the folder is unpacked
 $labHome = if ($env:IONITY_LAB_HOME) { $env:IONITY_LAB_HOME } else { 'E:\.claude\Ionity\.IONITY-LAB' }
 Set-Location $root
 $logs = Join-Path $root 'logs'   # runtime logs live here (git-ignored), not in the repo root
@@ -62,12 +62,18 @@ if ($Restart) {
 }
 
 # 1. broker - owned by the Ionity Lab
-if (Listening 1883) { Say 'broker        already up on :1883 (Ionity Lab)' }
+if (Listening 1883) { Say 'broker        already up on :1883' }
 elseif (Test-Path "$labHome\lab.ps1") {
   & "$labHome\lab.ps1" broker -Quiet:$Quiet
 }
+elseif (Test-Path "$root\.venv-broker\Scripts\python.exe") {
+  Say 'broker        starting (bundled) on :1883'
+  Start-Detached "$root\.venv-broker\Scripts\python.exe" "`"$root\broker\run_broker.py`" 0.0.0.0:1883" "$logs\broker_out.txt" "$logs\broker_err.txt" $root | Out-Null
+  for ($i = 0; $i -lt 20 -and -not (Listening 1883); $i++) { Start-Sleep 1 }
+  if (Listening 1883) { Say 'broker        up on :1883' } else { Say "broker        FAILED to start - see $logs\broker_err.txt" }
+}
 else {
-  Say "broker        DOWN and Ionity Lab not found at $labHome - clone github.com/dennisGIonity/Ionity-2nd-Router-Test-Lab there"
+  Say "broker        DOWN: no Ionity Lab at $labHome and no bundled broker - run INSTALL (scripts\install.ps1)"
   Say '              (the fleet server still runs; devices fall back to HTTP until the broker is up)'
 }
 
