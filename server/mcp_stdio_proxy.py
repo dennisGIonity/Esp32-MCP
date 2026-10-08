@@ -171,7 +171,8 @@ def forward(payload: dict) -> dict | None:
 
 UNREACHABLE = (
     "The Ionity fleet server is not running, so live fleet data is "
-    "unavailable. Start it with:  E:\\.claude\\Ionity\\.ESP32-MCP\\scripts\\start_fleet.ps1"
+    "unavailable. Start it with:  powershell -ExecutionPolicy Bypass -File "
+    + os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "scripts", "start_lab.ps1")
 )
 
 

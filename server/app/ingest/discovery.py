@@ -134,8 +134,12 @@ class DiscoveryService:
             log.info("mDNS advertising %s.local -> %s:%s",
                      MDNS_HOSTNAME, self.ip, self.s.port)
         except Exception as e:                        # noqa: BLE001
-            self.error = str(e)
-            log.warning("mDNS advertisement failed: %s", e)
+            if type(e).__name__ == "NonUniqueNameException":
+                self.error = (f"another fleet server already advertises {MDNS_HOSTNAME}.local on this "
+                              "network; run one fleet server per network (boards use whichever answers)")
+            else:
+                self.error = f"{type(e).__name__}: {e}" if str(e) else type(e).__name__
+            log.warning("mDNS advertisement failed: %s", self.error)
 
     async def stop(self) -> None:
         try:

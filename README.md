@@ -76,6 +76,65 @@ RUN-TESTS / DEMO-DEVICE `.cmd` files). Sources live in `packaging/`. Testers nee
 
 ---
 
+### One-step install (any Windows 10/11 PC)
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\install.ps1            # install + start
+powershell -ExecutionPolicy Bypass -File scripts\install.ps1 -NoStart   # install only
+#   -NoMcpo     skip the AI gateway      -Autostart  start at every Windows sign-in
+#   -Firewall   open 8099/8000/1883 TCP, 53/5353 UDP on Private networks (run as Administrator)
+```
+
+Needs Python 3.11+. Creates `.venv` (fleet server), `.venv-broker` (bundled MQTT broker from
+`packaging/broker`) and `.venv-mcpo` (AI gateway), and writes `.env` from `.env.example` with a
+fresh random `IONITY_ADMIN_TOKEN` and `IONITY_MCPO_API_KEY`. Safe to re-run; an existing `.env`
+is never overwritten. The first start after a fresh install can take 10-20 s while Python
+prepares its files.
+
+### Start, status, stop
+
+| Script | Does |
+|---|---|
+| `scripts\start_lab.ps1` | broker (Ionity Lab's if present, else the bundled one), fleet server, serial bridge, AI gateway; idempotent; `-Restart` to restart the server parts |
+| `scripts\status_lab.ps1` | each service up/down, boards online, LAN DNS lookups |
+| `scripts\stop_lab.ps1` | stops everything started from this folder and warns if this PC still uses itself as DNS |
+
+The scripts resolve the project folder from their own location (override with `IONITY_ROOT`).
+
+## AI gateway (mcpo) and keys
+
+`scripts\run_mcpo.py` serves the 18 fleet MCP tools as OpenAPI/REST on `:8000` (`/docs` lists
+them). Every request needs `Authorization: Bearer <IONITY_MCPO_API_KEY>`; the key is read from
+`.env` in-process, so it never appears on a command line. Device-changing MCP tools on the fleet
+server (`send_command`, `device_call_tool`, ...) need `Authorization: Bearer <IONITY_ADMIN_TOKEN>`;
+read-only tools and the dashboard stay open on the LAN. `server/mcp_stdio_proxy.py` adds the admin
+token automatically for local stdio clients such as Claude Desktop.
+
+## LAN DNS visibility and the YouTube alarm
+
+With `IONITY_DNS_PORT=53`, any device that uses this PC as its DNS server is logged per device
+(site name and time only, never page contents) and shown under **LAN DNS** on the dashboard.
+Point the router's DHCP DNS at this PC, or set it per device. Devices that use encrypted DNS
+(DNS-over-HTTPS, Android Private DNS, iCloud Private Relay) or a second network are not seen.
+
+`scripts\net_watch.py` watches that log and switches a board's `pwm0` output on (GPIO5 on an
+ESP32-S3, wired to a red LED) when a watched site is opened, off again 20 s after the last match.
+It writes a live report to `Demo working\network-report.html` (or `--report <file>`).
+
+```powershell
+.venv\Scripts\python.exe scripts\net_watch.py                       # board from IONITY_ALARM_DEVICE
+.venv\Scripts\python.exe scripts\net_watch.py --device esp32-xxxxxxxxxxxx --hold 30
+```
+
+Only monitor networks you manage, with the users' knowledge (e.g. POPIA).
+
+### POC kit
+
+`scripts\build_poc_package.ps1 -Out <folder>` builds the testers kit (broker, server, dashboard,
+flasher with firmware, manual) and overlays `packaging\poc`: SETUP / START / STOP / STATUS,
+WATCH-YOUTUBE-ALARM and COPY-AI-KEY. SETUP switches LAN DNS to port 53, generates the admin token
+and AI-gateway key, and installs mcpo. The build refuses to finish if any private file would ship.
+
 ## Flash and provision a board (no recompiling)
 
 1. `python firmware\build.py` — builds the four images (`esp32s3_uart`, `esp32s3_usb`, `esp32_classic`,
