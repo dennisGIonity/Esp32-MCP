@@ -4,7 +4,7 @@ AEDI - IONITY GLOBAL | Network watch: "YouTube alarm" proof of concept
 Author: Johan Wilhelm van Antwerp | Ionity (Pty) Ltd | Ionity Global (Pty) Ltd | AEDI
 Governance: Policy 986 AED | License: AED 900 | CC BY-NC-SA 4.0 where stated
 (c) 2018-2026 Antwerp Designs | Ionity (Pty) Ltd | Ionity Global (Pty) Ltd - All Rights Reserved - TM2
-Owner: github.com/Ionity-Global | www.ionity.today | ai@ionity.today
+Owner: github.com/Ionity-Global-Pty-Ltd | www.ionity.today | ai@ionity.today
 
 Watches the fleet server's own LAN DNS log (through MCP). The moment any device
 on the network looks up a watched site (default: YouTube), it switches on a red

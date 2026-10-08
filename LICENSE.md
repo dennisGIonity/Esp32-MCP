@@ -14,7 +14,7 @@ Web: https://www.ionity.today | https://www.ionity.world | Ref: https://www.ioni
 **Owner.** This repository and everything in it - source code, firmware, scripts, dashboard,
 documentation, media and packaging - is the property of **Antwerp Designs | Ionity (Pty) Ltd |
 Ionity Global (Pty) Ltd** (AEDI), published under the Ionity Global organisation
-(https://github.com/Ionity-Global).
+(https://github.com/Ionity-Global-Pty-Ltd).
 
 **Author.** Johan Wilhelm van Antwerp | Ionity (Pty) Ltd | Ionity Global (Pty) Ltd | AEDI
 

@@ -4,7 +4,7 @@ Doc ID: DOC-2026-09-ESP32MCP-DNS | Policy 986 AED
 Author: Johan Wilhelm van Antwerp | Ionity (Pty) Ltd | Ionity Global (Pty) Ltd | AEDI
 Governance: Policy 986 AED | License: AED 900 | CC BY-NC-SA 4.0 where stated
 (c) 2018-2026 Antwerp Designs | Ionity (Pty) Ltd | Ionity Global (Pty) Ltd - All Rights Reserved - TM2
-Owner: github.com/Ionity-Global | www.ionity.today | ai@ionity.today
+Owner: github.com/Ionity-Global-Pty-Ltd | www.ionity.today | ai@ionity.today
 
 Why this lives on the server and not on an ESP32
 ------------------------------------------------

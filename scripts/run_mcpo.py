@@ -4,7 +4,7 @@ AEDI - IONITY GLOBAL | Start mcpo (OpenAPI/REST front-end for the ESP32-MCP flee
 Author: Johan Wilhelm van Antwerp | Ionity (Pty) Ltd | Ionity Global (Pty) Ltd | AEDI
 Governance: Policy 986 AED | License: AED 900 | CC BY-NC-SA 4.0 where stated
 (c) 2018-2026 Antwerp Designs | Ionity (Pty) Ltd | Ionity Global (Pty) Ltd - All Rights Reserved - TM2
-Owner: github.com/Ionity-Global | www.ionity.today | ai@ionity.today
+Owner: github.com/Ionity-Global-Pty-Ltd | www.ionity.today | ai@ionity.today
 
 Reads IONITY_MCPO_API_KEY from the environment or .env and hands it to mcpo
 in-process, so the key never appears on a process command line (Task Manager,
