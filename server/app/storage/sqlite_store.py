@@ -111,6 +111,7 @@ class SQLiteStore(DnsStoreMixin, Store):
         self.db.row_factory = aiosqlite.Row
         await self.db.executescript(SCHEMA)
         await self.db.executescript(self.DNS_SCHEMA)
+        await self.migrate_dns()
         await self.db.commit()
         await self.checkpoint()          # start every run with a small WAL
 

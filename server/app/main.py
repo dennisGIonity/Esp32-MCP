@@ -20,6 +20,7 @@ from app.storage.sqlite_store import SQLiteStore
 from app.fleet.registry import FleetRegistry
 from app.ingest.mqtt_bridge import MqttBridge
 from app.ingest.dns_resolver import DnsService
+from app.ingest.net_alerts import NetworkWatch
 from app.ingest.discovery import DiscoveryService, primary_lan_ip
 from app.mcp.server import FleetMCPServer
 from app.api.routes import router, ws_clients
@@ -76,10 +77,14 @@ async def lifespan(app: FastAPI):
         await bridge.start()
         app.state.mqtt = bridge
 
+    netwatch = NetworkWatch(store, registry, settings)
+    app.state.netwatch = netwatch
     if settings.dns_enabled:
         dns = DnsService(store, settings)
+        dns.watch = netwatch                 # every query from every device -> alerts
         await dns.start()
         app.state.dns = dns
+    await netwatch.start()
 
     discovery = DiscoveryService(settings)
     await discovery.start()
@@ -128,6 +133,7 @@ async def lifespan(app: FastAPI):
     yield
 
     bcast.cancel()
+    await netwatch.stop()
     await datadog.stop()
     await discovery.stop()
     if app.state.dns:
@@ -145,7 +151,7 @@ app = FastAPI(
         "Telemetry ingest, fleet registry, alerting and Model Context Protocol "
         "gateway for 1000+ ESP32 edge nodes. Policy 986 AED."
     ),
-    version="2.0.2",
+    version="2.2.0",
     lifespan=lifespan,
 )
 

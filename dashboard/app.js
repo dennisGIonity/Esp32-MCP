@@ -597,3 +597,76 @@ refreshDns().then(() => setTimeout(dnsTick, dnsPollMs()));
 document.addEventListener("visibilitychange", () => {
   if (!document.hidden) { refreshAlerts(); pollHealth(); if (!DNS_QUERY) refreshDns(); }
 });
+
+/* ----------------------------------------------------------------- */
+/* v2.1 Every device on this network + watch alarms                   */
+/* ----------------------------------------------------------------- */
+function agoTs(ts) {
+  if (!ts) return "never";
+  const s = Math.max(0, Date.now() / 1000 - ts);
+  if (s < 60) return `${Math.round(s)}s ago`;
+  if (s < 3600) return `${Math.round(s / 60)} min ago`;
+  return `${(s / 3600).toFixed(1)} h ago`;
+}
+
+async function refreshNetwork() {
+  try {
+    const [ov, w] = await Promise.all([
+      fetch(`${API}/api/v1/network/overview?minutes=${DNS_WINDOW}`).then((r) => r.json()),
+      fetch(`${API}/api/v1/network/watch`).then((r) => r.json()),
+    ]);
+    const watching = w.watching || [];
+    const hot = (q) => watching.some((x) => q === x || q.endsWith("." + x));
+    const alarmIps = new Set((w.active || []).map((a) => a.ip));
+    const res = ov.resolver || {};
+    const sw = res.last_sweep || {};
+
+    $("nTotal").textContent = ov.total ?? 0;
+    $("nVisible").textContent = ov.visible ?? 0;
+    $("nHidden").textContent = ov.hidden ?? 0;
+    $("nAlarms").textContent = (w.active || []).length;
+    const light = w.light || {};
+    $("nLight").textContent = light.on ? "ON" : "off";
+    $("nLight").title = light.device ? `${light.device} / ${light.channel}${light.error ? " - " + light.error : ""}`
+                                     : (light.error || "no online ESP32");
+    $("netState").textContent = sw.at
+      ? `LAN sweep ${agoTs(sw.at)} · ${(sw.subnets || []).join(", ")} · ${res.lan_sweeps || 0} sweeps`
+      : "first sweep running…";
+
+    const cover = $("netCover");
+    if ((ov.hidden || 0) > 0) {
+      cover.className = "netcover warnbox";
+      cover.innerHTML = `<b>${esc(ov.hidden)} device(s) are on the network but their traffic is not reaching Ionity.</b>
+        They still use the router's DNS. To see and alert on <b>every</b> device: in the router
+        (<code>192.168.0.1</code>) set <b>LAN DHCP → DNS server</b> to <code>${esc(SERVER_IP)}</code>
+        (and turn off IPv6 DNS / RA-DNS on the LAN), then reconnect the devices' WiFi.
+        On phones turn off Android <i>Private DNS</i> / iPhone <i>Private Relay</i>.`;
+    } else {
+      cover.className = "netcover";
+      cover.innerHTML = ov.total ? `All ${esc(ov.total)} devices on the LAN are routed through Ionity DNS.` : "";
+    }
+
+    const list = ov.devices || [];
+    $("netDevices").innerHTML = list.map((d) => {
+      const name = d.label || d.hostname || d.vendor || "unidentified device";
+      const cls = alarmIps.has(d.ip) ? "alarm" : (d.dns_visible || d.infra) ? "vis" : "hid";
+      const state = d.dns_visible
+        ? `${esc(d.lookups)} lookups · ${esc(d.domains)} sites · last DNS ${esc(agoTs(d.last_dns))}`
+        : d.infra ? `network infrastructure · seen ${esc(agoTs(d.last_seen))}`
+        : `on LAN (seen ${esc(agoTs(d.last_seen))}) · traffic not visible - uses router DNS`;
+      const doms = (d.top_domains || []).map((t) =>
+        `<span class="dom${hot(t.qname) ? " hot" : ""}" title="${esc(t.qname)}">${esc(t.qname)}<b>${esc(t.hits)}</b></span>`).join("");
+      return `<div class="netdev ${cls}${d.online ? "" : " gone"}">
+        <div class="nd-h"><span class="nd-n">${esc(name)}</span><span class="nd-ip">${esc(d.ip)}</span></div>
+        <div class="nd-m">${esc(d.mac || "")}${d.vendor && d.vendor !== name ? " · " + esc(d.vendor) : ""}<br>${state}</div>
+        <div class="dnsdev-doms">${doms}</div>
+      </div>`;
+    }).join("") || '<div class="dns-empty">Sweeping the LAN… devices appear within a minute.</div>';
+  } catch {
+    $("netState").textContent = "server unreachable";
+  }
+}
+
+refreshNetwork();
+setInterval(() => { if (!document.hidden) refreshNetwork(); }, 5000);
+setInterval(() => { if (!document.hidden) refreshAlerts(); }, 5000);

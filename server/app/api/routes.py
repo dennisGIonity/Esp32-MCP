@@ -253,6 +253,43 @@ async def lan_devices(request: Request, limit: int = Query(100, le=1000)):
     return {"devices": await request.app.state.store.list_lan_devices(limit)}
 
 
+@router.get("/api/v1/network/overview")
+async def network_overview(request: Request, minutes: int = 60,
+                           limit: int = Query(300, le=1000)):
+    """Every device on the network (LAN sweep), whether its traffic is visible
+    through the Ionity resolver, and what it looked up in the window."""
+    now = time.time()
+    rows = await request.app.state.store.network_overview(now - minutes * 60, limit)
+    dns = getattr(request.app.state, "dns", None)
+    visible = hidden = 0
+    for d in rows:
+        last = d.get("last_dns") or 0
+        d["dns_visible"] = bool(last and now - last < 3600)
+        d["online"] = now - (d.get("last_seen") or 0) < 300
+        # The router and this server are infrastructure, not "hidden" clients.
+        d["infra"] = (d.get("vendor") == "this host"
+                      or "router" in (d.get("vendor") or "").lower()
+                      or "gateway" in (d.get("hostname") or "").lower())
+        if d["dns_visible"]:
+            visible += 1
+        elif not d["infra"] and d["online"]:
+            hidden += 1
+    return {
+        "minutes": minutes,
+        "devices": rows,
+        "total": len(rows),
+        "visible": visible,
+        "hidden": hidden,
+        "resolver": dns.stats() if dns else {"running": False},
+    }
+
+
+@router.get("/api/v1/network/watch")
+async def network_watch(request: Request):
+    nw = getattr(request.app.state, "netwatch", None)
+    return nw.stats() if nw else {"watching": []}
+
+
 # --------------------------------------------------------------------------
 # MCP over HTTP
 # --------------------------------------------------------------------------

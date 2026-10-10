@@ -241,6 +241,9 @@ class DnsService:
         self._arp: asyncio.Task | None = None
         self._pruner: asyncio.Task | None = None
         self.recent: list[dict[str, Any]] = []      # small in-memory live feed
+        self.watch = None                           # NetworkWatch (alerts), set by main
+        self.sweeps = 0
+        self.last_sweep: dict[str, Any] = {}
 
         self.running = False
         self.bind_error: str | None = None
@@ -424,6 +427,11 @@ class DnsService:
         }
         self._pending.append(row)
         self.recent.append(row)
+        if self.watch is not None:
+            try:
+                self.watch.on_query(row)
+            except Exception:
+                log.debug("watch hook failed", exc_info=True)
         if len(self.recent) > 300:
             del self.recent[: len(self.recent) - 300]
 
@@ -466,15 +474,52 @@ class DnsService:
     async def _arp_loop(self) -> None:
         """Give the IPs names. ARP supplies the MAC (hence vendor), and a
         best-effort reverse lookup often supplies a hostname."""
+        every = max(20, int(getattr(self.s, "lan_sweep_interval_s", 60)))
         while True:
             try:
                 await self._refresh_arp()
-                await asyncio.sleep(120)
+                await asyncio.sleep(every)
             except asyncio.CancelledError:
                 break
             except Exception:
                 log.debug("arp refresh failed", exc_info=True)
-                await asyncio.sleep(120)
+                await asyncio.sleep(every)
+
+    @staticmethod
+    def _sweep_targets() -> list[str]:
+        """Every /24 this host has a private address on (WiFi AND Ethernet)."""
+        from app.ingest.discovery import local_ipv4s
+        nets: set[str] = set()
+        for ip in local_ipv4s():
+            try:
+                a = ipaddress.ip_address(ip)
+            except ValueError:
+                continue
+            if a.is_private and not a.is_loopback and not a.is_link_local:
+                nets.add(str(ipaddress.ip_network(f"{ip}/24", strict=False)))
+        return sorted(nets)
+
+    def _poke(self, nets: list[str]) -> int:
+        """One empty UDP datagram to port 9 (discard) on every address. Nothing
+        listens there; the point is that the OS must ARP each address first, so
+        every live device lands in the ARP table - phones, TVs, ESP32s, the lot -
+        whether or not it ever uses our DNS. No admin rights, no extra tools."""
+        n = 0
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            s.setblocking(False)
+            for net in nets:
+                for host in ipaddress.ip_network(net).hosts():
+                    try:
+                        s.sendto(b"", (str(host), 9))
+                        n += 1
+                    except OSError:
+                        pass
+                    if n % 32 == 0:
+                        time.sleep(0.01)
+        finally:
+            s.close()
+        return n
 
     async def _refresh_arp(self) -> None:
         import re
@@ -482,10 +527,14 @@ class DnsService:
 
         # Name the host we are running on, so it isn't "unidentified" in the list.
         try:
-            me = socket.gethostbyname(socket.gethostname())
-            await self.store.upsert_lan_device(
-                ip=me, hostname=socket.gethostname(),
-                vendor="this host", label="Ionity fleet server")
+            from app.ingest.discovery import local_ipv4s
+            mine = {socket.gethostbyname(socket.gethostname())} | local_ipv4s()
+            for me in sorted(mine - {"127.0.0.1"}):
+                if ipaddress.ip_address(me).is_link_local:
+                    continue
+                await self.store.upsert_lan_device(
+                    ip=me, hostname=socket.gethostname(),
+                    vendor="this host", label="Ionity fleet server")
             await self.store.upsert_lan_device(
                 ip="127.0.0.1", hostname="localhost",
                 vendor="this host", label="fleet server (loopback)")
@@ -519,6 +568,24 @@ class DnsService:
         except Exception:
             pass
 
+        # Whole-network sweep: make every live device show up in ARP.
+        if getattr(self.s, "lan_sweep_enabled", True):
+            nets = self._sweep_targets()
+            t0 = time.time()
+            try:
+                poked = await asyncio.to_thread(self._poke, nets)
+                await asyncio.sleep(2.5)                     # let ARP replies land
+            except Exception:
+                poked = 0
+                log.debug("lan sweep failed", exc_info=True)
+            self.sweeps += 1
+            self.last_sweep = {"at": t0, "subnets": nets, "addresses_poked": poked}
+        try:
+            known = {d["ip"] for d in await self.store.list_lan_devices(1000) if d.get("mac")}
+        except Exception:
+            known = set()
+        first_pass = self.sweeps <= 1 or not known
+
         proc = await asyncio.create_subprocess_exec(
             "arp", "-a",
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
@@ -546,9 +613,12 @@ class DnsService:
                     hostname = None
             except Exception:
                 hostname = None
+            label = fleet_names.get(mac) or manual.get(mac)
             await self.store.upsert_lan_device(
-                ip=ip, mac=mac, hostname=hostname, vendor=oui_vendor(mac),
-                label=fleet_names.get(mac) or manual.get(mac))
+                ip=ip, mac=mac, hostname=hostname, vendor=oui_vendor(mac), label=label)
+            if not first_pass and ip not in known and self.watch is not None:
+                known.add(ip)
+                self.watch.on_new_device(ip, mac, label or hostname or oui_vendor(mac))
 
         n = await self.store.prune_lan(time.time() - 2 * 3600)
         if n:
@@ -573,6 +643,8 @@ class DnsService:
             "recv_errors": self.recv_errors,
             "rebinds": self.rebinds,
             "allow_from": [str(n) for n in self.allowed_nets],
+            "lan_sweeps": self.sweeps,
+            "last_sweep": self.last_sweep,
         }
 
 
