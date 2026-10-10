@@ -1,4 +1,4 @@
-# Pinned (audit 2026-10-02): the lab host runs Python 3.14 and CI runs 3.12 -
+# Pinned (audit 2026-10-09: python-dotenv 1.2.2 for PYSEC-2026-2270): the lab host runs Python 3.14 and CI runs 3.12 -
 # ">=" floors let the two resolve different trees. Maintain with
 #   pip install pip-tools && pip-compile server/requirements.in   (or uv pip compile)
 fastapi==0.142.2
@@ -8,7 +8,7 @@ pydantic-settings==2.15.0
 aiosqlite==0.22.1
 paho-mqtt==2.1.0
 zeroconf==0.151.5
-python-dotenv==1.1.1
+python-dotenv==1.2.2
 httpx==0.28.1
 pyserial==3.5
 

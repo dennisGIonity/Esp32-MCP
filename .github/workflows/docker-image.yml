@@ -1,18 +1,20 @@
-name: Docker Image CI
-
+# AEDI - IONITY GLOBAL | ESP32-MCP | Build the fleet server image (infra/Dockerfile)
+# Author: Johan Wilhelm van Antwerp | Ionity (Pty) Ltd | Ionity Global (Pty) Ltd | AEDI
+# Governance: Policy 986 AED | License: AED 900 | CC BY-NC-SA 4.0 where stated
+# (c) 2018-2026 Antwerp Designs | Ionity (Pty) Ltd | Ionity Global (Pty) Ltd - All Rights Reserved - TM2
+# Owner: github.com/Ionity-Global-Pty-Ltd | www.ionity.today | ai@ionity.today
+name: docker-image
 on:
   push:
-    branches: [ "main" ]
+    branches: [main]
   pull_request:
-    branches: [ "main" ]
+    branches: [main]
+  workflow_dispatch:
 
 jobs:
-
   build:
-
     runs-on: ubuntu-latest
-
     steps:
-    - uses: actions/checkout@v4
-    - name: Build the Docker image
-      run: docker build . --file Dockerfile --tag my-image-name:$(date +%s)
+      - uses: actions/checkout@v4
+      - name: Build the fleet server image (context = repo root, as infra/Dockerfile expects)
+        run: docker build --file infra/Dockerfile --tag ionity-esp32-mcp:${{ github.sha }} .
