@@ -1,0 +1,32 @@
+%% AEDI - IONITY GLOBAL | DOC-2026-10-ESP32MCP-FW-P3 | Policy 986 AED | License AED 900
+%% (c) 2018-2026 Antwerp Designs | Ionity (Pty) Ltd | Ionity Global (Pty) Ltd
+%%{init: {"flowchart": {"wrappingWidth": 400, "nodeSpacing": 26, "rankSpacing": 44}}}%%
+flowchart TB
+    GW["Gateway (Node/TS)<br/>Mosquitto · MQTT 5"]
+    subgraph C0["ESP32-S3 Core 0 · network (never waits for a tool)"]
+        MQ["<b>mqtt_task (5)</b><br/>MQTT_EVENT_DATA"]
+        OD["<b>MCPServer::onDownlink()</b><br/>1-8 checkDownlink (header, O(1))<br/>9 tool registered · 10 rid dedupe<br/>11 free slot, 0 ticks · memcpy<br/>ACK → job_q.send(0 ticks)"]
+        NT["<b>net_task (6)</b><br/>sole publisher<br/>esp_mqtt_client_enqueue()"]
+        PC["prov_console (3)<br/>ionity-prov/2"]
+        TM["esp_timer<br/>telemetry tick → postTick()"]
+    end
+    subgraph POOL["Allocated once at boot (PSRAM on S3)"]
+        JP[("Job pool<br/>4 × 4 KiB slots<br/>free_q · job_q")]
+        UP[("Uplink pool<br/>8 × 2 KiB · tx_q")]
+    end
+    subgraph C1["ESP32-S3 Core 1 · tools"]
+        WK["<b>mcp_worker (5)</b><br/>job_q.receive(1 s) · feeds TWDT<br/>cancel / deadline checks"]
+        RT["read_telemetry · get_device_info · identify<br/>handler(ctx) → CBOR result"]
+    end
+    GW == "REQ (EWP/1 + CBOR)" ==> MQ --> OD
+    OD -- "BUSY / ERR / ACK" --> UP
+    OD -- "slot index" --> JP --> WK --> RT
+    RT -- "RES {1: timing, 2: result}" --> UP
+    TM -. "tick msg" .-> JP
+    UP --> NT == "RES · ACK · ERR · TELEMETRY" ==> GW
+    classDef core fill:#0d2137,color:#ffffff,stroke:#0d2137
+    classDef owner fill:#e6f7fb,stroke:#00b4d8,color:#0d2137,stroke-width:2px
+    classDef pool fill:#fff3ee,stroke:#ff6b35,color:#0d2137
+    class OD,WK core
+    class NT,MQ owner
+    class JP,UP pool

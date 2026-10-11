@@ -249,3 +249,20 @@ select:focus,input:focus,textarea:focus{border-color:var(--accent);box-shadow:0 
 .toast.out{opacity:0;transform:translateY(6px)}
 @keyframes tin{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
 @media(prefers-reduced-motion:reduce){.toast{animation:none;transition:none}.btn{transition:none}}
+
+/* v2.1 - every device on the network ---------------------------------- */
+.netcover{font-size:12.5px;color:var(--muted);margin:4px 0 12px;line-height:1.5}
+.netcover b{color:var(--txt)} .netcover code{font-family:var(--mono);color:var(--accent)}
+.netcover.warnbox{border:1px solid rgba(242,185,75,.3);background:rgba(242,185,75,.07);border-radius:10px;padding:10px 12px}
+.netdevs{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:8px;max-height:520px;overflow-y:auto;padding-right:4px}
+.netdev{border:1px solid var(--line);border-radius:10px;padding:10px 12px;background:var(--panel2);min-width:0}
+.netdev.vis{border-left:3px solid var(--ok)} .netdev.hid{border-left:3px solid var(--warn)}
+.netdev.alarm{border-left:3px solid var(--crit);background:rgba(255,77,109,.07)}
+.netdev.gone{opacity:.55}
+.netdev .nd-h{display:flex;gap:8px;align-items:baseline;flex-wrap:wrap}
+.netdev .nd-n{font-weight:600;font-size:13px;overflow-wrap:anywhere}
+.netdev .nd-ip{font-family:var(--mono);font-size:11.5px;color:var(--accent)}
+.netdev .nd-m{font-size:11px;color:var(--muted);margin:3px 0 6px}
+.netdev .dnsdev-doms{gap:4px}
+.dom.hot{background:rgba(255,77,109,.16);border-color:rgba(255,77,109,.5);color:#ffd0d8}
+.alert.info{background:rgba(40,211,245,.06);border-color:rgba(40,211,245,.2)}

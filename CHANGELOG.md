@@ -5,6 +5,25 @@ AEDI - IONITY GLOBAL | DOC-2026-09-ESP32MCP-CHG | Policy 986 AED
 
 # Changelog
 
+## 2.2.0 — 2026-10-10 (whole-network view + network alerts · POC package v1.2)
+
+### Fleet server
+- **Every device on the network**: the LAN map now sweeps each private /24 the server sits on
+  (one UDP poke per address so the OS ARPs it; no admin rights, no extra tools) every
+  `IONITY_LAN_SWEEP_INTERVAL_S` (60 s). Phones, TVs, NAS, ESP32s all appear, not only DNS clients.
+- `lan_devices.last_dns` (auto-migrated) separates "on the LAN" from "traffic visible through Ionity DNS".
+- **Network alerts in the dashboard** (`app/ingest/net_alerts.py`): any device looking up a watched site
+  (`IONITY_WATCH_DOMAINS`, default YouTube + TikTok) raises a `watch:<domain>` alert on `lan-<ip>`; a device
+  that newly joins the LAN raises `lan:new`. Alerts clear after `IONITY_WATCH_HOLD_S` / `IONITY_NEW_DEVICE_HOLD_S`.
+- The ESP32 **red light** is now driven by the server itself (first online ESP32, or `IONITY_ALARM_DEVICE`,
+  channel `IONITY_ALARM_CHANNEL`); `net_watch.py` is optional.
+- New REST: `GET /api/v1/network/overview`, `GET /api/v1/network/watch`.
+
+### Dashboard
+- New **Every device on this network** panel: devices on LAN / traffic visible / not routed to Ionity DNS /
+  active watch alarms / red-light state, per-device cards with top sites (watched sites highlighted) and the
+  exact router setting needed when devices bypass Ionity DNS.
+
 ## 2.1.2 — 2026-10-03 (dashboard + testers package)
 
 ### Dashboard

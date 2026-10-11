@@ -1,0 +1,37 @@
+%% AEDI - IONITY GLOBAL | DOC-2026-10-ESP32MCP-PORTAL-P2 | Policy 986 AED
+%% (c) 2018-2026 Antwerp Designs | Ionity (Pty) Ltd | Ionity Global (Pty) Ltd
+%% Phase 2 portal: who owns the serial port, who talks to the board. Arrows = "uses".
+%%{init: {"flowchart": {"wrappingWidth": 420, "nodeSpacing": 28, "rankSpacing": 46}}}%%
+flowchart TB
+    subgraph BR["Browser · Chrome / Edge / Opera · apps/portal (React 19 · Vite 8 · Tailwind 4)"]
+        DC["<b>DeviceConsole</b> - the core component"]
+        PF["ProvisionForm<br/>validateForm → planSet"]
+        FL["usePairingFlow<br/>write · test · reboot · online · listed"]
+        TP["TerminalPanel<br/>xterm.js 6 · SecretScrubber · Save log"]
+        FP["FlashPanel<br/>esptool-js 0.7 (loaded on demand)"]
+        UD["useDevice<br/>session · client · scrubbed log"]
+        PC["ProvClient (@ionity/prov)<br/>ionity-prov/1 + /2 · retries · CRC"]
+        SS["<b>SerialSession</b> - the only owner of the port<br/>re-enumeration · lease · paced, timed-out writes"]
+        DC --> PF & FL & TP & FP & UD
+        FL --> PC
+        UD --> PC & SS
+        PC -- "request lines / reply lines" --> SS
+        TP -- "onBytes (ANSI kept)" --> SS
+        FP -- "lease(port)" --> SS
+    end
+    subgraph EB["ESP32-S3 (primary) · ESP32-C6 (secondary)"]
+        FW["Firmware console<br/>fw 2.x: prov/1 · fw 3: prov/2 + CRC-32"]
+        NVS[("NVS namespace 'ionity'<br/>wifi_ssid · wifi_pass · host_url · dev_uuid · ca_pem · tokens")]
+        ROM["ROM bootloader (download mode)"]
+        FW -- "validate all, then write" --> NVS
+    end
+    HOST["Fleet host / gateway API<br/>GET /api/v1/devices/{hwid}"]
+    SS <== "Web Serial · 115200 8N1 · USB-UART bridge or native USB" ==> FW
+    FP -. "SLIP · 921600 (port leased)" .-> ROM
+    FL -. "optional last check" .-> HOST
+    classDef core fill:#0d2137,color:#ffffff,stroke:#0d2137
+    classDef owner fill:#e6f7fb,stroke:#00b4d8,color:#0d2137,stroke-width:2px
+    classDef board fill:#fff3ee,stroke:#ff6b35,color:#0d2137
+    class DC core
+    class SS owner
+    class FW,NVS,ROM board

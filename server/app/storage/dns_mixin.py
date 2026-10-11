@@ -47,6 +47,18 @@ CREATE INDEX IF NOT EXISTS idx_lan_last ON lan_devices(last_seen DESC);
 class DnsStoreMixin:
     DNS_SCHEMA = DNS_SCHEMA
 
+    async def migrate_dns(self) -> None:
+        """v2.1: lan_devices.last_dns - when the device last used OUR resolver,
+        separate from last_seen (ARP presence). That is what tells the
+        dashboard 'on the network but its traffic is not visible'."""
+        async with self.db.execute("PRAGMA table_info(lan_devices)") as cur:
+            cols = {r[1] for r in await cur.fetchall()}
+        if "last_dns" not in cols:
+            await self.db.execute("ALTER TABLE lan_devices ADD COLUMN last_dns REAL")
+            await self.db.execute(
+                "UPDATE lan_devices SET last_dns = (SELECT MAX(ts) FROM dns_queries q"
+                " WHERE q.client_ip = lan_devices.ip)")
+
     # -- writes ------------------------------------------------------------
     async def insert_dns_batch(self, rows: list[dict[str, Any]]) -> None:
         if not rows:
@@ -64,13 +76,14 @@ class DnsStoreMixin:
         now = time.time()
         await self.db.executemany(
             """
-            INSERT INTO lan_devices (ip, first_seen, last_seen, query_count)
-            VALUES (?,?,?,?)
+            INSERT INTO lan_devices (ip, first_seen, last_seen, query_count, last_dns)
+            VALUES (?,?,?,?,?)
             ON CONFLICT(ip) DO UPDATE SET
                 last_seen=excluded.last_seen,
+                last_dns=excluded.last_dns,
                 query_count=lan_devices.query_count+excluded.query_count
             """,
-            [(ip, now, now, n) for ip, n in seen.items()],
+            [(ip, now, now, n, now) for ip, n in seen.items()],
         )
         await self.db.commit()
 
@@ -178,6 +191,34 @@ class DnsStoreMixin:
             (max(1, min(int(limit), 1000)),),
         ) as cur:
             return [dict(r) for r in await cur.fetchall()]
+
+    async def network_overview(self, since_s: float, limit: int = 300):
+        """Every device on the LAN (ARP sweep + DNS), with how much of its
+        traffic we can see in the window."""
+        async with self.db.execute(
+            """
+            SELECT l.*,
+                   (SELECT COUNT(*) FROM dns_queries q
+                     WHERE q.client_ip = l.ip AND q.ts >= ?)          AS lookups,
+                   (SELECT COUNT(DISTINCT q.qname) FROM dns_queries q
+                     WHERE q.client_ip = l.ip AND q.ts >= ?)          AS domains
+            FROM lan_devices l
+            WHERE l.ip <> '127.0.0.1'
+            ORDER BY lookups DESC, l.last_seen DESC
+            LIMIT ?
+            """,
+            (since_s, since_s, max(1, min(int(limit), 1000))),
+        ) as cur:
+            rows = [dict(r) for r in await cur.fetchall()]
+        for d in rows:
+            if d["lookups"]:
+                async with self.db.execute(
+                    "SELECT qname, COUNT(*) hits FROM dns_queries WHERE client_ip=? AND ts>=?"
+                    " GROUP BY qname ORDER BY hits DESC LIMIT 6", (d["ip"], since_s)) as cur:
+                    d["top_domains"] = [dict(r) for r in await cur.fetchall()]
+            else:
+                d["top_domains"] = []
+        return rows
 
     async def prune_lan(self, older_than_s: float) -> int:
         """Drop LAN rows not seen recently. The table is keyed by IP, so after

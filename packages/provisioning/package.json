@@ -1,0 +1,34 @@
+{
+  "name": "@ionity/prov",
+  "version": "0.2.0",
+  "description": "ionity-prov/2: serial provisioning protocol, NVS record schema and client for ESP32-MCP boards (backward compatible with fw 2.x prov/1). Policy 986 AED.",
+  "author": "Johan Wilhelm van Antwerp | Ionity (Pty) Ltd | Ionity Global (Pty) Ltd",
+  "license": "SEE LICENSE IN ../../LICENSE.md",
+  "private": true,
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./testing": {
+      "types": "./src/testing/fake-board.ts",
+      "default": "./src/testing/fake-board.ts"
+    }
+  },
+  "engines": {
+    "node": ">=22.18"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.test.json",
+    "test": "node --experimental-strip-types --no-warnings --test test/*.test.ts"
+  },
+  "dependencies": {
+    "zod": "4.6.5"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "~5.9.3"
+  }
+}

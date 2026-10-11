@@ -90,3 +90,9 @@ dist/
 
 # runtime + build logs (scripts write here; old root logs archived 2026-10-03)
 logs/
+
+# ESP32-MCP v3 (npm workspaces, portal, ESP-IDF firmware)
+node_modules/
+apps/portal/dist/
+apps/portal/public/firmware/*.bin
+apps/portal/public/firmware/manifest.json

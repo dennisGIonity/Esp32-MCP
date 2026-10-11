@@ -1,0 +1,55 @@
+# AEDI - IONITY GLOBAL | ESP32-MCP node firmware 3 | sdkconfig defaults (all targets)
+# Doc ID: DOC-2026-10-ESP32MCP-FW3 | Policy 986 AED | License AED 900
+# (c) 2018-2026 Antwerp Designs | Ionity (Pty) Ltd | Ionity Global (Pty) Ltd
+#
+# Layered by idf.py / release.py:  sdkconfig.defaults ; sdkconfig.<console>  (+ .<target> files)
+#   console fragments: sdkconfig.uart (USB-UART bridge port) | sdkconfig.usb (native USB port)
+
+# ---- flash layout: identical to fw 2.x (Arduino min_spiffs, 4 MB) -------------------
+CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+
+# ---- compiler: size-optimised, C++ without exceptions/RTTI, stack canaries -------
+CONFIG_COMPILER_OPTIMIZATION_SIZE=y
+CONFIG_COMPILER_STACK_CHECK_MODE_NORM=y
+# Memory safety in the field: cheap heap canaries catch overruns at free() time.
+CONFIG_HEAP_POISONING_LIGHT=y
+
+# ---- FreeRTOS: 1 kHz tick (ms deadlines), run-time stats for TELEMETRY cpu[]/tasks[] -
+CONFIG_FREERTOS_HZ=1000
+CONFIG_FREERTOS_USE_TRACE_FACILITY=y
+CONFIG_FREERTOS_GENERATE_RUN_TIME_STATS=y
+CONFIG_FREERTOS_RUN_TIME_STATS_USING_ESP_TIMER=y
+CONFIG_FREERTOS_RUN_TIME_COUNTER_TYPE_U64=y
+CONFIG_FREERTOS_CHECK_STACKOVERFLOW_CANARY=y
+
+# ---- watchdogs and crash evidence ---------------------------------------------
+CONFIG_ESP_TASK_WDT_EN=y
+CONFIG_ESP_TASK_WDT_INIT=y
+CONFIG_ESP_TASK_WDT_TIMEOUT_S=10
+CONFIG_ESP_SYSTEM_PANIC_PRINT_REBOOT=y
+CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH=y
+CONFIG_ESP_COREDUMP_DATA_FORMAT_ELF=y
+
+# ---- stacks of system tasks our callbacks run in (bytes) -------------------------
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
+CONFIG_ESP_SYSTEM_EVENT_TASK_STACK_SIZE=4096
+
+# ---- MQTT 5 (esp-mqtt), its task on the network core -----------------------------
+CONFIG_MQTT_PROTOCOL_5=y
+CONFIG_MQTT_TRANSPORT_SSL=y
+CONFIG_MQTT_TRANSPORT_WEBSOCKET=n
+CONFIG_MQTT_TASK_CORE_SELECTION_ENABLED=y
+CONFIG_MQTT_USE_CORE_0=y
+CONFIG_MQTT_OUTBOX_EXPIRED_TIMEOUT_MS=30000
+
+# ---- TLS: the common-CA bundle for mqtts:// unless a ca_pem is provisioned -------
+CONFIG_MBEDTLS_CERTIFICATE_BUNDLE=y
+CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_DEFAULT_CMN=y
+
+# ---- lwIP: *.local names via mDNS (ionity-fleet.local, fw 2.x discovery) ---------
+CONFIG_LWIP_DNS_SUPPORT_MDNS_QUERIES=y
+
+# ---- logging ----------------------------------------------------------------------
+CONFIG_LOG_DEFAULT_LEVEL_INFO=y

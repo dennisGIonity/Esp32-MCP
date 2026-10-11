@@ -1,0 +1,25 @@
+%% AEDI - IONITY GLOBAL | DOC-2026-10-ESP32MCP-FW-P3 | Policy 986 AED | License AED 900
+%% (c) 2018-2026 Antwerp Designs | Ionity (Pty) Ltd | Ionity Global (Pty) Ltd
+sequenceDiagram
+    autonumber
+    participant G as Gateway<br/>(MCP tool call)
+    participant M as mqtt_task<br/>Core 0
+    participant S as MCPServer<br/>onDownlink()
+    participant W as mcp_worker<br/>Core 1
+    participant N as net_task<br/>Core 0
+    G->>M: REQ tool=0x02 read_telemetry rid=R flags=ACK_REQUESTED<br/>args {1: sections}
+    M->>S: onDownlink(data, len) — data owned by esp-mqtt
+    Note over S: checkDownlink: magic, version, type, length,<br/>size ≤ 4096, tool registered, rid not seen
+    S->>S: free_q.receive(slot, 0 ticks)  (none → ERR BUSY retryAfterMs 250)
+    S->>S: memcpy frame → slot · deadline = now + deadlineMs (5 s default)
+    S->>N: ACK {queueDepth, etaMs} via tx_q (before the job is visible)
+    S->>W: job_q.send(slot, 0 ticks)  (PRIORITY → sendToFront)
+    S-->>M: return within microseconds, MQTT keeps running
+    N->>G: ACK
+    W->>W: cancelled? expired? → ERR CANCELLED / DEADLINE_EXCEEDED
+    W->>W: uplink.acquire(≤ 200 ms) · handler writes CBOR after a 22-byte gap
+    Note over W: parseArgs: map, no duplicate keys,<br/>sections ≤ 0xFF else ERR INVALID_ARGS argKey 1
+    W->>W: collect heap · net · cpu · tasks · sensors · actuators
+    W->>W: memmove → {1: timing, 2: result} · validate · free slot
+    W->>N: uplink.submit(RES) via tx_q
+    N->>G: RES status OK (one esp_mqtt_client_enqueue)

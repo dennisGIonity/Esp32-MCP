@@ -1,0 +1,64 @@
+# AEDI - IONITY GLOBAL | ESP32-MCP node firmware 3 | Kconfig
+# Doc ID: DOC-2026-10-ESP32MCP-FW3 | Policy 986 AED | License AED 900
+# (c) 2018-2026 Antwerp Designs | Ionity (Pty) Ltd | Ionity Global (Pty) Ltd
+
+menu "Ionity ESP32-MCP node"
+
+    config IONITY_DEFAULT_HOST_URL
+        string "MCP host when none is provisioned"
+        default "mqtt://ionity-fleet.local:1883"
+        help
+            Used when host_url is empty. lwIP resolves *.local names over mDNS
+            (LWIP_DNS_SUPPORT_MDNS_QUERIES), as fw 2.x did for ionity-fleet.local.
+
+    config IONITY_JOB_SLOTS
+        int "MCP job slots (requests queued + executing)"
+        range 1 8
+        default 4
+        help
+            Each slot holds one downlink frame (4 KiB). A request that finds no free
+            slot is answered ERR BUSY with retryAfterMs - the network task never waits.
+
+    config IONITY_UPLINK_SLOTS
+        int "Uplink frame buffers (2 KiB each)"
+        range 4 16
+        default 8
+
+    config IONITY_TELEMETRY_PERIOD_S
+        int "TELEMETRY period in seconds (0 = off)"
+        range 0 3600
+        default 10
+
+    config IONITY_TELEMETRY_SECTIONS
+        hex "TELEMETRY sections (TelemetrySection bitmask)"
+        range 0x00 0xFF
+        default 0x3F
+        help
+            0x01 heap, 0x02 net, 0x04 cpu, 0x08 tasks, 0x10 sensors, 0x20 actuators.
+
+    config IONITY_LED_GPIO
+        int "identify LED GPIO (-1 = none, identify not offered)"
+        range -1 48
+        default 2 if IDF_TARGET_ESP32S3
+        default -1
+
+    config IONITY_LED_ACTIVE_HIGH
+        bool "identify LED is active high"
+        default y
+
+    config IONITY_ADC_GPIO
+        int "Analog sense GPIO reported in TELEMETRY sensors.adcMv (-1 = none)"
+        range -1 48
+        default 3
+        help
+            fw 2.x analog sense pin (GPIO3 on ESP32-S3 and ESP32-C6, both ADC1).
+
+    config IONITY_SNTP_SERVER
+        string "SNTP server (empty = no wall clock; TELEMETRY.unixS absent)"
+        default "pool.ntp.org"
+
+    config IONITY_WIFI_POWER_SAVE
+        bool "Wi-Fi modem sleep (saves power, adds up to a DTIM interval of latency)"
+        default n
+
+endmenu

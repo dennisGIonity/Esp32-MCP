@@ -1,0 +1,14 @@
+## AEDI - IONITY GLOBAL | ESP32-MCP node firmware 3 | managed components
+## Doc ID: DOC-2026-10-ESP32MCP-FW3 | Policy 986 AED | License AED 900
+## ESP-IDF 5.x ships mqtt and json (cJSON) in-tree. ESP-IDF 6.0 moved both to the
+## component registry; these entries only apply there.
+dependencies:
+  idf: ">=5.5"
+  espressif/mqtt:
+    version: ">=1.0.0"
+    rules:
+      - if: "idf_version >=6.0"
+  espressif/cjson:
+    version: ">=1.7.18"
+    rules:
+      - if: "idf_version >=6.0"

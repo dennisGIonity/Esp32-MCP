@@ -1,0 +1,5 @@
+# AEDI - IONITY GLOBAL | @ionity/ewp | Policy 986 AED
+node_modules/
+dist/
+*.tsbuildinfo
+generated/.check.c

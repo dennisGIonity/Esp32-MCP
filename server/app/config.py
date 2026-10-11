@@ -78,6 +78,22 @@ class Settings(BaseSettings):
     # dropped silently so this host can never be used as an open resolver.
     dns_allow_from: str = "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,127.0.0.0/8"
 
+    # --- Whole-network view + alerts (v2.1) --------------------------------
+    # Every LAN subnet this host sits on is swept (one UDP poke per address, so
+    # the OS ARPs it) so EVERY device appears, not only the ones using our DNS.
+    lan_sweep_enabled: bool = True
+    lan_sweep_interval_s: int = 60
+    # Any device looking up one of these raises a dashboard alert + red light.
+    watch_domains: str = ("youtube.com,youtu.be,googlevideo.com,ytimg.com,youtube-nocookie.com,"
+                          "youtubei.googleapis.com,yt3.ggpht.com,tiktok.com,tiktokv.com,"
+                          "tiktokcdn.com,byteoversea.com")
+    watch_ignore: str = ""               # client IPs never alerted on (comma separated)
+    watch_hold_s: int = 300              # a watch alert clears after this long quiet
+    new_device_hold_s: int = 1800        # "new device joined" alert stays this long
+    alarm_device: str = ""               # board for the red light; empty = first online ESP32
+    alarm_channel: str = "pwm0"
+    alarm_light_hold_s: int = 20
+
     # --- Datadog (fleet host forwards; boards never hold the key) --------
     dd_enabled: bool = False
     dd_api_key: str = ""

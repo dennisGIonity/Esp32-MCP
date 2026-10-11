@@ -1,0 +1,38 @@
+{
+  "name": "@ionity/portal",
+  "version": "3.0.0-alpha.1",
+  "private": true,
+  "description": "Ionity ESP32-MCP provisioning portal: flash, provision (ionity-prov/2) and watch the serial console of ESP32 boards from the browser over Web Serial. Policy 986 AED.",
+  "author": "Johan Wilhelm van Antwerp | Ionity (Pty) Ltd | Ionity Global (Pty) Ltd",
+  "license": "SEE LICENSE IN ../../LICENSE.md",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -p tsconfig.json && vite build",
+    "preview": "vite preview --port 4173 --strictPort",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "e2e": "node e2e/run.mjs"
+  },
+  "dependencies": {
+    "@ionity/prov": "*",
+    "@xterm/addon-fit": "0.11.0",
+    "@xterm/xterm": "6.0.0",
+    "esptool-js": "0.7.0",
+    "react": "19.3.0",
+    "react-dom": "19.3.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "4.3.3",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@types/w3c-web-serial": "1.0.8",
+    "@vitejs/plugin-react": "6.1.2",
+    "axe-core": "4.14.0",
+    "playwright": "1.56.0",
+    "tailwindcss": "4.3.3",
+    "typescript": "~5.9.3",
+    "vite": "8.3.4",
+    "vitest": "5.0.3"
+  }
+}
