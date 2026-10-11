@@ -1,0 +1,5 @@
+# AEDI - IONITY GLOBAL | @ionity/portal | Policy 986 AED
+node_modules/
+dist/
+e2e/out/
+*.tsbuildinfo

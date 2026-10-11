@@ -1,0 +1,35 @@
+{
+  "name": "@ionity/ewp",
+  "version": "0.1.0",
+  "description": "Ionity Edge Wire Protocol v1 (EWP/1): the binary MQTT/WSS contract between the ESP32-MCP gateway and ESP32 nodes. Policy 986 AED.",
+  "author": "Johan Wilhelm van Antwerp | Ionity (Pty) Ltd | Ionity Global (Pty) Ltd",
+  "license": "SEE LICENSE IN ../../LICENSE.md",
+  "private": true,
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  },
+  "files": [
+    "src",
+    "generated"
+  ],
+  "engines": {
+    "node": ">=22.18"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json",
+    "test": "node --experimental-strip-types --no-warnings --test test/scalars.test.ts",
+    "gen:c": "node --experimental-strip-types --no-warnings scripts/gen-c-header.ts generated/ewp_protocol.h",
+    "check:c": "printf '#include \"ewp_protocol.h\"\\nint main(void){return EWP_HEADER_LEN==16?0:1;}\\n' > generated/.check.c && gcc -std=c11 -Wall -Wextra -Werror -pedantic -Igenerated -fsyntax-only generated/.check.c && g++ -std=c++17 -Wall -Wextra -Werror -pedantic -Igenerated -fsyntax-only -x c++ generated/.check.c && rm generated/.check.c"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "cbor-x": "1.6.6",
+    "typescript": "~5.9.3"
+  }
+}

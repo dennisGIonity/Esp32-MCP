@@ -1,0 +1,5 @@
+# AEDI - IONITY GLOBAL | console fragment: native USB port (USB-Serial-JTAG)
+# Provisioning and logs on the chip's USB-Serial-JTAG (VID 303a, PID 1001);
+# the console driver drops output when no host reads instead of stalling.
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+CONFIG_ESP_CONSOLE_SECONDARY_NONE=y

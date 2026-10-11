@@ -1,0 +1,6 @@
+# AEDI - IONITY GLOBAL | console fragment: USB-UART bridge port (CH340 / CP210x)
+# Provisioning and logs on UART0 at 115200 baud; no secondary console, so the
+# native USB port never steals or stalls console output.
+CONFIG_ESP_CONSOLE_UART_DEFAULT=y
+CONFIG_ESP_CONSOLE_UART_BAUDRATE=115200
+CONFIG_ESP_CONSOLE_SECONDARY_NONE=y

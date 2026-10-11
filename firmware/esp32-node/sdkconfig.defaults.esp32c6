@@ -1,0 +1,6 @@
+# AEDI - IONITY GLOBAL | ESP32-MCP node firmware 3 | ESP32-C6 (secondary target)
+# Doc ID: DOC-2026-10-ESP32MCP-FW3 | Policy 986 AED | License AED 900
+#
+# Single core, no PSRAM on the modules we target: every pool lives in internal RAM
+# (job pool 16 KiB + uplink pool 16 KiB) and the tasks run unpinned with
+# net_task above mcp_worker. Nothing target-specific to set beyond the defaults.

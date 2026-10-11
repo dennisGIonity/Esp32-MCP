@@ -1,0 +1,36 @@
+%% AEDI - IONITY GLOBAL | DOC-2026-10-ESP32MCP-PORTAL-P2 | Policy 986 AED
+%% (c) 2018-2026 Antwerp Designs | Ionity (Pty) Ltd | Ionity Global (Pty) Ltd
+%% "Write to board" on a fw 3 board with native USB (the hardest case)
+sequenceDiagram
+    autonumber
+    actor T as Technician
+    participant P as Portal<br/>DeviceConsole + ProvClient
+    participant S as SerialSession<br/>Web Serial port
+    participant B as ESP32 firmware<br/>ionity-prov/2
+    participant H as Fleet host API<br/>(optional)
+    T->>P: Connect board (click = user gesture)
+    P->>S: requestPort(Espressif/CH340/CP210x/FTDI filters)
+    S->>S: open 115200 · 64 KiB buffer · release DTR/RTS (no reset)
+    P->>B: {"ionity":"prov","op":"hello"}   (prov/1 form, no CRC)
+    B-->>P: IONITY-PROV {"op":"hello","prov":2,"line_max":4096,"set_fields":[…]} *crc
+    T->>P: Write to board
+    Note over P: validateForm() → planSet(form, board)<br/>only fields THIS firmware accepts · size ≤ line_max
+    P->>B: {"op":"set","v":2,"id":7,"ssid":…,"pass":…,"host_url":…,"device_uuid":…} *crc
+    Note over B: check CRC → validate every field → write NVS → commit<br/>(nothing written if one field is wrong)
+    B-->>P: {"op":"set","id":7,"ok":true,"changed":["ssid","pass",…]} *crc
+    P->>B: {"op":"test","v":2,"id":8,"timeout_ms":20000} *crc
+    B-->>P: {"op":"test","ok":true,"wifi":{"ok":true,"ip":…},"broker":{"ok":true}} *crc
+    P->>B: {"op":"reboot","v":2,"id":9} *crc
+    B--xS: chip reset · native USB leaves the bus
+    S->>S: disconnect → status "detached" · connect → reopen
+    loop until the firmware answers (≤ 30 s)
+        P->>B: {"op":"hello"}
+    end
+    B-->>P: hello reply (prov 2)
+    loop until Wi-Fi and host session are up (≤ 30 s)
+        P->>B: {"op":"get","v":2,"id":…} *crc
+        B-->>P: {"wifi":"connected","mqtt":true,…} *crc
+    end
+    P->>H: GET /api/v1/devices/{hwid}   (no secrets sent)
+    H-->>P: {"device":{"health":"online"}}
+    P-->>T: Board is provisioned and online (announced to screen readers)

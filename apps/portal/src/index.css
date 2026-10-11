@@ -1,0 +1,68 @@
+/*
+ * AEDI - IONITY GLOBAL | @ionity/portal | Tailwind CSS v4 theme | Policy 986 AED
+ * Brand colours from the Ionity document template: navy #0d2137, cyan #00b4d8, orange #ff6b35.
+ */
+@import "tailwindcss";
+
+@theme {
+  --color-navy-950: #071423;
+  --color-navy-900: #0d2137;
+  --color-navy-800: #15304d;
+  --color-navy-700: #1e4266;
+  --color-cyan-brand: #00b4d8;
+  --color-cyan-ink: #006f87;
+  --color-orange-brand: #ff6b35;
+  --color-ok: #188038;
+  --color-bad: #c5221f;
+  --font-sans: ui-sans-serif, system-ui, "Segoe UI", Roboto, Arial, sans-serif;
+  --font-mono: "Cascadia Code", "JetBrains Mono", Consolas, ui-monospace, monospace;
+}
+
+@layer base {
+  :root {
+    color-scheme: light dark;
+  }
+  body {
+    @apply bg-slate-50 text-slate-900 antialiased dark:bg-navy-950 dark:text-slate-100;
+  }
+  /* Visible keyboard focus everywhere (outline survives forced-colors mode). */
+  :where(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
+    outline: 3px solid var(--color-cyan-brand);
+    outline-offset: 2px;
+  }
+}
+
+/* Reusable utilities (Tailwind v4: @utility, so they can be @apply-ed). */
+@utility field-input {
+  @apply block w-full rounded-md border border-slate-400 bg-white px-3 py-2 text-base text-slate-900 dark:border-navy-700 dark:bg-navy-900 dark:text-slate-100;
+  min-height: 2.75rem;
+}
+@utility btn {
+  @apply inline-flex items-center justify-center gap-2 rounded-md px-4 py-2 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-60;
+  min-height: 2.75rem;
+}
+@utility btn-primary {
+  @apply btn bg-navy-900 text-white hover:bg-navy-800 dark:bg-cyan-brand dark:text-navy-950 dark:hover:bg-cyan-300;
+}
+@utility btn-secondary {
+  @apply btn border border-slate-400 bg-white text-navy-900 hover:bg-slate-100 dark:border-navy-700 dark:bg-navy-900 dark:text-slate-100 dark:hover:bg-navy-800;
+}
+@utility card {
+  @apply rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-navy-800 dark:bg-navy-900;
+}
+
+.field-input[aria-invalid="true"] {
+  @apply border-bad bg-red-50 dark:bg-red-950/40;
+}
+
+/* The terminal fills its panel; xterm measures this box. */
+.terminal-host {
+  height: clamp(18rem, 55vh, 40rem);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

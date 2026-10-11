@@ -1,0 +1,65 @@
+{
+  "product": "ionity-esp32-mcp-node",
+  "version": "2.0.0",
+  "built_at": "2026-09-29T10:34:19+00:00",
+  "policy": "Policy 986 AED | (c) 2018-2026 Antwerp Designs | Ionity (Pty) Ltd",
+  "provisioning": {
+    "protocol": "ionity-prov/1",
+    "baud": 115200,
+    "prefix": "IONITY-PROV "
+  },
+  "builds": [
+    {
+      "variant": "esp32s3_uart",
+      "name": "ESP32-S3 (CH340 / CP210x USB-UART port)",
+      "chip_family": "ESP32-S3",
+      "native_usb": false,
+      "fqbn": "esp32:esp32:esp32s3:FlashSize=4M,PartitionScheme=min_spiffs,CDCOnBoot=default",
+      "file": "esp32s3_uart.bin",
+      "offset": 0,
+      "size": 1298432,
+      "sha256": "3eae116ca3ff794064b2d4d85b1de1ea7fd1ef1b955fe76a6455db8a1d2b5a28",
+      "app_bytes": 1229748,
+      "app_pct": 62
+    },
+    {
+      "variant": "esp32s3_usb",
+      "name": "ESP32-S3 (native USB port)",
+      "chip_family": "ESP32-S3",
+      "native_usb": true,
+      "fqbn": "esp32:esp32:esp32s3:FlashSize=4M,PartitionScheme=min_spiffs,CDCOnBoot=cdc",
+      "file": "esp32s3_usb.bin",
+      "offset": 0,
+      "size": 1294336,
+      "sha256": "b8d5ee20fd2effc1af46b7b38345b602f8ad88fc6f1088f6d5a0281299ec5609",
+      "app_bytes": 1224812,
+      "app_pct": 62
+    },
+    {
+      "variant": "esp32_classic",
+      "name": "ESP32 / WROOM-32",
+      "chip_family": "ESP32",
+      "native_usb": false,
+      "fqbn": "esp32:esp32:esp32:FlashSize=4M,PartitionScheme=min_spiffs",
+      "file": "esp32_classic.bin",
+      "offset": 0,
+      "size": 1318912,
+      "sha256": "25b1d46005b09a866106fc4c5b655553fd09f71662c079ea620b25eb27d3bc92",
+      "app_bytes": 1249726,
+      "app_pct": 63
+    },
+    {
+      "variant": "esp32c3_usb",
+      "name": "ESP32-C3 (native USB, e.g. Super Mini)",
+      "chip_family": "ESP32-C3",
+      "native_usb": true,
+      "fqbn": "esp32:esp32:esp32c3:FlashSize=4M,PartitionScheme=min_spiffs,CDCOnBoot=cdc",
+      "file": "esp32c3_usb.bin",
+      "offset": 0,
+      "size": 1417216,
+      "sha256": "b1157219f99443fe62257b2c606567d2288e7e8d0689be5e37811faf4fd7e2ad",
+      "app_bytes": 1348827,
+      "app_pct": 68
+    }
+  ]
+}

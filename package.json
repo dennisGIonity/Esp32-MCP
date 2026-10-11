@@ -1,0 +1,22 @@
+{
+  "name": "ionity-esp32-mcp",
+  "private": true,
+  "description": "Ionity ESP32-MCP monorepo (TypeScript side): EWP/1 wire protocol, ionity-prov/2 provisioning, provisioning portal. Policy 986 AED.",
+  "author": "Johan Wilhelm van Antwerp | Ionity (Pty) Ltd | Ionity Global (Pty) Ltd",
+  "license": "SEE LICENSE IN LICENSE.md",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "engines": {
+    "node": ">=22.18"
+  },
+  "scripts": {
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "npm test --workspaces --if-present",
+    "build": "npm run build --workspaces --if-present",
+    "dev:portal": "npm run dev -w @ionity/portal",
+    "e2e:portal": "npm run e2e -w @ionity/portal",
+    "test:firmware": "firmware/esp32-node/test/run.sh"
+  }
+}

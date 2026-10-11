@@ -1,0 +1,11 @@
+# AEDI - IONITY GLOBAL | ESP32-MCP node firmware 3 | partition table
+# Identical to the Arduino "min_spiffs" layout of fw 2.x (verified against the
+# fw 2.1.1 images at 0x8000): a USB update with "keep settings" keeps the NVS
+# partition at 0x9000, so the board keeps its Wi-Fi and MCP host.
+# Name,   Type, SubType,  Offset,   Size,     Flags
+nvs,      data, nvs,      0x9000,   0x5000,
+otadata,  data, ota,      0xe000,   0x2000,
+app0,     app,  ota_0,    0x10000,  0x1E0000,
+app1,     app,  ota_1,    0x1F0000, 0x1E0000,
+spiffs,   data, spiffs,   0x3D0000, 0x20000,
+coredump, data, coredump, 0x3F0000, 0x10000,

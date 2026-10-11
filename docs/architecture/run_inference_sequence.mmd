@@ -1,0 +1,50 @@
+%% AEDI - IONITY GLOBAL | DOC-2026-10-ESP32MCP-ARCH-P1 v1.1 | Policy 986 AED
+%% (c) 2018-2026 Antwerp Designs | Ionity (Pty) Ltd | Ionity Global (Pty) Ltd
+%% run_inference: LLM -> MCP gateway -> MQTT 5 / EWP-1 -> ESP32-S3 (Core 0 / Core 1) -> Datadog
+sequenceDiagram
+    autonumber
+    participant L as LLM host<br/>Claude / Ollama + MCP client
+    participant G as MCP Gateway<br/>Node 24 · MCP SDK v2 (2026-07-28)
+    participant B as MQTT 5 broker<br/>Mosquitto now · cluster later (D9)
+    box ESP32-S3 node · FreeRTOS SMP
+        participant N as Core 0 · net_task<br/>esp-mqtt · EWP header
+        participant W as Core 1 · tool_worker<br/>ESP-DL · PSRAM arena
+    end
+    participant D as Datadog Agent<br/>APM · DogStatsD · Logs
+
+    L->>+G: POST /mcp tools/call run_inference<br/>{device:"riser-gf", model_id:"vibration_anomaly",<br/>input_frame:{source:"live", window_ms:1000}}<br/>_meta.traceparent (342 B JSON)
+    Note over G: zod-validate args · resolve device + model handle 3 (HELLO cache)<br/>policy: read-only tool, no confirmation · rid = gw<<24 | ctr<br/>span mcp.request continues the client traceparent
+    G->>B: PUBLISH ionity/ewp1/office/esp32-98a316e5d18c/dn<br/>QoS 1 · expiry 3 s · 29 B<br/>REQ rid=0x0100002A tool=0x03 ACK_REQ deadline=3000
+    B->>+N: deliver (clean session: never a stale replay)
+    Note over N: 16-byte header checks, no CBOR parse on Core 0<br/>dedupe rid · copy into pool slot (no malloc)<br/>xQueueSend(job_q, …, 0 ticks): never blocks
+    alt job queue full (4 slots in flight)
+        N-->>B: ERR status=BUSY retryAfterMs=250
+        B-->>G: ERR
+        G-->>L: CallToolResult isError=true "device busy, retry in 250 ms"
+    else accepted
+        N->>+W: job {rid, tool, slot, rx_us}
+        N-->>B: ACK queueDepth=1 etaMs=45
+        deactivate N
+        B-->>G: ACK
+        G-->>L: notifications/progress (only if the client sent a progressToken)
+        Note over W: capture 1000 ms IMU window → preprocess → invoke → top-k<br/>esp_timer_get_time() per stage · arena peak recorded<br/>TWDT-safe: long stages yield · only net_task publishes
+        W->>-N: tx_q ← RES {rid, timing, result}
+        activate N
+        N->>B: PUBLISH …/rs QoS 1 · 90 B RES status=OK
+        deactivate N
+        B->>G: RES rid=0x0100002A
+        Note over G: match rid · decode CBOR · class 1 → "anomaly" (model registry by hash)<br/>rebuild device spans: offset = (RTT − queue − exec) / 2
+        G-->>-L: CallToolResult resultType=complete<br/>structuredContent {label: anomaly, confidence: 0.93}
+    end
+    par traces and metrics for this call
+        G-)D: APM: mcp.request › ewp.rpc › esp32.queue · esp32.tool.exec › esp32.inference.invoke
+        G-)D: DogStatsD distribution esp32.mcp.tool_execution_ms · esp32.mcp.rpc_rtt_ms<br/>tags tool, model, fw, chip, site (never device_id)
+    and periodic telemetry (every 10 s, independent of the call)
+        N-)B: TELEMETRY QoS 0 · 115 B (heap, PSRAM, RSSI, CPU per core, stack HWM)
+        B-)G: TELEMETRY
+        G-)D: esp32.heap.free · esp32.heap.largest_block · esp32.psram.free · esp32.wifi.rssi
+    and logs during execution
+        N-)B: LOG rid=0x0100002A WARN "imu fifo overrun"
+        B-)G: LOG
+        G-)D: log + dd.trace_id / dd.span_id looked up from rid (device sends no trace ids)
+    end
