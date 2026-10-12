@@ -35,7 +35,7 @@ Copy-Tree 'packaging\testers' '.'
 # application
 Copy-Tree 'server' 'server' -excludeFiles @('*.db', '*.log')
 Copy-Tree 'dashboard' 'dashboard'
-Copy-Tree 'flasher\dist' 'flasher\dist' -excludeFiles @('*.map')
+Copy-Tree 'apps\flasher-legacy\dist' 'flasher\dist' -excludeFiles @('*.map')
 Copy-Tree 'firmware\dist' 'firmware\dist'
 Copy-Tree 'devices\pi-agent' 'devices\pi-agent'
 New-Item -ItemType Directory -Force "$Out\scripts", "$Out\broker", "$Out\docs" | Out-Null

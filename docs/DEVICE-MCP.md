@@ -6,7 +6,7 @@ AEDI - IONITY GLOBAL | DOC-2026-09-ESP32MCP-DMCP | v2.0.0 | 2026-09-29 SAST | Po
 # On-device MCP server (fw 2.0)
 
 Every node is its own Model Context Protocol server. Implementation:
-`firmware-arduino/Esp32_MCP_Node/DeviceMcp.ino` (dispatcher + HTTP), `EdgeAI.ino` (models, state modes),
+`firmware/legacy-arduino/Esp32_MCP_Node/DeviceMcp.ino` (dispatcher + HTTP), `EdgeAI.ino` (models, state modes),
 `Actuators.ino` (outputs).
 
 ## Transports

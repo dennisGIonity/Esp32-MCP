@@ -41,11 +41,11 @@ jobs:
 
   flasher:
     runs-on: ubuntu-latest
-    defaults: { run: { working-directory: flasher } }
+    defaults: { run: { working-directory: apps/flasher-legacy } }
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
-        with: { node-version: 22, cache: npm, cache-dependency-path: flasher/package-lock.json }
+        with: { node-version: 22, cache: npm, cache-dependency-path: apps/flasher-legacy/package-lock.json }
       - run: npm ci
       - run: npm audit --omit=dev --audit-level=high
       - run: npm run typecheck
@@ -69,7 +69,7 @@ jobs:
           arduino-cli core install esp32:esp32@3.3.11
           arduino-cli lib install PubSubClient@2.8 ArduinoJson@7.4.3 U8g2@2.36.19
       - name: Build flasher images (no secrets.h)
-        run: python3 firmware/build.py
+        run: python3 firmware/legacy-arduino/build.py
       - uses: actions/upload-artifact@v4
         with:
           name: firmware-images

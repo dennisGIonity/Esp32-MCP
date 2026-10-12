@@ -63,7 +63,7 @@ If arduino-cli's upload fails on a native-USB board it retries with
 `esptool --before usb-reset` automatically — see below.
 
 **Raspberry Pi Pico / Pico 2 (no radio):** open
-`firmware-arduino\Pico_MCP_Node` in the Arduino IDE, pick *Raspberry Pi Pico 2*
+`firmware\legacy-arduino\Pico_MCP_Node` in the Arduino IDE, pick *Raspberry Pi Pico 2*
 (or *Pico*), upload. The serial bridge picks up any RP2040/RP2350 port by
 itself within 15 s. Give it a label in `config\device_labels.json` — edits apply
 on the next reading, no restart.

@@ -33,7 +33,8 @@ logging.basicConfig(
 log = logging.getLogger("ionity.main")
 
 DASHBOARD_DIR = ROOT / "dashboard"
-FLASHER_DIR = ROOT / "flasher" / "dist"
+FLASHER_DIR = next((p for p in (ROOT / "apps" / "flasher-legacy" / "dist", ROOT / "flasher" / "dist") if p.exists()),
+                   ROOT / "flasher" / "dist")   # repo layout first, then the flat kit / container layout
 
 
 async def broadcaster(app: FastAPI) -> None:
@@ -109,7 +110,7 @@ async def lifespan(app: FastAPI):
     log.info(" Dashboard http://%s:%s/", settings.host, settings.port)
     log.info(" MCP RPC   http://%s:%s/api/v1/mcp/rpc", settings.host, settings.port)
     log.info(" Flasher   http://%s:%s/flasher/  (%s)", settings.host, settings.port,
-             "built" if FLASHER_DIR.exists() else "not built: cd flasher && npm run build")
+             "built" if FLASHER_DIR.exists() else "not built: cd apps/flasher-legacy && npm run build")
     log.info(" Datadog   %s", f"-> api.{settings.dd_site} env={settings.dd_env}"
              if datadog.enabled else "off (IONITY_DD_ENABLED / IONITY_DD_API_KEY)")
     log.info(" MQTT      %s:%s (enabled=%s)", settings.mqtt_host,

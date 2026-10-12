@@ -32,13 +32,13 @@ jobs:
           arduino-cli core install esp32:esp32@3.3.11
           arduino-cli lib install PubSubClient@2.8 ArduinoJson@7.4.3 U8g2@2.36.19
       - name: Firmware images bundled into the page
-        run: python3 firmware/build.py --copy-to flasher/public/firmware
+        run: python3 firmware/legacy-arduino/build.py --copy-to apps/flasher-legacy/public/firmware
       - uses: actions/setup-node@v4
-        with: { node-version: 22, cache: npm, cache-dependency-path: flasher/package-lock.json }
-      - working-directory: flasher
+        with: { node-version: 22, cache: npm, cache-dependency-path: apps/flasher-legacy/package-lock.json }
+      - working-directory: apps/flasher-legacy
         run: npm ci && npm test && npm run build
       - uses: actions/upload-pages-artifact@v3
-        with: { path: flasher/dist }
+        with: { path: apps/flasher-legacy/dist }
       - name: Attach images to the release (tags only)
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2

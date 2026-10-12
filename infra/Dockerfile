@@ -2,9 +2,9 @@
 # --- flasher build stage -----------------------------------------------------
 FROM node:22-alpine AS flasher
 WORKDIR /flasher
-COPY flasher/package.json flasher/package-lock.json ./
+COPY apps/flasher-legacy/package.json apps/flasher-legacy/package-lock.json ./
 RUN npm ci --no-audit --no-fund
-COPY flasher/ .
+COPY apps/flasher-legacy/ .
 RUN npm run build
 
 # --- runtime -----------------------------------------------------------------

@@ -55,7 +55,7 @@ CLI twin for scripts and browsers without Web Serial: `scripts/provision.py` (py
 ## A board plugged into the lab Pi (no browser, Pi offline)
 
 ```powershell
-python firmware\build.py --lab esp32s3_uart            # image with the git-ignored secrets.h baked in -> firmware/dist-lab/
+python firmware\legacy-arduino\build.py --lab esp32s3_uart            # image with the git-ignored secrets.h baked in -> firmware/dist-lab/
 scripts\deploy_pi_board.ps1 -Image firmware\dist-lab\esp32s3_uart.bin -Label "lab-node-01" `
     -Wheels <esptool-aarch64.tar>                        # first run only: the Pi has no internet
 ```

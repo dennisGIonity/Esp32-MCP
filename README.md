@@ -25,8 +25,8 @@ Classification: PUBLIC | Building Tomorrow, Today. | Anything is Possible with G
 
 | Layer | What it does |
 |---|---|
-| **Firmware 2.0** (`firmware-arduino/Esp32_MCP_Node`) | One image for any network: WiFi, MCP host and tokens live in NVS, written over USB by the flasher. MQTT primary / HTTP fallback, LWT, offline buffer, OTA. **On-device MCP server** over HTTP (`:80/mcp`) and MQTT. Edge inference, actuators, state modes. |
-| **Flasher** (`flasher/`) | React + esptool-js + Web Serial. Identifies the chip, picks the right image, flashes, provisions WiFi + MCP host, checks the board joined and its MCP tools answer. Served at `/flasher/`, also built for GitHub Pages. |
+| **Firmware 2.0** (`firmware/legacy-arduino/Esp32_MCP_Node`) | One image for any network: WiFi, MCP host and tokens live in NVS, written over USB by the flasher. MQTT primary / HTTP fallback, LWT, offline buffer, OTA. **On-device MCP server** over HTTP (`:80/mcp`) and MQTT. Edge inference, actuators, state modes. |
+| **Flasher** (`apps/flasher-legacy/`) | React + esptool-js + Web Serial. Identifies the chip, picks the right image, flashes, provisions WiFi + MCP host, checks the board joined and its MCP tools answer. Served at `/flasher/`, also built for GitHub Pages. |
 | **Fleet host** (`server/`) | FastAPI. MQTT bridge + HTTP ingest → registry → batched SQLite. Alerts, WebSocket dashboard, firmware images for the flasher. |
 | **MCP gateway** (`server/app/mcp/`) | JSON-RPC 2.0 over HTTP and stdio, protocol 2025-06-18. 18 tools, incl. `device_call_tool` which reaches each board's own MCP server through the broker. |
 | **Datadog** (`server/app/integrations/datadog.py`) | The host forwards every metric, alert, online/offline event and a per-board service check. Boards never hold the key. |
@@ -137,7 +137,7 @@ and AI-gateway key, and installs mcpo. The build refuses to finish if any privat
 
 ## Flash and provision a board (no recompiling)
 
-1. `python firmware\build.py` — builds the four images (`esp32s3_uart`, `esp32s3_usb`, `esp32_classic`,
+1. `python firmware\legacy-arduino\build.py` — builds the four images (`esp32s3_uart`, `esp32s3_usb`, `esp32_classic`,
    `esp32c3_usb`) into `firmware/dist/` with a manifest (sha256, size). No `secrets.h` goes into them.
 2. Open **http://localhost:8099/flasher/** in Chrome or Edge, plug the board in, then:
    **Select USB port → Flash & provision.** The flasher detects the chip (and whether it is on a
@@ -274,14 +274,14 @@ regardless of fleet size.
 
 ```
 E:\.claude\Ionity\.ESP32-MCP
-├── firmware-arduino/
+├── firmware/legacy-arduino/
 │   ├── Esp32_MCP_Node/      fw 2.0 node: main + Provision, DeviceMcp, EdgeAI, Actuators, Oled tabs
 │   ├── Pico_MCP_Node/       Pico / Pico 2 (serial or WiFi)
 │   └── Esp32_Network_Sentinel/  single-site link/power sentinel with OLED clock
 ├── firmware/
 │   ├── build.py             builds the flasher images + manifest (arduino-cli)
 │   └── platformio.ini       PlatformIO build of the same sketch
-├── flasher/                 React web flasher (esptool-js, Web Serial) -> /flasher/ and GitHub Pages
+├── apps/flasher-legacy/                 React web flasher (esptool-js, Web Serial) -> /flasher/ and GitHub Pages
 ├── server/                  FastAPI fleet host + MCP gateway (:8099)
 │   └── app/{api,ingest,storage,fleet,mcp,integrations}
 ├── devices/pi-agent/        Raspberry Pi Zero / Linux agent + systemd installer
@@ -294,7 +294,7 @@ E:\.claude\Ionity\.ESP32-MCP
 └── docs/                    architecture, flasher, device MCP, Datadog, schema, provisioning, lab, roadmap
 
 git-ignored, local only:  .venv/  data/ (fleet.db)  logs/ (fleet_*, bridge_out, archives)
-                          dist/ (testers zip)  firmware/dist*/  flasher/dist/  .build-*/  secrets.h  .env
+                          dist/ (testers zip)  firmware/dist*/  apps/flasher-legacy/dist/  .build-*/  secrets.h  .env
 ```
 
 What changed in 2.0 and why: **[CHANGELOG.md](CHANGELOG.md)**.

@@ -4,7 +4,7 @@ AEDI - IONITY GLOBAL | Build flasher images for the ESP32-MCP node
 Doc ID: DOC-2026-09-ESP32MCP-BUILD | Policy 986 AED
 (c) 2018-2026 Antwerp Designs | Ionity (Pty) Ltd
 
-Compiles firmware-arduino/Esp32_MCP_Node once per board variant with
+Compiles firmware/legacy-arduino/Esp32_MCP_Node once per board variant with
 arduino-cli and writes, for the Ionity Flasher:
 
     firmware/dist/<variant>.bin      merged image (bootloader+partitions+app), flash at 0x0
@@ -13,14 +13,14 @@ arduino-cli and writes, for the Ionity Flasher:
 Images are built WITHOUT secrets.h: WiFi, the MCP host and tokens are written
 into NVS by the flasher, so the same image is safe to publish.
 
-    python firmware/build.py --lab esp32s3_uart
+    python firmware/legacy-arduino/build.py --lab esp32s3_uart
         LAB image: includes the git-ignored secrets.h, so a board flashed with a
         full erase seeds its NVS with the lab WiFi on first boot (no password is
         typed anywhere). Written to firmware/dist-lab/ - never publish these.
 
-    python firmware/build.py                 # all variants
-    python firmware/build.py esp32s3_uart    # one
-    python firmware/build.py --copy-to flasher/public/firmware
+    python firmware/legacy-arduino/build.py                 # all variants
+    python firmware/legacy-arduino/build.py esp32s3_uart    # one
+    python firmware/legacy-arduino/build.py --copy-to apps/flasher-legacy/public/firmware
 
 arduino-cli is taken from $ARDUINO_CLI, then PATH, then the Arduino IDE 2 bundle.
 """
@@ -37,10 +37,10 @@ import subprocess
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
-SKETCH = ROOT / "firmware-arduino" / "Esp32_MCP_Node"
+ROOT = Path(__file__).resolve().parents[2]
+SKETCH = ROOT / "firmware" / "legacy-arduino" / "Esp32_MCP_Node"
 DIST = ROOT / "firmware" / "dist"
-CACHE = ROOT / "firmware" / ".build"
+CACHE = ROOT / "firmware" / "legacy-arduino" / ".build"
 DIST_LAB = ROOT / "firmware" / "dist-lab"
 
 # variant -> (fqbn, esptool chip family, serial on native USB?, human name)
@@ -92,7 +92,7 @@ def build(cli: str, variant: str, work: Path, lab: bool = False) -> dict:
     skip = ("*.log", ".build-*", ".theia") if lab else ("secrets.h", "*.log", ".build-*", ".theia")
     shutil.copytree(SKETCH, src, ignore=shutil.ignore_patterns(*skip))
     if lab and not (src / "secrets.h").exists():
-        raise SystemExit("--lab needs firmware-arduino/Esp32_MCP_Node/secrets.h (copy secrets.h.example)")
+        raise SystemExit("--lab needs firmware/legacy-arduino/Esp32_MCP_Node/secrets.h (copy secrets.h.example)")
     # Persistent build dir per variant: arduino-cli caches the compiled core
     # there, so a rebuild takes seconds instead of ~10 minutes per variant.
     out = CACHE / variant          # shared with --lab: the compiled core is reused
@@ -124,7 +124,7 @@ def build(cli: str, variant: str, work: Path, lab: bool = False) -> dict:
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("variants", nargs="*", default=list(VARIANTS))
-    ap.add_argument("--copy-to", help="also copy images + manifest here (e.g. flasher/public/firmware)")
+    ap.add_argument("--copy-to", help="also copy images + manifest here (e.g. apps/flasher-legacy/public/firmware)")
     ap.add_argument("--lab", action="store_true", help="bake in secrets.h -> firmware/dist-lab (private)")
     a = ap.parse_args()
     cli = find_cli()

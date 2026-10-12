@@ -24,8 +24,9 @@ param(
 
 $ErrorActionPreference = "Stop"
 $acli = 'E:\Program Files (x86)\ArduinoIDE\Arduino IDE\resources\app\lib\backend\resources\arduino-cli.exe'
-$sk   = 'E:\.claude\Ionity\.ESP32-MCP\firmware-arduino\Esp32_MCP_Node'
-$root = 'E:\.claude\Ionity\.ESP32-MCP\firmware-arduino'
+$repo = Split-Path -Parent $PSScriptRoot; while ($repo -and -not (Test-Path (Join-Path $repo '.env.example'))) { $repo = Split-Path -Parent $repo }
+$sk   = Join-Path $repo 'firmware\legacy-arduino\Esp32_MCP_Node'
+$root = Join-Path $repo 'firmware\legacy-arduino'
 
 function Say($m) { Write-Host "[add-device] $m" }
 

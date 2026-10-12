@@ -6,7 +6,7 @@
 
 # --- secrets -----------------------------------------------------------
 .env
-firmware/include/secrets.h
+firmware/legacy-arduino/include/secrets.h
 infra/mosquitto/config/passwd
 
 # --- python ------------------------------------------------------------
@@ -24,7 +24,9 @@ data/
 
 # --- platformio --------------------------------------------------------
 firmware/.pio/
+firmware/legacy-arduino/.pio/
 firmware/.vscode/
+firmware/legacy-arduino/.vscode/
 *.bin
 *.elf
 
@@ -45,10 +47,10 @@ logs_*.txt
 sim_*.txt
 
 # --- arduino ide build output ---
-firmware-arduino/.build-*/
-firmware-arduino/*.log
-firmware-arduino/Esp32_MCP_Node/secrets.h
-firmware-arduino/Pico_MCP_Node/secrets.h
+firmware/legacy-arduino/.build-*/
+firmware/legacy-arduino/*.log
+firmware/legacy-arduino/Esp32_MCP_Node/secrets.h
+firmware/legacy-arduino/Pico_MCP_Node/secrets.h
 **/secrets.h
 
 # --- lab runtime ---
@@ -69,12 +71,13 @@ _merge/
 .theia/
 
 # --- flasher (React) ---
-flasher/node_modules/
-flasher/dist/
-flasher/public/firmware/*.bin
-# firmware images are built (firmware/build.py) and published by CI, not committed
+apps/flasher-legacy/node_modules/
+apps/flasher-legacy/dist/
+apps/flasher-legacy/public/firmware/*.bin
+# firmware images are built (firmware/legacy-arduino/build.py) and published by CI, not committed
 firmware/dist/
 firmware/.build/
+firmware/legacy-arduino/.build/
 firmware/dist-lab/
 # local scratch logs
 emu_*.txt
