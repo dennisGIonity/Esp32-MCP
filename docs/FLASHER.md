@@ -50,13 +50,13 @@ Board → host: `IONITY-PROV {"ok":true,"op":"<op>", ...}` (other lines are ordi
 `server` may be an IPv4, a DNS name, or `name.local`; empty means mDNS `ionity-fleet.local`.
 `role=standalone` = no host at all, the board is only an MCP server on the LAN.
 
-CLI twin for scripts and browsers without Web Serial: `scripts/provision.py` (pyserial).
+CLI twin for scripts and browsers without Web Serial: `tools/scripts/provision.py` (pyserial).
 
 ## A board plugged into the lab Pi (no browser, Pi offline)
 
 ```powershell
 python firmware\legacy-arduino\build.py --lab esp32s3_uart            # image with the git-ignored secrets.h baked in -> firmware/dist-lab/
-scripts\deploy_pi_board.ps1 -Image firmware\dist-lab\esp32s3_uart.bin -Label "lab-node-01" `
+tools\scripts\deploy_pi_board.ps1 -Image firmware\dist-lab\esp32s3_uart.bin -Label "lab-node-01" `
     -Wheels <esptool-aarch64.tar>                        # first run only: the Pi has no internet
 ```
 

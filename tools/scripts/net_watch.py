@@ -33,7 +33,15 @@ import time
 import urllib.request
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
+def _find_root() -> Path:
+    """Repo root (tools/scripts/...) or flat kit root (scripts/...), found by markers."""
+    for p in Path(__file__).resolve().parents:
+        if any((p / m).exists() for m in (".env", ".env.example", "SETUP.cmd", ".git")):
+            return p
+    return Path(__file__).resolve().parents[1]
+
+
+ROOT = _find_root()
 DEFAULT_WATCH = ("youtube.com,youtu.be,googlevideo.com,ytimg.com,youtube-nocookie.com,"
                  "youtubei.googleapis.com,yt3.ggpht.com")
 LOG = ROOT / "logs" / "net_watch.log"

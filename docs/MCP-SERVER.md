@@ -13,7 +13,7 @@ about every device as a single system, however many boards there are.
 | Transport | Address | Use for |
 |---|---|---|
 | **HTTP** | `POST http://192.168.0.3:8099/api/v1/mcp/rpc` | AEDi, dashboards, curl, anything on the LAN |
-| **stdio** | `E:\.claude\Ionity\.ESP32-MCP\.venv\Scripts\python.exe E:\.claude\Ionity\.ESP32-MCP\server\mcp_stdio_proxy.py` | Claude Desktop, Claude Code — clients that spawn a subprocess |
+| **stdio** | `E:\Ionity\ESP32-MCP\.venv\Scripts\python.exe E:\Ionity\ESP32-MCP\services\fleet-host\server\mcp_stdio_proxy.py` | Claude Desktop, Claude Code — clients that spawn a subprocess |
 
 Server identity: `ionity-esp32-fleet-mcp` v1.0.0, protocol `2024-11-05`.
 
@@ -95,14 +95,14 @@ Resources: `ionity://fleet/summary`, `ionity://fleet/devices`,
 MCP, the dashboard and ingest all depend on it.
 
 ```powershell
-E:\.claude\Ionity\.ESP32-MCP\scripts\start_fleet.ps1        # starts it if it isn't already
+E:\Ionity\ESP32-MCP\tools\scripts\start_fleet.ps1        # starts it if it isn't already
 ```
 
 To survive a reboot, register it as a scheduled task that runs at logon:
 
 ```powershell
 schtasks /create /tn "Ionity Fleet Server" /sc onlogon /rl highest ^
-  /tr "E:\.claude\Ionity\.ESP32-MCP\.venv\Scripts\pythonw.exe E:\.claude\Ionity\.ESP32-MCP\server\run.py"
+  /tr "E:\Ionity\ESP32-MCP\.venv\Scripts\pythonw.exe E:\Ionity\ESP32-MCP\services\fleet-host\server\run.py"
 ```
 
 Worth doing before you rely on the DNS resolver — once the router points the

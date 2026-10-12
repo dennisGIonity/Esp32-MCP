@@ -9,8 +9,8 @@ Every node speaks one protocol, so the fleet server, dashboard and MCP tools tre
 
 | Device | What to deploy | Transport | Commands | Deploy with |
 |---|---|---|---|---|
-| **ESP32-S3 / ESP32 / ESP32-C3** | `firmware/legacy-arduino/Esp32_MCP_Node` (fw 1.2.0) | WiFi → MQTT (HTTP fallback) | all | `scripts\add_device.ps1 -Port COMx` (Arduino CLI) · or Arduino IDE · or `firmware/legacy-arduino/` PlatformIO |
-| **Raspberry Pi Pico 2 / Pico** (no radio) | `firmware/legacy-arduino/Pico_MCP_Node` (fw 1.1.0) | USB serial → `scripts/serial_bridge.py` → HTTP | ping, identify, dns_probe (via host) | Arduino IDE, board *Raspberry Pi Pico 2* |
+| **ESP32-S3 / ESP32 / ESP32-C3** | `firmware/legacy-arduino/Esp32_MCP_Node` (fw 1.2.0) | WiFi → MQTT (HTTP fallback) | all | `tools\scripts\add_device.ps1 -Port COMx` (Arduino CLI) · or Arduino IDE · or `firmware/legacy-arduino/` PlatformIO |
+| **Raspberry Pi Pico 2 / Pico** (no radio) | `firmware/legacy-arduino/Pico_MCP_Node` (fw 1.1.0) | USB serial → `tools/scripts/serial_bridge.py` → HTTP | ping, identify, dns_probe (via host) | Arduino IDE, board *Raspberry Pi Pico 2* |
 | **Pico W / Pico 2 W** | same sketch, W board selected | WiFi → HTTP + serial | via serial bridge | Arduino IDE, board *Pico 2 W* |
 | **Raspberry Pi Zero W / Zero 2 W / any Linux SBC** | `devices/pi-agent` (agent 1.0.0) | WiFi/Ethernet → MQTT (HTTP fallback) | ping, identify (ACT LED), reboot, set_meta, dns_probe | `sudo bash install.sh` on the Pi → systemd service |
 | **ESP32-S3 network sentinel** (Kelvin Drive) | `firmware/legacy-arduino/Esp32_Network_Sentinel` | HTTP → `services/network-sentinel` (:8000) | — | Arduino IDE |

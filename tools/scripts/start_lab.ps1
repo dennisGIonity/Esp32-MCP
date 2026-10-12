@@ -27,7 +27,7 @@
 # ===========================================================================
 param([switch]$Restart, [switch]$Quiet)
 
-$root = if ($env:IONITY_ROOT) { $env:IONITY_ROOT } else { Split-Path -Parent $PSScriptRoot }   # works wherever the folder is unpacked
+$root = if ($env:IONITY_ROOT) { $env:IONITY_ROOT } else { Split-Path -Parent (Split-Path -Parent $PSScriptRoot) }   # works wherever the folder is unpacked
 $labHome = if ($env:IONITY_LAB_HOME) { $env:IONITY_LAB_HOME } else { 'E:\.claude\Ionity\.IONITY-LAB' }
 Set-Location $root
 $logs = Join-Path $root 'logs'   # runtime logs live here (git-ignored), not in the repo root
@@ -71,7 +71,7 @@ elseif (Test-Path "$labHome\lab.ps1") {
 }
 elseif (Test-Path "$root\.venv-broker\Scripts\python.exe") {
   Say 'broker        starting (bundled) on :1883'
-  Start-Detached "$root\.venv-broker\Scripts\python.exe" "`"$root\packaging\broker\run_broker.py`" 0.0.0.0:1883" "$logs\broker_out.txt" "$logs\broker_err.txt" $root | Out-Null
+  Start-Detached "$root\.venv-broker\Scripts\python.exe" "`"$root\tools\packaging\broker\run_broker.py`" 0.0.0.0:1883" "$logs\broker_out.txt" "$logs\broker_err.txt" $root | Out-Null
   for ($i = 0; $i -lt 20 -and -not (Listening 1883); $i++) { Start-Sleep 1 }
   if (Listening 1883) { Say 'broker        up on :1883' } else { Say "broker        FAILED to start - see $logs\broker_err.txt" }
 }
@@ -95,7 +95,7 @@ else {
 if ((ProcLike '*serial_bridge.py*').Count -gt 0) { Say 'serial bridge already running' }
 else {
   Say 'serial bridge starting'
-  Start-Detached "$root\.venv\Scripts\python.exe" "`"$root\scripts\serial_bridge.py`"" "$logs\bridge_out.txt" "$logs\bridge_err.txt" $root | Out-Null
+  Start-Detached "$root\.venv\Scripts\python.exe" "`"$root\tools\scripts\serial_bridge.py`"" "$logs\bridge_out.txt" "$logs\bridge_err.txt" $root | Out-Null
 }
 
 # 4. mcpo - OpenAPI/REST front-end for the MCP tools (after the fleet server: its
@@ -109,7 +109,7 @@ elseif (Test-Path $mcpoPy) {
   # 'Authorization: Bearer <key>'. Writes then reach :8099 with IONITY_ADMIN_TOKEN, added by the stdio proxy.
   if (-not ($env:IONITY_MCPO_API_KEY -or (Select-String -Path "$root\.env" -Pattern '^\s*IONITY_MCPO_API_KEY\s*=\s*\S' -Quiet -ErrorAction SilentlyContinue))) {
     Say 'mcpo          WARNING: no IONITY_MCPO_API_KEY set - open to the whole LAN' }
-  Start-Detached $mcpoPy "`"$root\scripts\run_mcpo.py`"" "$logs\mcpo_out.txt" "$logs\mcpo_err.txt" $root | Out-Null
+  Start-Detached $mcpoPy "`"$root\tools\scripts\run_mcpo.py`"" "$logs\mcpo_out.txt" "$logs\mcpo_err.txt" $root | Out-Null
   for ($i = 0; $i -lt 30 -and -not (Listening 8000); $i++) { Start-Sleep 1 }
 }
 else { Say 'mcpo          not installed (.venv-mcpo) - optional, see header' }

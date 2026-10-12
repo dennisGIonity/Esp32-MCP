@@ -17,7 +17,7 @@
 # ===========================================================================
 param([switch]$NoStart, [switch]$NoMcpo, [switch]$Autostart, [switch]$Firewall)
 $ErrorActionPreference = 'Stop'
-$root = Split-Path -Parent $PSScriptRoot
+$root = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 Set-Location $root
 function Say($m, $c = 'Cyan') { Write-Host "[install] $m" -ForegroundColor $c }
 function Fail($m) { Write-Host "[install] $m" -ForegroundColor Red; exit 1 }
@@ -45,7 +45,7 @@ function Venv($dir, $label, $req, [string[]]$pkgs) {
   Say "$label ready" 'Green'
 }
 Venv "$root\.venv" 'fleet server' "$root\services\fleet-host\server\requirements.txt"
-Venv "$root\.venv-broker" 'MQTT broker' "$root\packaging\broker\requirements.txt"
+Venv "$root\.venv-broker" 'MQTT broker' "$root\tools\packaging\broker\requirements.txt"
 if (-not $NoMcpo) { Venv "$root\.venv-mcpo" 'AI gateway (mcpo)' $null @('mcpo', 'mcp>=1.24,<2') }
 
 # 3. .env with fresh secrets (never overwritten)
@@ -73,13 +73,13 @@ if ($Firewall) {
 if ($Autostart) {
   $lnk = Join-Path ([Environment]::GetFolderPath('Startup')) 'Ionity ESP32-MCP.lnk'
   $s = (New-Object -ComObject WScript.Shell).CreateShortcut($lnk)
-  $s.TargetPath = 'powershell.exe'; $s.Arguments = "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$root\scripts\start_lab.ps1`" -Quiet"
+  $s.TargetPath = 'powershell.exe'; $s.Arguments = "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$root\tools\scripts\start_lab.ps1`" -Quiet"
   $s.WorkingDirectory = $root; $s.WindowStyle = 7; $s.Save()
   Say "autostart: $lnk" 'Green'
 }
 
 # 5. start
-if (-not $NoStart) { & "$root\scripts\start_lab.ps1" }
+if (-not $NoStart) { & "$root\tools\scripts\start_lab.ps1" }
 $ip = (Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue | Where-Object { $_.IPAddress -notmatch '^(127|169\.254)\.' -and $_.PrefixOrigin -ne 'WellKnown' } | Sort-Object InterfaceMetric | Select-Object -First 1).IPAddress
 if (-not $ip) { $ip = 'localhost' }
 Write-Host ''

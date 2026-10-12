@@ -76,4 +76,4 @@ curl -s http://ionity-fleet.local:8099/api/v1/devices/esp32-98a316e5d18c/mcp -H 
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"read_telemetry","arguments":{}}}'
 ```
 
-`scripts/device_emulator.py` answers the same JSON-RPC over MQTT, for testing without hardware.
+`tools/scripts/device_emulator.py` answers the same JSON-RPC over MQTT, for testing without hardware.

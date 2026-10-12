@@ -9,9 +9,9 @@
 # ===========================================================================
 param([string]$Version = '')
 $ErrorActionPreference = 'Stop'
-$Root = Split-Path -Parent $PSScriptRoot
+$Root = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 if (-not $Version) {
-  $Version = (& "$Root\.venv\Scripts\python.exe" -c "import sys;sys.path.insert(0,r'$Root\server');from app.mcp.protocol import SERVER_VERSION as v;print(v)").Trim()
+  $Version = (& "$Root\.venv\Scripts\python.exe" -c "import sys;sys.path.insert(0,r'$Root\services\fleet-host\server');from app.mcp.protocol import SERVER_VERSION as v;print(v)").Trim()
   $fw = (Get-Content "$Root\firmware\dist\manifest.json" -Raw | ConvertFrom-Json).version
   $Version = "$Version-fw$fw"
 }
@@ -31,7 +31,7 @@ function Copy-Tree($src, $dst, [string[]]$excludeDirs = @(), [string[]]$excludeF
 }
 
 # package front matter (.cmd, manual, readme, tools)
-Copy-Tree 'packaging\testers' '.'
+Copy-Tree 'tools\packaging\testers' '.'
 # application
 Copy-Tree 'services\fleet-host\server' 'server' -excludeFiles @('*.db', '*.log')
 Copy-Tree 'services\fleet-host\dashboard' 'dashboard'
@@ -39,8 +39,8 @@ Copy-Tree 'apps\flasher-legacy\dist' 'flasher\dist' -excludeFiles @('*.map')
 Copy-Tree 'firmware\dist' 'firmware\dist'
 Copy-Tree 'devices\pi-agent' 'devices\pi-agent'
 New-Item -ItemType Directory -Force "$Out\scripts", "$Out\broker", "$Out\docs" | Out-Null
-Copy-Item "$Root\scripts\device_emulator.py", "$Root\scripts\purge_devices.py", "$Root\scripts\smoke_live.py" "$Out\scripts\"
-Copy-Item "$Root\packaging\broker\run_broker.py", "$Root\packaging\broker\requirements.txt" "$Out\broker\"
+Copy-Item "$Root\tools\scripts\device_emulator.py", "$Root\tools\scripts\purge_devices.py", "$Root\tools\scripts\smoke_live.py" "$Out\scripts\"
+Copy-Item "$Root\tools\packaging\broker\run_broker.py", "$Root\tools\packaging\broker\requirements.txt" "$Out\broker\"
 foreach ($doc in 'DEPLOYABLES.md') { if (Test-Path "$Root\docs\$doc") { Copy-Item "$Root\docs\$doc" "$Out\docs\" } }
 Copy-Item "$Root\CHANGELOG.md" "$Out\" -ErrorAction SilentlyContinue
 

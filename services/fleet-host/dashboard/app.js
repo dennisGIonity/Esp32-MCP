@@ -229,7 +229,7 @@ function drawGrid(devices) {
   if (!list.length) {
     grid.replaceChildren();
     grid.insertAdjacentHTML("beforeend", `<div class="empty">No devices match these filters. Nothing reporting yet? Plug a board in and run
-      <code>scripts\\add_device.ps1 -Port COMx</code>.</div>`);
+      <code>tools\\scripts\\add_device.ps1 -Port COMx</code>.</div>`);
     return;
   }
   grid.querySelector(".empty")?.remove();

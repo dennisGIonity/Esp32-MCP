@@ -38,7 +38,7 @@ import time
 import urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-ROOT = os.path.dirname(HERE)
+ROOT = os.path.dirname(os.path.dirname(HERE))
 OUT: dict = {"started": time.strftime("%Y-%m-%d %H:%M:%S %z"), "checks": []}
 HIDE = ("token", "secret", "password", "psk", "api_key")
 INIT = {"protocolVersion": "2025-06-18", "capabilities": {},

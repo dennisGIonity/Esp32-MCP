@@ -28,7 +28,7 @@ param(
   [switch]$KeepNvs
 )
 $ErrorActionPreference = "Stop"
-$root = Split-Path $PSScriptRoot -Parent
+$root = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
 $ssh = @("-o", "BatchMode=yes", "-o", "ConnectTimeout=8", "-i", $Key)
 $dst = "$User@$PiHost"
 function Say($m) { Write-Host "[pi-deploy] $m" }
@@ -41,7 +41,7 @@ function Remote($cmd) {
 Say "copying image + provision.py to ${dst}:~/ionity-flash"
 Remote "mkdir -p ~/ionity-flash" | Out-Null
 & scp @ssh $Image "$dst`:ionity-flash/image.bin" | Out-Null
-& scp @ssh "$root\scripts\provision.py" "$dst`:ionity-flash/provision.py" | Out-Null
+& scp @ssh "$root\tools\scripts\provision.py" "$dst`:ionity-flash/provision.py" | Out-Null
 
 $has = Remote "test -x ~/ionity-flash/venv/bin/esptool.py && echo yes || echo no"
 if ("$has".Trim() -ne "yes") {

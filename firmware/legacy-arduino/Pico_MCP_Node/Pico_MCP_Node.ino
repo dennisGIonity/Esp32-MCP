@@ -10,7 +10,7 @@
 //   * WiFi + HTTP POST   when built for a W board and the radio associates
 //   * "TLM {json}" lines on USB serial, every cycle, unconditionally
 // The serial path is what lets a plain (non-W) Pico report at all:
-// scripts/serial_bridge.py on the host forwards those lines to the server.
+// tools/scripts/serial_bridge.py on the host forwards those lines to the server.
 // On a W board it is also a free debug tap.
 //
 // Board: Tools > Board > Raspberry Pi Pico/RP2040/RP2350 > (Pico W | Pico 2 W | Pico | Pico 2)
@@ -126,7 +126,7 @@ String buildJson() {
 // ---------------------------------------------------------------------------
 // Commands over USB serial (1.1.0)
 //
-// A board with no radio still takes commands: scripts/serial_bridge.py
+// A board with no radio still takes commands: tools/scripts/serial_bridge.py
 // subscribes to this device's MQTT cmd topic and writes one line per command:
 //     CMD {"action":"ping","cmd_id":"c123"}
 // and the board answers on one line, which the bridge publishes to cmd/result:

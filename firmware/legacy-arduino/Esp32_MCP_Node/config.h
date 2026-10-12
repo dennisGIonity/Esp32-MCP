@@ -10,7 +10,7 @@
 // ===========================================================================
 
 // secrets.h is OPTIONAL since fw 2.0.0. Credentials are provisioned into NVS
-// over USB serial by the Ionity Flasher (flasher/) or `scripts/provision.py`;
+// over USB serial by the Ionity Flasher (apps/flasher-legacy/) or `tools/scripts/provision.py`;
 // secrets.h only seeds the very first boot of a hand-built image.
 #if __has_include("secrets.h")
   #include "secrets.h"

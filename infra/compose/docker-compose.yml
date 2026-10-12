@@ -14,7 +14,7 @@ services:
       - "1883:1883"
       - "9001:9001"
     volumes:
-      - ./infra/mosquitto/config:/mosquitto/config:ro
+      - ../mosquitto/config:/mosquitto/config:ro
       - mosquitto-data:/mosquitto/data
       - mosquitto-log:/mosquitto/log
     healthcheck:
@@ -26,7 +26,7 @@ services:
 
   fleet-server:
     build:
-      context: .
+      context: ../..
       dockerfile: infra/Dockerfile
     container_name: ionity-fleet-server
     restart: unless-stopped
@@ -51,7 +51,7 @@ services:
       IONITY_CORS_ORIGINS: ${IONITY_CORS_ORIGINS:-*}
     volumes:
       - fleet-data:/data
-      - ./firmware/dist:/app/firmware/dist:ro   # images built by firmware/legacy-arduino/build.py / CI
+      - ../../firmware/dist:/app/firmware/dist:ro   # images built by firmware/legacy-arduino/build.py / CI
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8099/api/v1/health', timeout=3).status==200 else 1)"]
       interval: 15s

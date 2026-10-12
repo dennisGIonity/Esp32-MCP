@@ -31,7 +31,7 @@ Classification: PUBLIC | Building Tomorrow, Today. | Anything is Possible with G
 | **MCP gateway** (`services/fleet-host/server/app/mcp/`) | JSON-RPC 2.0 over HTTP and stdio, protocol 2025-06-18. 18 tools, incl. `device_call_tool` which reaches each board's own MCP server through the broker. |
 | **Datadog** (`services/fleet-host/server/app/integrations/datadog.py`) | The host forwards every metric, alert, online/offline event and a per-board service check. Boards never hold the key. |
 | **Dashboard** (`services/fleet-host/dashboard/`) | Live fleet monitor, MCP console, link to the flasher. |
-| **Emulator / simulator** (`scripts/`) | `device_emulator.py` = one fw 2.0 board incl. its MCP tools; `fleet_simulator.py` = N boards for load. |
+| **Emulator / simulator** (`tools/scripts/`) | `device_emulator.py` = one fw 2.0 board incl. its MCP tools; `fleet_simulator.py` = N boards for load. |
 
 > **Live lab:** 2× ESP32-S3 (MQTT) + 1× Pico 2 (serial bridge) in `site=lab`. The lab network is its own
 > project, **[Ionity-2nd-Router-Test-Lab](https://github.com/dennisGIonity/Ionity-2nd-Router-Test-Lab)**
@@ -43,16 +43,16 @@ Classification: PUBLIC | Building Tomorrow, Today. | Anything is Possible with G
 ## Quick start
 
 ```powershell
-cd E:\.claude\Ionity\.ESP32-MCP
+cd E:\Ionity\ESP32-MCP
 python -m venv .venv; .\.venv\Scripts\Activate.ps1
 pip install -r services\fleet-host\server\requirements.txt
 python services\fleet-host\server\run.py                                   # dashboard, API, MCP, flasher on :8099
-python scripts\device_emulator.py                      # a fw 2.0 board, incl. its MCP tools (needs the broker)
-python scripts\fleet_simulator.py --devices 250        # load: 250 boards over HTTP
+python tools\scripts\device_emulator.py                      # a fw 2.0 board, incl. its MCP tools (needs the broker)
+python tools\scripts\fleet_simulator.py --devices 250        # load: 250 boards over HTTP
 ```
 
 Dashboard **http://localhost:8099/** · Flasher **http://localhost:8099/flasher/** · API docs **/docs**.
-The lab path with the broker: `scripts\start_lab.ps1` (amqtt :1883 + host + serial bridge).
+The lab path with the broker: `tools\scripts\start_lab.ps1` (amqtt :1883 + host + serial bridge).
 
 ### Where everything lives (lab host 192.168.0.2)
 
@@ -65,28 +65,28 @@ The lab path with the broker: `scripts\start_lab.ps1` (amqtt :1883 + host + seri
 | MQTT broker | `mqtt://localhost:1883` | `mqtt://192.168.0.2:1883` — no web UI; e.g. MQTT Explorer, topic `ionity/#` |
 | A board's own MCP (fw 2.0) | – | `POST http://<board-ip>/mcp` · `GET http://<board-ip>/info` |
 
-Start / restart it all: `scripts\start_lab.ps1` (broker :1883 + fleet server :8099 + serial bridge; idempotent).
+Start / restart it all: `tools\scripts\start_lab.ps1` (broker :1883 + fleet server :8099 + serial bridge; idempotent).
 
 ### Testers package
 
-`powershell -ExecutionPolicy Bypass -File scripts\build_testers_package.ps1` builds
+`powershell -ExecutionPolicy Bypass -File tools\scripts\build_testers_package.ps1` builds
 `dist\Ionity-ESP32-MCP-Testers-v<ver>.zip` — a standalone bench kit (own MQTT broker, server, dashboard,
 flasher + public firmware, `MANUAL.html`, `README.md`, and SETUP / START / STOP / STATUS / FLASH-BOARD /
-RUN-TESTS / DEMO-DEVICE `.cmd` files). Sources live in `packaging/`. Testers need only Python 3.11+.
+RUN-TESTS / DEMO-DEVICE `.cmd` files). Sources live in `tools/packaging/`. Testers need only Python 3.11+.
 
 ---
 
 ### One-step install (any Windows 10/11 PC)
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts\install.ps1            # install + start
-powershell -ExecutionPolicy Bypass -File scripts\install.ps1 -NoStart   # install only
+powershell -ExecutionPolicy Bypass -File tools\scripts\install.ps1            # install + start
+powershell -ExecutionPolicy Bypass -File tools\scripts\install.ps1 -NoStart   # install only
 #   -NoMcpo     skip the AI gateway      -Autostart  start at every Windows sign-in
 #   -Firewall   open 8099/8000/1883 TCP, 53/5353 UDP on Private networks (run as Administrator)
 ```
 
 Needs Python 3.11+. Creates `.venv` (fleet server), `.venv-broker` (bundled MQTT broker from
-`packaging/broker`) and `.venv-mcpo` (AI gateway), and writes `.env` from `.env.example` with a
+`tools/packaging/broker`) and `.venv-mcpo` (AI gateway), and writes `.env` from `.env.example` with a
 fresh random `IONITY_ADMIN_TOKEN` and `IONITY_MCPO_API_KEY`. Safe to re-run; an existing `.env`
 is never overwritten. The first start after a fresh install can take 10-20 s while Python
 prepares its files.
@@ -95,15 +95,15 @@ prepares its files.
 
 | Script | Does |
 |---|---|
-| `scripts\start_lab.ps1` | broker (Ionity Lab's if present, else the bundled one), fleet server, serial bridge, AI gateway; idempotent; `-Restart` to restart the server parts |
-| `scripts\status_lab.ps1` | each service up/down, boards online, LAN DNS lookups |
-| `scripts\stop_lab.ps1` | stops everything started from this folder and warns if this PC still uses itself as DNS |
+| `tools\scripts\start_lab.ps1` | broker (Ionity Lab's if present, else the bundled one), fleet server, serial bridge, AI gateway; idempotent; `-Restart` to restart the server parts |
+| `tools\scripts\status_lab.ps1` | each service up/down, boards online, LAN DNS lookups |
+| `tools\scripts\stop_lab.ps1` | stops everything started from this folder and warns if this PC still uses itself as DNS |
 
 The scripts resolve the project folder from their own location (override with `IONITY_ROOT`).
 
 ## AI gateway (mcpo) and keys
 
-`scripts\run_mcpo.py` serves the 18 fleet MCP tools as OpenAPI/REST on `:8000` (`/docs` lists
+`tools\scripts\run_mcpo.py` serves the 18 fleet MCP tools as OpenAPI/REST on `:8000` (`/docs` lists
 them). Every request needs `Authorization: Bearer <IONITY_MCPO_API_KEY>`; the key is read from
 `.env` in-process, so it never appears on a command line. Device-changing MCP tools on the fleet
 server (`send_command`, `device_call_tool`, ...) need `Authorization: Bearer <IONITY_ADMIN_TOKEN>`;
@@ -117,21 +117,21 @@ With `IONITY_DNS_PORT=53`, any device that uses this PC as its DNS server is log
 Point the router's DHCP DNS at this PC, or set it per device. Devices that use encrypted DNS
 (DNS-over-HTTPS, Android Private DNS, iCloud Private Relay) or a second network are not seen.
 
-`scripts\net_watch.py` watches that log and switches a board's `pwm0` output on (GPIO5 on an
+`tools\scripts\net_watch.py` watches that log and switches a board's `pwm0` output on (GPIO5 on an
 ESP32-S3, wired to a red LED) when a watched site is opened, off again 20 s after the last match.
 It writes a live report to `Demo working\network-report.html` (or `--report <file>`).
 
 ```powershell
-.venv\Scripts\python.exe scripts\net_watch.py                       # board from IONITY_ALARM_DEVICE
-.venv\Scripts\python.exe scripts\net_watch.py --device esp32-xxxxxxxxxxxx --hold 30
+.venv\Scripts\python.exe tools\scripts\net_watch.py                       # board from IONITY_ALARM_DEVICE
+.venv\Scripts\python.exe tools\scripts\net_watch.py --device esp32-xxxxxxxxxxxx --hold 30
 ```
 
 Only monitor networks you manage, with the users' knowledge (e.g. POPIA).
 
 ### POC kit
 
-`scripts\build_poc_package.ps1 -Out <folder>` builds the testers kit (broker, server, dashboard,
-flasher with firmware, manual) and overlays `packaging\poc`: SETUP / START / STOP / STATUS,
+`tools\scripts\build_poc_package.ps1 -Out <folder>` builds the testers kit (broker, server, dashboard,
+flasher with firmware, manual) and overlays `tools\packaging\poc`: SETUP / START / STOP / STATUS,
 WATCH-YOUTUBE-ALARM and COPY-AI-KEY. SETUP switches LAN DNS to port 53, generates the admin token
 and AI-gateway key, and installs mcpo. The build refuses to finish if any private file would ship.
 
@@ -147,8 +147,8 @@ and AI-gateway key, and installs mcpo. The build refuses to finish if any privat
 3. Already on fw 2.0? Tick **Provision only** to move a board to another network, or
    **Update only** to flash new firmware and keep its settings (the NVS partition is skipped).
 
-No Chrome? `python scripts\provision.py COM8 --ssid IONITY-LAB-IOT --password - --server 192.168.0.2 --mcp-token auto --test`.
-Details: **[docs/FLASHER.md](docs/FLASHER.md)**. The old path (`scripts\add_device.ps1`, `secrets.h`) still works:
+No Chrome? `python tools\scripts\provision.py COM8 --ssid IONITY-LAB-IOT --password - --server 192.168.0.2 --mcp-token auto --test`.
+Details: **[docs/FLASHER.md](docs/FLASHER.md)**. The old path (`tools\scripts\add_device.ps1`, `secrets.h`) still works:
 `secrets.h` now only seeds the first boot.
 
 ---
@@ -273,28 +273,36 @@ regardless of fleet size.
 ## Layout
 
 ```
-E:\.claude\Ionity\.ESP32-MCP
-├── firmware/legacy-arduino/
-│   ├── Esp32_MCP_Node/      fw 2.0 node: main + Provision, DeviceMcp, EdgeAI, Actuators, Oled tabs
-│   ├── Pico_MCP_Node/       Pico / Pico 2 (serial or WiFi)
-│   └── Esp32_Network_Sentinel/  single-site link/power sentinel with OLED clock
+ESP32-MCP/                    (local clone: E:\Ionity\ESP32-MCP)
+├── apps/
+│   ├── portal/               Board Portal 3 (React 19 + Web Serial): connect, provision, verify online
+│   └── flasher-legacy/       Flasher 2 (esptool-js) -> /flasher/ and GitHub Pages
+├── packages/protocol/        EWP/1 contract (TypeScript source of truth, generates the C header)
 ├── firmware/
-│   ├── build.py             builds the flasher images + manifest (arduino-cli)
-│   └── platformio.ini       PlatformIO build of the same sketch
-├── apps/flasher-legacy/                 React web flasher (esptool-js, Web Serial) -> /flasher/ and GitHub Pages
-├── server/                  FastAPI fleet host + MCP gateway (:8099)
-│   └── app/{api,ingest,storage,fleet,mcp,integrations}
-├── devices/pi-agent/        Raspberry Pi Zero / Linux agent + systemd installer
-├── services/network-sentinel/  Kelvin Drive network sentinel service (:8000)
-├── dashboard/               fleet dashboard served at /
-├── scripts/                 start_lab, add_device, provision, device_emulator, fleet_simulator, serial bridge
-├── packaging/               testers package sources (.cmd, MANUAL.html, tools/, bundled broker)
-├── infra/                   Dockerfile + mosquitto.conf
-├── .github/workflows/       CI (tests, firmware matrix, flasher) + Pages/release
-└── docs/                    architecture, flasher, device MCP, Datadog, schema, provisioning, lab, roadmap
+│   ├── esp32-node/           firmware 3 (ESP-IDF, S3/C6, MCPServer + Core-1 worker) - preview
+│   ├── legacy-arduino/       firmware 2.1.1 (Esp32_MCP_Node, Pico_MCP_Node, Network_Sentinel),
+│   │                         build.py (flasher images) and platformio.ini
+│   └── dist/                 built images + manifest (git-ignored; read by the fleet server)
+├── services/
+│   ├── fleet-host/
+│   │   ├── server/           FastAPI fleet host + MCP gateway + LAN DNS (:8099)
+│   │   └── dashboard/        fleet dashboard served at /
+│   └── network-sentinel/     Kelvin Drive network sentinel service (:8000)
+├── devices/pi-agent/         Raspberry Pi Zero / Linux agent + systemd installer
+├── tools/
+│   ├── scripts/              start_lab, stop_lab, add_device, provision, net_watch, run_mcpo, serial bridge
+│   └── packaging/            testers / POC kit sources (.cmd, MANUAL.html, tools/, bundled broker)
+├── infra/                    Dockerfile, mosquitto config, compose/docker-compose.yml
+├── config/                   device_labels.json (live-reloaded)
+├── .github/workflows/        CI (tests, firmware matrix, flasher) + Pages/release
+└── docs/                     architecture, flasher, device MCP, Datadog, schema, provisioning, lab, roadmap
 
-git-ignored, local only:  .venv/  data/ (fleet.db)  logs/ (fleet_*, bridge_out, archives)
-                          dist/ (testers zip)  firmware/dist*/  apps/flasher-legacy/dist/  .build-*/  secrets.h  .env
+git-ignored, local only:  .venv*/  data/ (fleet.db)  logs/  dist/ (kits)  firmware/dist*/
+                          apps/*/dist/  node_modules/  .build-*/  secrets.h  .env
+
+Docker:  docker compose -f infra/compose/docker-compose.yml up -d
+The testers / POC kit keeps a flat layout (server/, dashboard/, scripts/ at the kit root);
+the code finds the root by markers (.env, .env.example, SETUP.cmd, .git), so it runs in both.
 ```
 
 What changed in 2.0 and why: **[CHANGELOG.md](CHANGELOG.md)**.

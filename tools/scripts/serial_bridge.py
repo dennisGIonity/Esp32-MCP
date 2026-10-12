@@ -37,7 +37,15 @@ RP_VIDS = {0x2E8A}          # Raspberry Pi (RP2040 / RP2350)
 # Serial-only boards cannot receive set_meta (there is no inbound path to
 # them), so their label/site/group are applied here instead:
 #   {"pico-c18354253344139d": {"label": "lab-node-03", "site": "lab", "group": "bench"}}
-LABELS_FILE = Path(__file__).resolve().parents[1] / "config" / "device_labels.json"
+def _find_root() -> Path:
+    """Repo root (tools/scripts/...) or flat kit root (scripts/...), found by markers."""
+    for p in Path(__file__).resolve().parents:
+        if any((p / m).exists() for m in (".env", ".env.example", "SETUP.cmd", ".git")):
+            return p
+    return Path(__file__).resolve().parents[1]
+
+
+LABELS_FILE = _find_root() / "config" / "device_labels.json"
 
 
 def load_labels() -> dict:

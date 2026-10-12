@@ -13,18 +13,18 @@
 # ===========================================================================
 param([Parameter(Mandatory)][string]$Out)
 $ErrorActionPreference = 'Stop'
-$Root = Split-Path -Parent $PSScriptRoot
-& "$Root\scripts\build_testers_package.ps1" | Out-Host
+$Root = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
+& "$Root\tools\scripts\build_testers_package.ps1" | Out-Host
 $kit = Get-ChildItem "$Root\dist" -Directory -Filter 'Ionity-ESP32-MCP-Testers-v*' | Where-Object { $_.Name -notlike '*dryrun*' } | Sort-Object LastWriteTime -Descending | Select-Object -First 1
 if (-not $kit) { throw 'testers kit not built' }
 $dest = Join-Path $Out 'Ionity-ESP32-MCP-POC-Kit'
 if (Test-Path $dest) { Remove-Item $dest -Recurse -Force }
 New-Item -ItemType Directory -Force $Out | Out-Null
 Copy-Item $kit.FullName $dest -Recurse
-Copy-Item "$Root\packaging\poc\*.cmd" $dest -Force
-Copy-Item "$Root\packaging\poc\tools\poc.ps1" "$dest\tools\" -Force
+Copy-Item "$Root\tools\packaging\poc\*.cmd" $dest -Force
+Copy-Item "$Root\tools\packaging\poc\tools\poc.ps1" "$dest\tools\" -Force
 New-Item -ItemType Directory -Force "$dest\scripts" | Out-Null
-Copy-Item "$Root\scripts\net_watch.py", "$Root\scripts\run_mcpo.py" "$dest\scripts\" -Force
+Copy-Item "$Root\tools\scripts\net_watch.py", "$Root\tools\scripts\run_mcpo.py" "$dest\scripts\" -Force
 if (-not (Test-Path "$dest\server\mcp_stdio_proxy.py")) { Copy-Item "$Root\services\fleet-host\server\mcp_stdio_proxy.py" "$dest\server\" }
 $bad = @(Get-ChildItem $dest -Recurse -Force -File | Where-Object { $_.Name -in @('.env', 'secrets.h', 'fleet.db') -or $_.FullName -match '\\\.venv|\\dist-lab\\' })
 if ($bad.Count) { throw ('private files in the kit: ' + (($bad | ForEach-Object { $_.FullName }) -join ', ')) }

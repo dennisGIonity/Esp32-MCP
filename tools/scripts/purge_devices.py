@@ -24,7 +24,15 @@ import sys
 import time
 from pathlib import Path
 
-DB = Path(__file__).resolve().parents[1] / "data" / "fleet.db"
+def _find_root() -> Path:
+    """Repo root (tools/scripts/...) or flat kit root (scripts/...), found by markers."""
+    for p in Path(__file__).resolve().parents:
+        if any((p / m).exists() for m in (".env", ".env.example", "SETUP.cmd", ".git")):
+            return p
+    return Path(__file__).resolve().parents[1]
+
+
+DB = _find_root() / "data" / "fleet.db"
 
 # The simulator generates ids as f"esp32-{i:012x}", so every one of them
 # begins esp32-00000000. A real eFuse MAC never will.
