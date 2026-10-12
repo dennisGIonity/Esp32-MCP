@@ -164,8 +164,8 @@ stdio for Claude Desktop / Claude Code / Cowork — the bridge keeps answering w
 {
   "mcpServers": {
     "ionity-esp32-fleet": {
-      "command": "E:\\.claude\\Ionity\\.ESP32-MCP\\.venv\\Scripts\\python.exe",
-      "args": ["E:\\.claude\\Ionity\\.ESP32-MCP\\server\\mcp_stdio_proxy.py"]
+      "command": "E:\\Ionity\\ESP32-MCP\\.venv\\Scripts\\python.exe",
+      "args": ["E:\\Ionity\\ESP32-MCP\\services\\fleet-host\\server\\mcp_stdio_proxy.py"]
     }
   }
 }

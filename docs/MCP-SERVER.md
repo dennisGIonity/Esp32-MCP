@@ -26,8 +26,8 @@ of the previous file sits beside it):
 {
   "mcpServers": {
     "ionity-esp32-fleet": {
-      "command": "E:\\.claude\\Ionity\\.ESP32-MCP\\.venv\\Scripts\\python.exe",
-      "args": ["E:\\.claude\\Ionity\\.ESP32-MCP\\server\\mcp_stdio_proxy.py"],
+      "command": "E:\\Ionity\\ESP32-MCP\\.venv\\Scripts\\python.exe",
+      "args": ["E:\\Ionity\\ESP32-MCP\\services\\fleet-host\\server\\mcp_stdio_proxy.py"],
       "env": { "IONITY_MCP_URL": "http://127.0.0.1:8099/api/v1/mcp/rpc" }
     }
   }
