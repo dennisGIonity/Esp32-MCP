@@ -13,7 +13,9 @@ if "%PORT%"=="" ( echo No ESP32 USB port found. Plug the board in and run again,
 echo Board on %PORT%. Close the Flasher / any serial monitor first.
 set /p SSID=WiFi name [Afrihost Fibre DTM]: 
 if "%SSID%"=="" set SSID=Afrihost Fibre DTM
-"%PY%" scripts\provision.py %PORT% --ssid "%SSID%" --password - --role node --test
+set PROV=tools\scripts\provision.py
+if not exist "%PROV%" set PROV=scripts\provision.py
+"%PY%" "%PROV%" %PORT% --ssid "%SSID%" --password - --role node --test
 echo.
 echo Done. The board appears ONLINE on http://localhost:8099/ within about a minute.
 pause

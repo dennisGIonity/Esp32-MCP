@@ -78,7 +78,7 @@ now live in `.env` and are evaluated on ingest.
 
 ## Storage migration path
 
-Everything above `Store` (`server/app/storage/base.py`) is driver-agnostic.
+Everything above `Store` (`services/fleet-host/server/app/storage/base.py`) is driver-agnostic.
 Moving to TimescaleDB is a new `TimescaleStore(Store)` plus one config flag:
 
 ```sql
@@ -123,7 +123,7 @@ Two MCP tiers, deliberately split (fw 2.0, 2026-09-29):
 
 | Tier | Runs on | Here | Role |
 |---|---|---|---|
-| **Host MCP** (AI orchestrator + device bridge) | workstation / gateway | `server/app/mcp` (FastAPI, JSON-RPC over HTTP + stdio bridge) | Fleet-wide reasoning, history, alerts, commands; `device_call_tool` turns an agent's call into one compact MQTT message to one board. |
+| **Host MCP** (AI orchestrator + device bridge) | workstation / gateway | `services/fleet-host/server/app/mcp` (FastAPI, JSON-RPC over HTTP + stdio bridge) | Fleet-wide reasoning, history, alerts, commands; `device_call_tool` turns an agent's call into one compact MQTT message to one board. |
 | **On-device MCP** | every ESP32 | `DeviceMcp.ino` | Direct hardware tools: telemetry incl. heap + loop timing, edge inference, actuators, state modes. |
 
 Why the bridge: the board never parses an HTTP/SSE MCP session from the internet, never holds cloud
@@ -137,7 +137,7 @@ Arduino sketch runs on S3/C3/classic with a small footprint):
 | Espressif `esp-iot-solution` `mcp_server` component (ESP-IDF, S3/C6) | The ESP-IDF route for a production FreeRTOS build. Our tool names and JSON shapes are compatible, so the host bridge does not care which firmware answers. |
 | Solnera ESP32-MCPServer (Arduino/PlatformIO) | Same idea as `DeviceMcp.ino` with worker tasks; ours is synchronous in `loop()` and measured (loop_us_*). |
 | Xiaozhi embedded MCP framework | Voice/vision front-end + MCP; a Xiaozhi board can register as another node if it speaks the telemetry schema. |
-| `@midas/esp32-devops-mcp` (npm) | Developer-side build / serial / benchmark MCP for the workstation; complements the fleet host (CI/flashing) rather than replacing it. Our own CI + `firmware/build.py` + the flasher cover builds and flashing. |
+| `@midas/esp32-devops-mcp` (npm) | Developer-side build / serial / benchmark MCP for the workstation; complements the fleet host (CI/flashing) rather than replacing it. Our own CI + `firmware/legacy-arduino/build.py` + the flasher cover builds and flashing. |
 
 ## Observability
 

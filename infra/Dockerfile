@@ -2,9 +2,9 @@
 # --- flasher build stage -----------------------------------------------------
 FROM node:22-alpine AS flasher
 WORKDIR /flasher
-COPY flasher/package.json flasher/package-lock.json ./
+COPY apps/flasher-legacy/package.json apps/flasher-legacy/package-lock.json ./
 RUN npm ci --no-audit --no-fund
-COPY flasher/ .
+COPY apps/flasher-legacy/ .
 RUN npm run build
 
 # --- runtime -----------------------------------------------------------------
@@ -13,12 +13,12 @@ ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PYTHONPATH=/app/server \
     IONITY_HOST=0.0.0.0 IONITY_PORT=8099 IONITY_SQLITE_PATH=/data/fleet.db \
     IONITY_FIRMWARE_DIST=/app/firmware/dist
 WORKDIR /app
-COPY server/requirements.txt /app/requirements.txt
+COPY services/fleet-host/server/requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir -r /app/requirements.txt \
  && useradd --system --uid 10001 --home /app ionity \
  && mkdir -p /data /app/firmware/dist && chown -R ionity:ionity /data /app
-COPY --chown=ionity:ionity server    /app/server
-COPY --chown=ionity:ionity dashboard /app/dashboard
+COPY --chown=ionity:ionity services/fleet-host/server    /app/server
+COPY --chown=ionity:ionity services/fleet-host/dashboard /app/dashboard
 COPY --chown=ionity:ionity --from=flasher /flasher/dist /app/flasher/dist
 USER ionity
 EXPOSE 8099

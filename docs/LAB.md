@@ -31,8 +31,8 @@ It starts itself at logon (Startup shortcut **Ionity Lab**). By hand:
 
 ```powershell
 E:\.claude\Ionity\.IONITY-LAB\lab.ps1 start                    # the whole lab: broker + every registered project
-E:\.claude\Ionity\.ESP32-MCP\scripts\start_lab.ps1            # just this project (asks the lab for the broker)
-E:\.claude\Ionity\.ESP32-MCP\scripts\start_lab.ps1 -Restart   # restart this project's services
+E:\Ionity\ESP32-MCP\tools\scripts\start_lab.ps1            # just this project (asks the lab for the broker)
+E:\Ionity\ESP32-MCP\tools\scripts\start_lab.ps1 -Restart   # restart this project's services
 E:\.claude\Ionity\.IONITY-LAB\lab.ps1 status                   # health check - every line OK before a demo
 ```
 
@@ -41,8 +41,8 @@ That brings up, in order:
 | # | Service | Port | Owned by |
 |---|---|---|---|
 | 1 | MQTT broker (amqtt) | 1883 | **Ionity-Lab**: `broker\run_broker.py` in its `.venv` |
-| 2 | Fleet server + dashboard + MCP + LAN DNS | 8099, 53/udp | ESP32-MCP: `server\run.py` in `.venv` |
-| 3 | Serial bridge | — | ESP32-MCP: `scripts\serial_bridge.py` in `.venv` |
+| 2 | Fleet server + dashboard + MCP + LAN DNS | 8099, 53/udp | ESP32-MCP: `services\fleet-host\server\run.py` in `.venv` |
+| 3 | Serial bridge | — | ESP32-MCP: `tools\scripts\serial_bridge.py` in `.venv` |
 
 The MCP bridge in Claude also runs `start_lab.ps1` if it finds the server down.
 
@@ -54,7 +54,7 @@ boards follow it). In the lab layout that is **http://192.168.124.4:8099/**.
 **ESP32 (any: S3, C3, classic):**
 
 ```powershell
-E:\.claude\Ionity\.ESP32-MCP\scripts\add_device.ps1 -Port COM12 -Label "lab-node-04"
+E:\Ionity\ESP32-MCP\tools\scripts\add_device.ps1 -Port COM12 -Label "lab-node-04"
 ```
 
 Detects the chip with esptool, picks the FQBN and flash size, compiles
@@ -63,7 +63,7 @@ If arduino-cli's upload fails on a native-USB board it retries with
 `esptool --before usb-reset` automatically — see below.
 
 **Raspberry Pi Pico / Pico 2 (no radio):** open
-`firmware-arduino\Pico_MCP_Node` in the Arduino IDE, pick *Raspberry Pi Pico 2*
+`firmware\legacy-arduino\Pico_MCP_Node` in the Arduino IDE, pick *Raspberry Pi Pico 2*
 (or *Pico*), upload. The serial bridge picks up any RP2040/RP2350 port by
 itself within 15 s. Give it a label in `config\device_labels.json` — edits apply
 on the next reading, no restart.

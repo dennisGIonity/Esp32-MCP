@@ -5,7 +5,7 @@ AEDI - IONITY GLOBAL | DOC-2026-09-ESP32MCP-005 | v1.0.0 | Policy 986 AED
 
 > **fw 2.0 (2026-09-29):** the fastest path is now the web flasher — [FLASHER.md](FLASHER.md). It writes
 > WiFi, the MCP host and tokens into NVS over USB, so `secrets.h` is no longer needed per network.
-> `scripts/provision.py` does the same from a terminal, for bulk runs.
+> `tools/scripts/provision.py` does the same from a terminal, for bulk runs.
 
 # Provisioning 1000 devices
 
@@ -28,7 +28,7 @@ Nothing that varies per *unit* is compiled in. Only things that vary per
 ## Step 1 — build once
 
 ```powershell
-cd E:\.claude\Ionity\.ESP32-MCP\firmware
+cd E:\Ionity\ESP32-MCP\firmware\legacy-arduino
 copy include\secrets.h.example include\secrets.h
 # edit: WIFI_SSID, WIFI_PASSWORD, MQTT_USERNAME/PASSWORD, FLEET_TOKEN, OTA_PASSWORD
 pio run -e esp32s3

@@ -6,7 +6,7 @@ AEDI - IONITY GLOBAL | DOC-2026-09-ESP32MCP-DMCP | v2.0.0 | 2026-09-29 SAST | Po
 # On-device MCP server (fw 2.0)
 
 Every node is its own Model Context Protocol server. Implementation:
-`firmware-arduino/Esp32_MCP_Node/DeviceMcp.ino` (dispatcher + HTTP), `EdgeAI.ino` (models, state modes),
+`firmware/legacy-arduino/Esp32_MCP_Node/DeviceMcp.ino` (dispatcher + HTTP), `EdgeAI.ino` (models, state modes),
 `Actuators.ino` (outputs).
 
 ## Transports
@@ -76,4 +76,4 @@ curl -s http://ionity-fleet.local:8099/api/v1/devices/esp32-98a316e5d18c/mcp -H 
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"read_telemetry","arguments":{}}}'
 ```
 
-`scripts/device_emulator.py` answers the same JSON-RPC over MQTT, for testing without hardware.
+`tools/scripts/device_emulator.py` answers the same JSON-RPC over MQTT, for testing without hardware.
