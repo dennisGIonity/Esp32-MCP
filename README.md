@@ -27,10 +27,10 @@ Classification: PUBLIC | Building Tomorrow, Today. | Anything is Possible with G
 |---|---|
 | **Firmware 2.0** (`firmware/legacy-arduino/Esp32_MCP_Node`) | One image for any network: WiFi, MCP host and tokens live in NVS, written over USB by the flasher. MQTT primary / HTTP fallback, LWT, offline buffer, OTA. **On-device MCP server** over HTTP (`:80/mcp`) and MQTT. Edge inference, actuators, state modes. |
 | **Flasher** (`apps/flasher-legacy/`) | React + esptool-js + Web Serial. Identifies the chip, picks the right image, flashes, provisions WiFi + MCP host, checks the board joined and its MCP tools answer. Served at `/flasher/`, also built for GitHub Pages. |
-| **Fleet host** (`server/`) | FastAPI. MQTT bridge + HTTP ingest → registry → batched SQLite. Alerts, WebSocket dashboard, firmware images for the flasher. |
-| **MCP gateway** (`server/app/mcp/`) | JSON-RPC 2.0 over HTTP and stdio, protocol 2025-06-18. 18 tools, incl. `device_call_tool` which reaches each board's own MCP server through the broker. |
-| **Datadog** (`server/app/integrations/datadog.py`) | The host forwards every metric, alert, online/offline event and a per-board service check. Boards never hold the key. |
-| **Dashboard** (`dashboard/`) | Live fleet monitor, MCP console, link to the flasher. |
+| **Fleet host** (`services/fleet-host/server/`) | FastAPI. MQTT bridge + HTTP ingest → registry → batched SQLite. Alerts, WebSocket dashboard, firmware images for the flasher. |
+| **MCP gateway** (`services/fleet-host/server/app/mcp/`) | JSON-RPC 2.0 over HTTP and stdio, protocol 2025-06-18. 18 tools, incl. `device_call_tool` which reaches each board's own MCP server through the broker. |
+| **Datadog** (`services/fleet-host/server/app/integrations/datadog.py`) | The host forwards every metric, alert, online/offline event and a per-board service check. Boards never hold the key. |
+| **Dashboard** (`services/fleet-host/dashboard/`) | Live fleet monitor, MCP console, link to the flasher. |
 | **Emulator / simulator** (`scripts/`) | `device_emulator.py` = one fw 2.0 board incl. its MCP tools; `fleet_simulator.py` = N boards for load. |
 
 > **Live lab:** 2× ESP32-S3 (MQTT) + 1× Pico 2 (serial bridge) in `site=lab`. The lab network is its own
@@ -45,8 +45,8 @@ Classification: PUBLIC | Building Tomorrow, Today. | Anything is Possible with G
 ```powershell
 cd E:\.claude\Ionity\.ESP32-MCP
 python -m venv .venv; .\.venv\Scripts\Activate.ps1
-pip install -r server\requirements.txt
-python server\run.py                                   # dashboard, API, MCP, flasher on :8099
+pip install -r services\fleet-host\server\requirements.txt
+python services\fleet-host\server\run.py                                   # dashboard, API, MCP, flasher on :8099
 python scripts\device_emulator.py                      # a fw 2.0 board, incl. its MCP tools (needs the broker)
 python scripts\fleet_simulator.py --devices 250        # load: 250 boards over HTTP
 ```
@@ -107,7 +107,7 @@ The scripts resolve the project folder from their own location (override with `I
 them). Every request needs `Authorization: Bearer <IONITY_MCPO_API_KEY>`; the key is read from
 `.env` in-process, so it never appears on a command line. Device-changing MCP tools on the fleet
 server (`send_command`, `device_call_tool`, ...) need `Authorization: Bearer <IONITY_ADMIN_TOKEN>`;
-read-only tools and the dashboard stay open on the LAN. `server/mcp_stdio_proxy.py` adds the admin
+read-only tools and the dashboard stay open on the LAN. `services/fleet-host/server/mcp_stdio_proxy.py` adds the admin
 token automatically for local stdio clients such as Claude Desktop.
 
 ## LAN DNS visibility and the YouTube alarm
@@ -285,7 +285,7 @@ E:\.claude\Ionity\.ESP32-MCP
 ├── server/                  FastAPI fleet host + MCP gateway (:8099)
 │   └── app/{api,ingest,storage,fleet,mcp,integrations}
 ├── devices/pi-agent/        Raspberry Pi Zero / Linux agent + systemd installer
-├── modules/network-sentinel/  Kelvin Drive network sentinel service (:8000)
+├── services/network-sentinel/  Kelvin Drive network sentinel service (:8000)
 ├── dashboard/               fleet dashboard served at /
 ├── scripts/                 start_lab, add_device, provision, device_emulator, fleet_simulator, serial bridge
 ├── packaging/               testers package sources (.cmd, MANUAL.html, tools/, bundled broker)

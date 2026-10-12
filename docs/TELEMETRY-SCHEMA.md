@@ -69,7 +69,7 @@ These drive the built-in alert engine. Reuse them with the same units.
 | `free_heap_bytes` | bytes | `< IONITY_ALERT_FREE_HEAP_BYTES` (default 20000) |
 
 Anything else is stored and charted but not alerted on. To add an alert, append
-one tuple to `checks` in `server/app/fleet/registry.py:_evaluate_alerts`.
+one tuple to `checks` in `services/fleet-host/server/app/fleet/registry.py:_evaluate_alerts`.
 
 ## Status payload (retained + Last Will)
 

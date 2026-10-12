@@ -5,7 +5,7 @@ AEDI - IONITY GLOBAL | DOC-2026-09-ESP32MCP-DD | v2.0.0 | 2026-09-29 SAST | Poli
 
 # Datadog
 
-The fleet host forwards; boards never hold an API key. Code: `server/app/integrations/datadog.py`.
+The fleet host forwards; boards never hold an API key. Code: `services/fleet-host/server/app/integrations/datadog.py`.
 
 ## Enable
 

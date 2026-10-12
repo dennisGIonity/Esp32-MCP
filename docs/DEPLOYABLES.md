@@ -13,7 +13,7 @@ Every node speaks one protocol, so the fleet server, dashboard and MCP tools tre
 | **Raspberry Pi Pico 2 / Pico** (no radio) | `firmware/legacy-arduino/Pico_MCP_Node` (fw 1.1.0) | USB serial → `scripts/serial_bridge.py` → HTTP | ping, identify, dns_probe (via host) | Arduino IDE, board *Raspberry Pi Pico 2* |
 | **Pico W / Pico 2 W** | same sketch, W board selected | WiFi → HTTP + serial | via serial bridge | Arduino IDE, board *Pico 2 W* |
 | **Raspberry Pi Zero W / Zero 2 W / any Linux SBC** | `devices/pi-agent` (agent 1.0.0) | WiFi/Ethernet → MQTT (HTTP fallback) | ping, identify (ACT LED), reboot, set_meta, dns_probe | `sudo bash install.sh` on the Pi → systemd service |
-| **ESP32-S3 network sentinel** (Kelvin Drive) | `firmware/legacy-arduino/Esp32_Network_Sentinel` | HTTP → `modules/network-sentinel` (:8000) | — | Arduino IDE |
+| **ESP32-S3 network sentinel** (Kelvin Drive) | `firmware/legacy-arduino/Esp32_Network_Sentinel` | HTTP → `services/network-sentinel` (:8000) | — | Arduino IDE |
 
 ## The protocol (all fleet nodes)
 ```

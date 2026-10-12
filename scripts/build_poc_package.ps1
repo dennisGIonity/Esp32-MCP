@@ -25,7 +25,7 @@ Copy-Item "$Root\packaging\poc\*.cmd" $dest -Force
 Copy-Item "$Root\packaging\poc\tools\poc.ps1" "$dest\tools\" -Force
 New-Item -ItemType Directory -Force "$dest\scripts" | Out-Null
 Copy-Item "$Root\scripts\net_watch.py", "$Root\scripts\run_mcpo.py" "$dest\scripts\" -Force
-if (-not (Test-Path "$dest\server\mcp_stdio_proxy.py")) { Copy-Item "$Root\server\mcp_stdio_proxy.py" "$dest\server\" }
+if (-not (Test-Path "$dest\server\mcp_stdio_proxy.py")) { Copy-Item "$Root\services\fleet-host\server\mcp_stdio_proxy.py" "$dest\server\" }
 $bad = @(Get-ChildItem $dest -Recurse -Force -File | Where-Object { $_.Name -in @('.env', 'secrets.h', 'fleet.db') -or $_.FullName -match '\\\.venv|\\dist-lab\\' })
 if ($bad.Count) { throw ('private files in the kit: ' + (($bad | ForEach-Object { $_.FullName }) -join ', ')) }
 "POC kit: $dest  (from $($kit.Name); $(@(Get-ChildItem $dest -Recurse -File).Count) files, no secrets)"

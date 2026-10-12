@@ -559,8 +559,8 @@ class DnsService:
         manual: dict[str, str] = {}
         try:
             import json as _json
-            from pathlib import Path as _Path
-            cfg = _Path(__file__).parents[3] / "config" / "device_labels.json"    # resolve() would hit the disk on the loop
+            from app.config import ROOT as _ROOT
+            cfg = _ROOT / "config" / "device_labels.json"    # resolve() would hit the disk on the loop
             text = await asyncio.to_thread(cfg.read_text, encoding="utf-8")   # keep file I/O off the loop
             for k, v in _json.loads(text).items():
                 if re.fullmatch(r"[0-9a-fA-F]{2}([-:][0-9a-fA-F]{2}){5}", k) and v.get("label"):

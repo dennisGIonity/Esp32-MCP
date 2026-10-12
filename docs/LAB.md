@@ -41,7 +41,7 @@ That brings up, in order:
 | # | Service | Port | Owned by |
 |---|---|---|---|
 | 1 | MQTT broker (amqtt) | 1883 | **Ionity-Lab**: `broker\run_broker.py` in its `.venv` |
-| 2 | Fleet server + dashboard + MCP + LAN DNS | 8099, 53/udp | ESP32-MCP: `server\run.py` in `.venv` |
+| 2 | Fleet server + dashboard + MCP + LAN DNS | 8099, 53/udp | ESP32-MCP: `services\fleet-host\server\run.py` in `.venv` |
 | 3 | Serial bridge | — | ESP32-MCP: `scripts\serial_bridge.py` in `.venv` |
 
 The MCP bridge in Claude also runs `start_lab.ps1` if it finds the server down.

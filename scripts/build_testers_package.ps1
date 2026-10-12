@@ -33,8 +33,8 @@ function Copy-Tree($src, $dst, [string[]]$excludeDirs = @(), [string[]]$excludeF
 # package front matter (.cmd, manual, readme, tools)
 Copy-Tree 'packaging\testers' '.'
 # application
-Copy-Tree 'server' 'server' -excludeFiles @('*.db', '*.log')
-Copy-Tree 'dashboard' 'dashboard'
+Copy-Tree 'services\fleet-host\server' 'server' -excludeFiles @('*.db', '*.log')
+Copy-Tree 'services\fleet-host\dashboard' 'dashboard'
 Copy-Tree 'apps\flasher-legacy\dist' 'flasher\dist' -excludeFiles @('*.map')
 Copy-Tree 'firmware\dist' 'firmware\dist'
 Copy-Tree 'devices\pi-agent' 'devices\pi-agent'

@@ -87,7 +87,7 @@ else {
   # python.exe with BOTH streams redirected, not pythonw: under pythonw sys.stdout is
   # None and uvicorn's log formatter dies at startup ("Unable to configure formatter
   # 'default'") - the server then never listens and the MCP tools go dark.
-  Start-Detached "$root\.venv\Scripts\python.exe" "`"$root\server\run.py`"" "$logs\fleet_out.txt" "$logs\fleet_err.txt" $root | Out-Null
+  Start-Detached "$root\.venv\Scripts\python.exe" "`"$root\services\fleet-host\server\run.py`"" "$logs\fleet_out.txt" "$logs\fleet_err.txt" $root | Out-Null
   for ($i = 0; $i -lt 40 -and -not (Listening 8099); $i++) { Start-Sleep 1 }
 }
 

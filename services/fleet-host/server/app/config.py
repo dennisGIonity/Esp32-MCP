@@ -7,7 +7,24 @@ from __future__ import annotations
 from pathlib import Path
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-ROOT = Path(__file__).resolve().parents[2]
+
+def _find_root() -> Path:
+    """Repo root (services/fleet-host/server/...), flat kit root (server/...) or the container's /app.
+
+    Found by markers rather than a fixed depth, so the same code runs in every layout."""
+    import os
+    env = os.environ.get("IONITY_ROOT")
+    if env:
+        return Path(env).resolve()
+    here = Path(__file__).resolve()
+    for p in here.parents:
+        if any((p / m).exists() for m in (".env", ".env.example", "SETUP.cmd", ".git")):
+            return p
+    return here.parents[2]
+
+
+ROOT = _find_root()
+SERVICE_DIR = Path(__file__).resolve().parents[2]   # holds server/ and dashboard/ (repo: services/fleet-host)
 
 
 class Settings(BaseSettings):

@@ -13,7 +13,8 @@ import pytest
 
 from app.models import TelemetryIn, StatusIn
 
-AGENT = Path(__file__).resolve().parents[2] / "devices" / "pi-agent" / "ionity_agent.py"
+AGENT = next(p / "devices" / "pi-agent" / "ionity_agent.py" for p in Path(__file__).resolve().parents
+             if (p / "devices" / "pi-agent" / "ionity_agent.py").exists())   # repo or flat kit layout
 spec = importlib.util.spec_from_file_location("ionity_agent", AGENT)
 ia = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(ia)

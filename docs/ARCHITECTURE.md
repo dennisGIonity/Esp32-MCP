@@ -78,7 +78,7 @@ now live in `.env` and are evaluated on ingest.
 
 ## Storage migration path
 
-Everything above `Store` (`server/app/storage/base.py`) is driver-agnostic.
+Everything above `Store` (`services/fleet-host/server/app/storage/base.py`) is driver-agnostic.
 Moving to TimescaleDB is a new `TimescaleStore(Store)` plus one config flag:
 
 ```sql
@@ -123,7 +123,7 @@ Two MCP tiers, deliberately split (fw 2.0, 2026-09-29):
 
 | Tier | Runs on | Here | Role |
 |---|---|---|---|
-| **Host MCP** (AI orchestrator + device bridge) | workstation / gateway | `server/app/mcp` (FastAPI, JSON-RPC over HTTP + stdio bridge) | Fleet-wide reasoning, history, alerts, commands; `device_call_tool` turns an agent's call into one compact MQTT message to one board. |
+| **Host MCP** (AI orchestrator + device bridge) | workstation / gateway | `services/fleet-host/server/app/mcp` (FastAPI, JSON-RPC over HTTP + stdio bridge) | Fleet-wide reasoning, history, alerts, commands; `device_call_tool` turns an agent's call into one compact MQTT message to one board. |
 | **On-device MCP** | every ESP32 | `DeviceMcp.ino` | Direct hardware tools: telemetry incl. heap + loop timing, edge inference, actuators, state modes. |
 
 Why the bridge: the board never parses an HTTP/SSE MCP session from the internet, never holds cloud

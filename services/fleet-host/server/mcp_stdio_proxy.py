@@ -39,7 +39,20 @@ import urllib.request
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent            # ...\server
-ROOT = HERE.parent                                # ...\.ESP32-MCP
+
+
+def _find_root() -> Path:
+    """Repo root (services/fleet-host/server) or flat kit root (server/), found by markers."""
+    env = os.environ.get("IONITY_ROOT")
+    if env:
+        return Path(env).resolve()
+    for d in HERE.parents:
+        if any((d / m).exists() for m in (".env", ".env.example", "SETUP.cmd", ".git")):
+            return d
+    return HERE.parent
+
+
+ROOT = _find_root()                               # repo or kit root (.env, .venv live here)
 sys.path.insert(0, str(HERE))
 
 URL = os.environ.get("IONITY_MCP_URL", "http://127.0.0.1:8099/api/v1/mcp/rpc")
@@ -117,7 +130,8 @@ def try_autostart() -> None:
         return
 
     flags = 0x00000008 | 0x08000000                # DETACHED | NO_WINDOW
-    lab = ROOT / "scripts" / "start_lab.ps1"
+    lab = next((c for c in (ROOT / "tools" / "scripts" / "start_lab.ps1", ROOT / "scripts" / "start_lab.ps1")
+                if c.exists()), ROOT / "scripts" / "start_lab.ps1")
     try:
         if lab.exists():
             # Bring up the whole lab (broker + server + serial bridge), not
@@ -172,10 +186,23 @@ def forward(payload: dict) -> dict | None:
     return json.loads(raw) if raw else None
 
 
+def _start_script() -> str:
+    """start_lab.ps1 in the repo (tools/scripts) or start script of a flat kit (scripts)."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    p = here
+    for _ in range(6):
+        p = os.path.dirname(p)
+        for rel in (("tools", "scripts", "start_lab.ps1"), ("scripts", "start_lab.ps1"), ("START.cmd",)):
+            c = os.path.join(p, *rel)
+            if os.path.exists(c):
+                return c
+    return os.path.join(os.path.dirname(here), "scripts", "start_lab.ps1")
+
+
 UNREACHABLE = (
     "The Ionity fleet server is not running, so live fleet data is "
     "unavailable. Start it with:  powershell -ExecutionPolicy Bypass -File "
-    + os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "scripts", "start_lab.ps1")
+    + _start_script()
 )
 
 

@@ -15,7 +15,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from app.config import settings, ROOT
+from app.config import settings, ROOT, SERVICE_DIR
 from app.storage.sqlite_store import SQLiteStore
 from app.fleet.registry import FleetRegistry
 from app.ingest.mqtt_bridge import MqttBridge
@@ -32,7 +32,7 @@ logging.basicConfig(
 )
 log = logging.getLogger("ionity.main")
 
-DASHBOARD_DIR = ROOT / "dashboard"
+DASHBOARD_DIR = SERVICE_DIR / "dashboard"
 FLASHER_DIR = next((p for p in (ROOT / "apps" / "flasher-legacy" / "dist", ROOT / "flasher" / "dist") if p.exists()),
                    ROOT / "flasher" / "dist")   # repo layout first, then the flat kit / container layout
 

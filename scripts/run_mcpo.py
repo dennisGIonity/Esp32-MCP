@@ -40,7 +40,7 @@ def main() -> None:
         args += ["--api-key", key, "--strict-auth"]  # in-process only, never on a command line
     else:
         print("WARNING: IONITY_MCPO_API_KEY is not set - mcpo is open to the whole LAN", file=sys.stderr)
-    args += ["--", str(ROOT / ".venv" / "Scripts" / "python.exe"), str(ROOT / "server" / "mcp_stdio_proxy.py")]
+    args += ["--", str(ROOT / ".venv" / "Scripts" / "python.exe"), str(next((p for p in (ROOT / "services" / "fleet-host" / "server" / "mcp_stdio_proxy.py", ROOT / "server" / "mcp_stdio_proxy.py") if p.exists()), ROOT / "server" / "mcp_stdio_proxy.py"))]
     sys.argv = args
     from mcpo import app
     app()

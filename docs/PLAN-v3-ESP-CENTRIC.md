@@ -52,7 +52,7 @@ any LAN resolver. The ESP reports such devices as "seen, DNS silent".
 | Area | Today (v2.2.0) | Spec v3 | Action |
 |---|---|---|---|
 | Firmware tools | get_device_info, read_telemetry, run_inference, set_actuator, set_state_mode, identify | + get_dns_activity, query_dns_log, get_network_stats, get_local_devices, set/get_flag_rules | Add NetObserve module |
-| DNS capture | Host `server/app/ingest/dns_resolver.py` (laptop is the resolver) | On the ESP | Port resolver + flag logic to firmware; host resolver becomes optional lab fallback, off by default |
+| DNS capture | Host `services/fleet-host/server/app/ingest/dns_resolver.py` (laptop is the resolver) | On the ESP | Port resolver + flag logic to firmware; host resolver becomes optional lab fallback, off by default |
 | LAN device list | Host LAN sweep (`/api/v1/network/overview`, `list_lan_devices`) | Per-ESP `get_local_devices` | Retire host sweep from defaults and dashboard |
 | Flag rules | Host watch list (YouTube/TikTok) | Rules pushed to ESPs, evaluated on-device | New `manage_flag_rules` fleet tool + NVS-stored rules |
 | Network-sentinel module | Separate host-side probe stack + separate sentinel firmware | Absorb probes into node firmware | Fold latency/loss probes into `get_network_stats`; retire module |

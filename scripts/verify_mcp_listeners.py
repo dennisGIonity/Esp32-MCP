@@ -174,7 +174,7 @@ def host_http(mcp: str):
 # -------------------------------------------------------------- L2 MCP / stdio
 def host_stdio(http_summary):
     env = dict(os.environ, IONITY_AUTOSTART="0")
-    p = subprocess.Popen([sys.executable, os.path.join(ROOT, "server", "mcp_stdio_proxy.py")],
+    p = subprocess.Popen([sys.executable, os.path.join(ROOT, "services", "fleet-host", "server", "mcp_stdio_proxy.py")],
                          stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
                          text=True, env=env, cwd=ROOT)
     q: queue.Queue = queue.Queue()
