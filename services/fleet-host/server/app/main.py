@@ -13,7 +13,7 @@ from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.config import settings, ROOT, SERVICE_DIR
@@ -40,8 +40,13 @@ logging.basicConfig(
 log = logging.getLogger("ionity.main")
 
 DASHBOARD_DIR = SERVICE_DIR / "dashboard"
+# The board portal (apps/portal: flash, provision, fleet, live DNS, watchlist).
+# Repo layout first, then the flat kit / container layout.
+PORTAL_DIR = next((p for p in (ROOT / "apps" / "portal" / "dist", ROOT / "portal" / "dist") if p.exists()),
+                  ROOT / "portal" / "dist")
+# DEPRECATED: the 2.x React flasher, served only if someone still builds it.
 FLASHER_DIR = next((p for p in (ROOT / "apps" / "flasher-legacy" / "dist", ROOT / "flasher" / "dist") if p.exists()),
-                   ROOT / "flasher" / "dist")   # repo layout first, then the flat kit / container layout
+                   ROOT / "flasher" / "dist")
 
 
 async def broadcaster(app: FastAPI) -> None:
@@ -141,8 +146,8 @@ async def lifespan(app: FastAPI):
     log.info(" HTTP      http://%s:%s", settings.host, settings.port)
     log.info(" Dashboard http://%s:%s/", settings.host, settings.port)
     log.info(" MCP       http://%s:%s/mcp  (Streamable HTTP; v2 JSON: /api/v1/mcp/rpc)", settings.host, settings.port)
-    log.info(" Flasher   http://%s:%s/flasher/  (%s)", settings.host, settings.port,
-             "built" if FLASHER_DIR.exists() else "not built: cd apps/flasher-legacy && npm run build")
+    log.info(" Portal    http://%s:%s/portal/  (%s)", settings.host, settings.port,
+             "built" if PORTAL_DIR.exists() else "not built: npm run build -w @ionity/portal")
     log.info(" Datadog   %s", f"-> api.{settings.dd_site} env={settings.dd_env}"
              if datadog.enabled else "off (IONITY_DD_ENABLED / IONITY_DD_API_KEY)")
     log.info(" MQTT      %s:%s (enabled=%s)", settings.mqtt_host,
@@ -219,7 +224,7 @@ async def dashboard_no_cache(request, call_next):
     after an update (cheap: unchanged files come back as 304)."""
     response = await call_next(request)
     p = request.url.path
-    if p == "/" or p.startswith("/static/") or p == "/flasher/" or p == "/flasher/index.html":
+    if p == "/" or p.startswith("/static/") or p in ("/portal/", "/portal/index.html", "/flasher/", "/flasher/index.html"):
         response.headers["Cache-Control"] = "no-cache"
     return response
 
@@ -232,7 +237,21 @@ if DASHBOARD_DIR.exists():
         return FileResponse(str(DASHBOARD_DIR / "index.html"))
 
 
+if PORTAL_DIR.exists():
+    # The board portal. Web Serial works on http://localhost (and the host's own
+    # page needs no CORS for the fleet API / WebSockets), so the lab needs no
+    # certificate for it. Hashed assets are immutable; index.html revalidates.
+    app.mount("/portal", StaticFiles(directory=str(PORTAL_DIR), html=True), name="portal")
+
+    @app.get("/portal", include_in_schema=False)
+    async def portal_slash():
+        return RedirectResponse("/portal/", status_code=308)
+
 if FLASHER_DIR.exists():
-    # The React flasher (flasher/, `npm run build`). Web Serial works on
-    # http://localhost, so the lab needs no certificate for it.
     app.mount("/flasher", StaticFiles(directory=str(FLASHER_DIR), html=True), name="flasher")
+elif PORTAL_DIR.exists():
+    # Old bookmarks and printed labels point at /flasher/: the portal replaces it.
+    @app.get("/flasher", include_in_schema=False)
+    @app.get("/flasher/{rest:path}", include_in_schema=False)
+    async def flasher_moved(rest: str = ""):
+        return RedirectResponse("/portal/", status_code=308)

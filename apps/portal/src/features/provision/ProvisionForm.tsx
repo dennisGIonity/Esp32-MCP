@@ -64,6 +64,7 @@ export function ProvisionForm(props: Props) {
   const [scanState, setScanState] = useState<{ busy: boolean; text: string }>({ busy: false, text: '' });
   const [hostApiDraft, setHostApiDraft] = useState(props.hostApi);
   const [hostApiError, setHostApiError] = useState<string | undefined>(undefined);
+  useEffect(() => setHostApiDraft(props.hostApi), [props.hostApi]);
   const controls = useRef(new Map<FormField, HTMLElement>());
   const formErrorRef = useRef<HTMLParagraphElement>(null);
 

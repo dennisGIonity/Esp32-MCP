@@ -12,7 +12,7 @@ export default defineConfig({
   plugins: [react(), tailwindcss()],
   server: {
     // `npm run dev`: talk to a local fleet host / gateway without CORS.
-    proxy: { '/api': 'http://localhost:8099' },
+    proxy: { '/api': 'http://localhost:8099', '/ws': { target: 'ws://localhost:8099', ws: true } },
   },
   build: {
     target: 'es2022',

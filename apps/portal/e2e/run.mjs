@@ -10,6 +10,11 @@
  *   S3 validation: errors on fields, focus, aria-invalid, live region, error cleared on input
  *   S4 wrong Wi-Fi password: failure on the right step and field, then fixed
  *   S5 a browser without Web Serial gets an explanation, not a broken page
+ *   S6 the REAL fleet host (Python, temp DB) serving the portal at /portal/, fed real
+ *      EWP/1 frames by a simulated NetObserve node: fleet card (online, RSSI, heap,
+ *      uptime, fw), quick actions, flagged banner, live DNS push + filters + history,
+ *      watchlist add/validate with the admin token; axe on every fleet view
+ *      (needs the server's Python: PYTHON=/path/to/venv/bin/python, default python3)
  * Every scenario: no console errors, secrets never in the page text, terminal or saved log.
  * S1 also: axe-core (WCAG 2.2 AA + best practice), desktop and 390 px screenshots.
  *
@@ -20,6 +25,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createInterface } from 'node:readline';
 import { chromium } from 'playwright';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -30,6 +36,11 @@ const require = createRequire(import.meta.url);
 const axePath = require.resolve('axe-core/axe.min.js');
 const PORT = 4173;
 const BASE = `http://localhost:${PORT}/`;
+
+// Optional lookups the portal makes and handles when they are missing: a firmware
+// release (none is built in the test tree) and the host's provisioning defaults
+// (vite preview proxies /api to a fleet host that is not running in S1-S5).
+const OPTIONAL = /\/(api\/v1\/firmware\/manifest|firmware\/manifest\.json|api\/v1\/provisioning\/defaults)$/;
 
 const results = [];
 let failures = 0;
@@ -68,7 +79,7 @@ async function open(browser, path, { viewport = { width: 1440, height: 900 }, in
   page.on('console', (m) => {
     // Chromium logs every HTTP error status; the mocked host API answers 404 on purpose
     // while it "has not seen" the board yet. Any other error fails the scenario.
-    if (m.type() === 'error' && !/\/api\/v1\/devices\//.test(m.location().url)) errors.push(`${m.text()} @ ${m.location().url}`);
+    if (m.type() === 'error' && !/\/api\/v1\/devices\//.test(m.location().url) && !OPTIONAL.test(m.location().url)) errors.push(`${m.text()} @ ${m.location().url}`);
   });
   page.on('pageerror', (e) => errors.push(`pageerror: ${e.message}`));
   if (init) await page.addInitScript(init);
@@ -112,6 +123,52 @@ async function assertNoSecret(page, secret, where) {
   check(!(await terminalText(page)).includes(secret), `${where}: secret visible in the terminal`);
 }
 
+/** The real fleet host + simulated node (e2e/fleet_host.py). */
+async function startFleetHost() {
+  const proc = spawn(process.env.PYTHON ?? 'python3', [join(here, 'fleet_host.py')], { stdio: ['pipe', 'pipe', 'pipe'] });
+  let err = '';
+  proc.stderr.on('data', (d) => (err += d));
+  const lines = createInterface({ input: proc.stdout });
+  const waiters = [];
+  const seen = [];
+  lines.on('line', (l) => {
+    seen.push(l);
+    for (const w of [...waiters]) if (w.test(l)) w.resolve(l), waiters.splice(waiters.indexOf(w), 1);
+  });
+  const waitLine = (re, ms = 30_000) =>
+    new Promise((resolve, reject) => {
+      const hit = seen.find((l) => re.test(l));
+      if (hit) return resolve(hit);
+      const t = setTimeout(() => reject(new Error(`fleet host: no ${re} in ${ms} ms\n${seen.join('\n')}\n${err.slice(-3000)}`)), ms);
+      waiters.push({ test: (l) => re.test(l) || /^ERROR/.test(l), resolve: (l) => (clearTimeout(t), /^ERROR/.test(l) ? reject(new Error(l + '\n' + err)) : resolve(l)) });
+      proc.once('exit', (code) => reject(new Error(`fleet host exited (${code})\n${err.slice(-3000)}`)));
+    });
+  const [, base, token] = (await waitLine(/^READY /, 60_000)).split(' ');
+  return {
+    base,
+    token,
+    async send(cmd) {
+      proc.stdin.write(`${cmd}\n`);
+      await waitLine(new RegExp(`^OK ${cmd}$`));
+      seen.splice(0); // the next OK of the same command is a new one
+    },
+    async stop() {
+      proc.stdin.end('quit\n');
+      await new Promise((r) => (proc.exitCode !== null ? r() : proc.once('exit', r)));
+    },
+  };
+}
+
+async function axeCheck(page, name) {
+  await page.addScriptTag({ path: axePath });
+  const axe = await page.evaluate(async () => {
+    const r = await globalThis.axe.run(document, { runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa', 'best-practice'] } });
+    return r.violations.map((v) => ({ id: v.id, impact: v.impact, help: v.help, nodes: v.nodes.length, targets: v.nodes.slice(0, 3).map((n) => n.target.join(' ')) }));
+  });
+  writeFileSync(join(out, `${name}-axe.json`), JSON.stringify(axe, null, 2));
+  check(axe.length === 0, `${name} axe violations: ${axe.map((v) => `${v.id}(${v.impact}) x${v.nodes} ${v.targets.join(' | ')}`).join('; ')}`);
+}
+
 async function scenario(name, fn) {
   const t0 = Date.now();
   try {
@@ -126,7 +183,8 @@ async function scenario(name, fn) {
 }
 
 const preview = await startPreview();
-const browser = await chromium.launch();
+// CHROMIUM_PATH: a preinstalled browser when the pinned Playwright build is not downloaded (CI images, sandboxes)
+const browser = await chromium.launch(process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : {});
 console.log(`portal e2e against ${BASE}`);
 
 try {
@@ -134,6 +192,10 @@ try {
   await scenario('S1 fw 3 native USB: provision, test, reboot through re-enumeration, online, listed', async () => {
     const { context, page, errors } = await open(browser, '?simulate=v2-usb');
     let hostCalls = 0;
+    // The host's provisioning defaults pre-fill untouched, empty fields (site/group here).
+    await page.route('**/api/v1/provisioning/defaults', (route) =>
+      route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ server: '192.168.0.3', mdns_host: 'ionity-fleet.local', mqtt_port: 1883, http_port: 8099, site: 'lab', group: 'bench', require_token: false, admin: false, warning: null }) }),
+    );
     await page.route('**/api/v1/devices/**', async (route) => {
       hostCalls++;
       if (hostCalls === 1) return route.fulfill({ status: 404, contentType: 'application/json', body: '{"detail":"unknown device"}' });
@@ -169,6 +231,8 @@ try {
     check(sim.uuid === uuid, 'device UUID stored');
     check(sim.host === 'mqtt://192.168.0.3:1883', `host_url stored as ${sim.host}`);
     check(sim.reboots === 1, 'board rebooted once');
+    const site = await page.evaluate(() => globalThis.__IONITY_SIM__.board().nvs.get('site'));
+    check(site === 'lab', `provisioning defaults pre-filled the site (${site})`);
     const status = await page.getByTestId('connection-status').innerText();
     check(/reattached 1×/.test(status), `session reattached after re-enumeration (${status})`);
 
@@ -320,6 +384,116 @@ try {
     check(await page.getByRole('button', { name: 'Connect board' }).isDisabled(), 'Connect disabled');
     check(errors.length === 0, `console errors: ${errors.join(' | ')}`);
     await context.close();
+  });
+  // ------------------------------------------------------------------------------------------ S6
+  await scenario('S6 real fleet host at /portal/: fleet status, actions, flagged banner, live DNS, watchlist', async () => {
+    const host = await startFleetHost();
+    const PORTAL = `${host.base}/portal/`;
+    const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+    const page = await context.newPage();
+    const errors = [];
+    page.on('console', (m) => {
+      if (m.type() === 'error' && !OPTIONAL.test(m.location().url)) errors.push(`${m.text()} @ ${m.location().url}`);
+    });
+    page.on('pageerror', (e) => errors.push(`pageerror: ${e.message}`));
+    try {
+      const legacy = await fetch(`${host.base}/flasher/`, { redirect: 'manual' });
+      check(legacy.status === 308 && legacy.headers.get('location') === '/portal/', `/flasher/ redirects to /portal/ (${legacy.status})`);
+
+      // -- Fleet --------------------------------------------------------------------
+      await page.goto(`${PORTAL}#fleet`);
+      const card = page.locator('[data-testid=fleet-card][data-device="esp32-98a316e5d18c"]');
+      await card.waitFor({ timeout: 15_000 });
+      const facts = await card.innerText();
+      for (const want of ['lounge-node', '-58 dBm', '177 kB', '1h 2m', '3.1.0', 'EWP/1', '192.168.0.50'])
+        check(facts.includes(want), `fleet card shows ${want}: ${facts.replace(/\s+/g, ' ')}`);
+      check((await card.getAttribute('data-health')) === 'online', 'board online');
+      check(await card.getByRole('button', { name: 'Reboot…' }).isDisabled(), 'reboot needs the admin token');
+      await card.getByRole('button', { name: 'Ping' }).click();
+      const ping = await card.getByTestId('action-result').innerText();
+      // HTTP-ingest nodes get tool calls over MQTT only: the host says so instead of hanging.
+      check(/MQTT|ms/.test(ping), `ping result reported (${ping})`);
+
+      // the flagged banner, from the stored episode + the snapshot
+      const banner = page.getByTestId('flag-banner');
+      await banner.waitFor({ timeout: 10_000 });
+      const btext = await banner.innerText();
+      check(/Kitchen TV/.test(btext) && /YouTube/.test(btext), `banner names device + category: ${btext}`);
+
+      await page.getByTestId('host-token').fill(host.token);
+      check(!(await card.getByRole('button', { name: 'Reboot…' }).isDisabled()), 'token enables reboot');
+      await card.getByRole('button', { name: 'Reboot…' }).click();
+      const dialog = page.getByRole('dialog', { name: /Reboot lounge-node/ });
+      await dialog.waitFor();
+      check(await page.getByRole('button', { name: 'Cancel' }).evaluate((el) => el === document.activeElement), 'Cancel has focus');
+      await page.keyboard.press('Escape');
+      await dialog.waitFor({ state: 'hidden' });
+      await axeCheck(page, 'S6-fleet');
+      await page.screenshot({ path: join(out, 'S6-fleet.png'), fullPage: true });
+
+      // -- Network activity ------------------------------------------------------------
+      await page.getByTestId('tab-network').click();
+      check(page.url().endsWith('#network'), 'tab in the URL');
+      await page.locator('[data-testid=dns-row]', { hasText: 'www.youtube.com' }).first().waitFor({ timeout: 10_000 });
+      const yt = page.locator('[data-testid=dns-row]', { hasText: 'www.youtube.com' }).first();
+      check((await yt.getAttribute('data-flagged')) === '1' && /Kitchen TV/.test(await yt.innerText()), 'YouTube lookup flagged and attributed');
+      const before = await page.locator('[data-testid=dns-row]').count();
+      await host.send('batch');
+      await page.locator('[data-testid=dns-row]', { hasText: 'rr1---sn-abc.googlevideo.com' }).first().waitFor({ timeout: 10_000 });
+      check((await page.locator('[data-testid=dns-row]').count()) >= before + 3, 'live batch pushed over /ws/events');
+      await page.waitForFunction(() => /\b4[1-9] hits\b/.test(document.querySelector('[data-testid=flag-banner]')?.textContent ?? ''), null, { timeout: 10_000 });
+
+      await page.getByTestId('filter-domain').fill('*.googlevideo.com');
+      const g = await page.locator('[data-testid=dns-row]').allInnerTexts();
+      check(g.length >= 1 && g.every((t) => t.includes('googlevideo.com')), `domain filter (${g.length} rows)`);
+      await page.getByTestId('filter-domain').fill('');
+      await page.getByTestId('filter-flagged').check();
+      const flagged = await page.locator('[data-testid=dns-row]').evaluateAll((els) => els.map((e) => e.getAttribute('data-flagged')));
+      check(flagged.length >= 3 && flagged.every((f) => f === '1'), 'flagged-only filter');
+      await page.getByTestId('filter-flagged').uncheck();
+      await page.getByTestId('filter-device').fill('laptop');
+      const lap = await page.locator('[data-testid=dns-row]').allInnerTexts();
+      check(lap.length >= 1 && lap.every((t) => /laptop|192\.168\.0\.43/.test(t)), `device filter (${lap.length})`);
+      await page.getByTestId('filter-device').fill('');
+      await page.getByTestId('filter-domain').fill('googlevideo');
+      await page.getByRole('button', { name: 'Search history' }).click();
+      await page.locator('[data-testid=dns-history] [data-testid=dns-row]').first().waitFor({ timeout: 10_000 });
+      await page.getByTestId('filter-domain').fill('');
+      await axeCheck(page, 'S6-network');
+      await page.screenshot({ path: join(out, 'S6-network.png'), fullPage: true });
+
+      // -- Watchlist -----------------------------------------------------------------
+      await page.getByTestId('tab-watchlist').click();
+      await page.locator('[data-testid=rule-row][data-pattern="*.googlevideo.com"]').waitFor({ timeout: 10_000 });
+      const v0 = await page.getByTestId('watchlist-version').innerText();
+      await page.getByTestId('rule-pattern').fill('com');
+      await page.getByTestId('rule-add').click();
+      check((await page.getByTestId('rule-pattern').getAttribute('aria-invalid')) === 'true', 'a bare TLD is refused before it reaches the host');
+      await page.getByTestId('rule-pattern').fill('*.tiktokcdn.com');
+      await page.getByTestId('rule-category').fill('video_streaming:tiktok');
+      await page.getByTestId('rule-add').click();
+      await page.locator('[data-testid=rule-row][data-pattern="*.tiktokcdn.com"]').waitFor({ timeout: 10_000 });
+      await page.waitForFunction((v) => document.querySelector('[data-testid=watchlist-version]')?.textContent !== v, v0);
+      const r = await fetch(`${host.base}/api/v1/watchlist`).then((x) => x.json());
+      check(r.rules.some((x) => x.pattern === '*.tiktokcdn.com' && x.category === 'video_streaming:tiktok'), 'rule stored on the host');
+      await page.getByRole('button', { name: 'Delete rule *.tiktokcdn.com' }).click();
+      await page.locator('[data-testid=rule-row][data-pattern="*.tiktokcdn.com"]').waitFor({ state: 'detached', timeout: 10_000 });
+      await axeCheck(page, 'S6-watchlist');
+      await page.screenshot({ path: join(out, 'S6-watchlist.png'), fullPage: true });
+
+      await page.setViewportSize({ width: 390, height: 844 });
+      await page.getByTestId('tab-network').click();
+      await page.waitForTimeout(300);
+      const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+      check(overflow <= 0, `no horizontal page scroll at 390 px (overflow ${overflow}px)`);
+      await page.screenshot({ path: join(out, 'S6-mobile-network.png'), fullPage: true });
+
+      check(!(await page.evaluate(() => document.body.innerText)).includes(host.token), 'admin token never shown');
+      check(errors.length === 0, `console errors: ${errors.join(' | ')}`);
+    } finally {
+      await context.close();
+      await host.stop();
+    }
   });
 } finally {
   await browser.close();

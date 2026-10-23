@@ -146,7 +146,7 @@ function Do-Status {
     Say ("server  :{0}  UP   mqtt={1}  mcp={2} ({3} tools)" -f $Port, $h.mqtt.connected, $h.mcp.server, $h.mcp.tools) Green
     Say ("fleet   total={0} online={1} stale={2} offline={3} alerting={4}" -f $s.total_devices, $s.online, $s.stale, $s.offline, $s.alerting)
     Say ("dashboard  $Base/      (other PCs on the LAN: http://{0}:{1}/)" -f (Lan-IP), $Port) Cyan
-    Say ("flasher    $Base/flasher/")
+    Say ("portal     $Base/portal/")
     Say ("MCP        $Base/api/v1/mcp/rpc")
   } catch { Say ("server  :{0}  down  (logs: {1})" -f $Port, "$Logs\server_err.txt") Yellow }
 }
@@ -211,7 +211,7 @@ switch ($Action) {
   'stop'       { Do-Stop }
   'status'     { Do-Status }
   'open'       { Start-Process "$Base/" }
-  'flasher'    { Start-Process "$Base/flasher/"; Say 'Use Chrome or Edge - the flasher needs Web Serial.' }
+  'flasher'    { Start-Process "$Base/portal/"; Say 'Use Chrome or Edge - the portal needs Web Serial.' }
   'tests'      { Do-Tests }
   'demo'       { Do-Demo }
   'purge-demo' { Do-PurgeDemo }

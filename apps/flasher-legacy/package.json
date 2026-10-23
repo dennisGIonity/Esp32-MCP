@@ -2,7 +2,7 @@
   "name": "ionity-esp32-flasher",
   "private": true,
   "version": "2.0.0",
-  "description": "Ionity ESP32-MCP web flasher: flash, provision WiFi + MCP host over Web Serial, verify. Policy 986 AED.",
+  "description": "DEPRECATED (see DEPRECATED.md): the 2.x web flasher, replaced by apps/portal. Policy 986 AED.",
   "author": "Johan Wilhelm van Antwerp | Ionity (Pty) Ltd",
   "license": "SEE LICENSE IN ../README.md",
   "type": "module",
