@@ -1,24 +1,35 @@
-# /etc/ionity-agent.conf - Ionity fleet agent (Raspberry Pi Zero / Linux)
-# Every key is optional. Env overrides: IONITY_AGENT_<KEY> (e.g. IONITY_AGENT_SITE=lab).
+# AEDI - IONITY GLOBAL | Ionity fleet agent 2 config (/etc/ionity-agent.conf) | Policy 986 AED
+# Every key can also be set with an environment variable IONITY_AGENT_<KEY>.
 [agent]
 site = lab
 group = bench
 label =
-# Fleet server. Empty = look up mdns_host (needs avahi / libnss-mdns, default on Pi OS),
-# then server_fallback. Set an IP here to pin it.
+# Fleet host. Empty = find ionity-fleet.local over mDNS, then server_fallback.
 server =
 mdns_host = ionity-fleet.local
-server_fallback = 192.168.124.4
+server_fallback =
 mqtt_port = 1883
 http_port = 8099
-mqtt_root = ionity
 mqtt_username =
 mqtt_password =
-# Must match IONITY_FLEET_TOKEN on the server once IONITY_REQUIRE_TOKEN=true.
-fleet_token = dev-fleet-token-change-me
+# Sent as X-Fleet-Token when frames go over HTTP (no broker reachable).
+fleet_token =
 interval_s = 10
-# Default resolver for the dns_probe command (Gate^Flame in the lab).
-gf_dns = 192.168.124.3
 state_file = /var/lib/ionity-agent/state.json
-# LED used by "identify". Empty = auto (ACT, led0).
+# sysfs LED names under /sys/class/leds (empty = ACT / led0)
 led =
+alert_led =
+alert_hold_s = 20
+
+# ---- NetObserve: the Pi as the LAN's DNS forwarder ----------------------------
+# forward = listen on UDP+TCP 53 and log who asks for what (then set the router's
+# DHCP "DNS server" to this Pi's address). off = telemetry only.
+dns_mode = off
+# 1-2 IPv4 resolvers the Pi forwards to. Never the router: it would hand the
+# question straight back to this Pi.
+dns_upstream = 1.1.1.1,8.8.8.8
+dns_port = 53
+# empty = all addresses (falls back to the LAN address if a stub resolver holds 0.0.0.0:53)
+dns_bind =
+# seconds between DNS_BATCH reports; watchlist hits are reported at once
+dns_flush_s = 10
