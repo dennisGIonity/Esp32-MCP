@@ -23,6 +23,8 @@ from __future__ import annotations
 import asyncio
 import ipaddress
 import logging
+import re
+from pathlib import Path
 import socket
 import threading
 import struct
@@ -235,13 +237,13 @@ class DnsService:
                              getattr(settings, "dns_allow_from",
                                      "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,127.0.0.0/8").split(",")
                              if n.strip()]
-        self._pending: list[dict[str, Any]] = []
-        self._lock = asyncio.Lock()
-        self._writer: asyncio.Task | None = None
         self._arp: asyncio.Task | None = None
-        self._pruner: asyncio.Task | None = None
         self.recent: list[dict[str, Any]] = []      # small in-memory live feed
-        self.watch = None                           # NetworkWatch (alerts), set by main
+        self.watch = None                           # NetworkWatch (new-device alerts), set by main
+        self.pipeline = None                        # DnsPipeline (every query), set by main
+        self.arp_macs: dict[str, str] = {}          # ip -> mac from the last ARP read
+        self.labels = None                          # LabelBook, set by main
+        self._names: dict[str, tuple[str | None, float]] = {}   # ip -> (reverse name, looked up at)
         self.sweeps = 0
         self.last_sweep: dict[str, Any] = {}
 
@@ -277,9 +279,7 @@ class DnsService:
                       self.s.dns_bind, self.s.dns_port, e)
             return
 
-        self._writer = asyncio.create_task(self._writer_loop())
         self._arp = asyncio.create_task(self._arp_loop())
-        self._pruner = asyncio.create_task(self._pruner_loop())
 
     def _make_socket(self) -> socket.socket:
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -320,7 +320,7 @@ class DnsService:
 
     async def stop(self) -> None:
         self._stopping = True
-        for t in (self._writer, self._arp, self._pruner):
+        for t in (self._arp,):
             if t:
                 t.cancel()
                 try:
@@ -419,56 +419,19 @@ class DnsService:
 
     # -- logging -----------------------------------------------------------
     def _record(self, client_ip, qname, qtype, answers, rcode, cached, latency_ms):
-        row = {
-            "ts": time.time(), "client_ip": client_ip, "qname": qname,
-            "qtype": qtype, "answers": ",".join(answers[:6]) or None,
-            "rcode": rcode, "cached": cached, "blocked": 0,
-            "latency_ms": round(latency_ms, 2),
-        }
-        self._pending.append(row)
+        """Into the shared DNS pipeline (attribution, rules, flags, storage, live feed)."""
+        row = {"ts": time.time(), "client_ip": client_ip, "qname": qname, "qtype": qtype,
+               "answers": ",".join(answers[:6]) or None, "rcode": rcode, "cached": cached,
+               "latency_ms": round(latency_ms, 2)}
         self.recent.append(row)
-        if self.watch is not None:
-            try:
-                self.watch.on_query(row)
-            except Exception:
-                log.debug("watch hook failed", exc_info=True)
         if len(self.recent) > 300:
             del self.recent[: len(self.recent) - 300]
-
-    async def _writer_loop(self) -> None:
-        """Batch DNS rows to disk. A busy LAN can easily do hundreds of
-        queries a second; one commit per query would be wasteful."""
-        while True:
-            try:
-                await asyncio.sleep(2.0)
-                if not self._pending:
-                    continue
-                async with self._lock:
-                    batch, self._pending = self._pending, []
-                await self.store.insert_dns_batch(batch)
-            except asyncio.CancelledError:
-                if self._pending:
-                    try:
-                        await self.store.insert_dns_batch(self._pending)
-                    except Exception:
-                        pass
-                break
-            except Exception:
-                log.exception("dns writer error")
-
-    async def _pruner_loop(self) -> None:
-        while True:
-            try:
-                await asyncio.sleep(3600)
-                cutoff = time.time() - self.s.dns_retention_days * 86400
-                n = await self.store.prune_dns(cutoff)
-                if n:
-                    log.info("Pruned %d DNS rows older than %d days",
-                             n, self.s.dns_retention_days)
-            except asyncio.CancelledError:
-                break
-            except Exception:
-                log.exception("dns pruner error")
+        if self.pipeline is not None:
+            from app.dns.pipeline import DnsRecord
+            self.pipeline.ingest([DnsRecord(ts=row["ts"], client_ip=client_ip, qname=qname, qtype=qtype,
+                                            rcode=rcode, latency_ms=row["latency_ms"], cached=cached,
+                                            mac=self.arp_macs.get(client_ip), answers=row["answers"],
+                                            node_id="host")])
 
     # -- LAN device naming -------------------------------------------------
     async def _arp_loop(self) -> None:
@@ -522,9 +485,6 @@ class DnsService:
         return n
 
     async def _refresh_arp(self) -> None:
-        import re
-        import socket
-
         # Name the host we are running on, so it isn't "unidentified" in the list.
         try:
             from app.ingest.discovery import local_ipv4s
@@ -554,20 +514,8 @@ class DnsService:
                     fleet_names[mac_key] = d.get("label") or did
         except Exception:
             pass
-        # Anything else (the Pi, a printer) can be named by MAC in
-        # config/device_labels.json: {"88-a2-9e-27-a1-8f": {"label": "..."}}
-        manual: dict[str, str] = {}
-        try:
-            import json as _json
-            from app.config import ROOT as _ROOT
-            cfg = _ROOT / "config" / "device_labels.json"    # resolve() would hit the disk on the loop
-            text = await asyncio.to_thread(cfg.read_text, encoding="utf-8")   # keep file I/O off the loop
-            for k, v in _json.loads(text).items():
-                if re.fullmatch(r"[0-9a-fA-F]{2}([-:][0-9a-fA-F]{2}){5}", k) and v.get("label"):
-                    manual[k.lower().replace(":", "-")] = v["label"]
-        except Exception:
-            pass
-
+        # Anything else (the Pi, a printer) is named in config/device_labels.json (app/labels.py).
+        book = self.labels
         # Whole-network sweep: make every live device show up in ARP.
         if getattr(self.s, "lan_sweep_enabled", True):
             nets = self._sweep_targets()
@@ -586,17 +534,10 @@ class DnsService:
             known = set()
         first_pass = self.sweeps <= 1 or not known
 
-        proc = await asyncio.create_subprocess_exec(
-            "arp", "-a",
-            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
-        )
-        out, _ = await proc.communicate()
-        text = out.decode("utf-8", "replace")
-
-        pat = re.compile(r"(\d+\.\d+\.\d+\.\d+)\s+([0-9a-fA-F]{2}[-:][0-9a-fA-F]{2}"
-                         r"[-:][0-9a-fA-F]{2}[-:][0-9a-fA-F]{2}[-:][0-9a-fA-F]{2}"
-                         r"[-:][0-9a-fA-F]{2})")
-        for ip, mac in pat.findall(text):
+        pairs = await read_arp_table()
+        self.arp_macs = {ip: mac.lower().replace(":", "-") for ip, mac in pairs}
+        devices = []
+        for ip, mac in pairs:
             mac = mac.lower().replace(":", "-")
             # Skip broadcast and multicast pseudo-entries: they are not devices.
             # 224.0.0.0/4 is multicast; 01-00-5e is the IPv4-multicast MAC prefix.
@@ -604,16 +545,11 @@ class DnsService:
             if (ip.endswith(".255") or mac.startswith("ff-ff")
                     or mac.startswith("01-00-5e") or 224 <= first_octet <= 239):
                 continue
-            hostname = None
-            try:
-                loop = asyncio.get_running_loop()
-                hostname = (await asyncio.wait_for(
-                    loop.getnameinfo((ip, 0), 0), timeout=1.5))[0]
-                if hostname == ip:
-                    hostname = None
-            except Exception:
-                hostname = None
-            label = fleet_names.get(mac) or manual.get(mac)
+            devices.append((ip, mac))
+        await self._reverse_names([ip for ip, _ in devices])
+        for ip, mac in devices:
+            hostname = self._names.get(ip, (None, 0))[0]
+            label = fleet_names.get(mac) or (book.resolve(mac=mac, ip=ip)[0] if book else None)
             await self.store.upsert_lan_device(
                 ip=ip, mac=mac, hostname=hostname, vendor=oui_vendor(mac), label=label)
             if not first_pass and ip not in known and self.watch is not None:
@@ -623,6 +559,23 @@ class DnsService:
         n = await self.store.prune_lan(time.time() - 2 * 3600)
         if n:
             log.info("LAN map: dropped %d address(es) not seen for 2h", n)
+
+    async def _reverse_names(self, ips: list[str]) -> None:
+        """Reverse lookups, cached 10 min, 16 at a time - a sweep of 254 hosts
+        no longer waits 1.5 s per silent address in a row."""
+        now = time.time()
+        todo = [ip for ip in ips if now - self._names.get(ip, (None, 0.0))[1] > 600]
+        sem = asyncio.Semaphore(16)
+        loop = asyncio.get_running_loop()
+
+        async def one(ip: str) -> None:
+            async with sem:
+                try:
+                    name = (await asyncio.wait_for(loop.getnameinfo((ip, 0), 0), timeout=1.5))[0]
+                except Exception:                   # noqa: BLE001 - no PTR record is normal
+                    name = None
+                self._names[ip] = (None if name == ip else name, time.time())
+        await asyncio.gather(*(one(ip) for ip in todo))
 
     # -- stats -------------------------------------------------------------
     def stats(self) -> dict[str, Any]:
@@ -636,7 +589,6 @@ class DnsService:
             "cache_entries": len(self._cache),
             "cache_hit_rate": round(self.cache_hits / self.queries, 3) if self.queries else 0.0,
             "upstream_failures": self.upstream_fails,
-            "pending_writes": len(self._pending),
             "inflight": len(self._inflight),
             "dropped_overload": self.dropped,
             "refused_clients": self.refused,
@@ -646,6 +598,36 @@ class DnsService:
             "lan_sweeps": self.sweeps,
             "last_sweep": self.last_sweep,
         }
+
+
+# ---------------------------------------------------------------------------
+# ARP table: /proc/net/arp on Linux (Pi, Docker host network), `arp -a` elsewhere
+# ---------------------------------------------------------------------------
+_ARP_ANY = re.compile(r"(\d+\.\d+\.\d+\.\d+)\D+?([0-9a-fA-F]{2}(?:[-:][0-9a-fA-F]{2}){5})")
+
+
+_PROC_ARP = Path("/proc/net/arp")
+_HAS_PROC_ARP = _PROC_ARP.exists()          # Linux; decided once at import, not on the event loop
+
+
+async def read_arp_table() -> list[tuple[str, str]]:
+    """[(ip, mac)] for complete entries. No root, no extra packages."""
+    proc_arp = _PROC_ARP
+    if _HAS_PROC_ARP:
+        text = await asyncio.to_thread(proc_arp.read_text, encoding="ascii", errors="replace")
+        out = []
+        for line in text.splitlines()[1:]:
+            f = line.split()
+            if len(f) >= 4 and int(f[2], 16) & 0x2 and f[3] != "00:00:00:00:00:00":
+                out.append((f[0], f[3]))
+        return out
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "arp", "-a", stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL)
+        out_b, _ = await proc.communicate()
+    except (OSError, NotImplementedError):
+        return []
+    return _ARP_ANY.findall(out_b.decode("utf-8", "replace"))
 
 
 # ---------------------------------------------------------------------------

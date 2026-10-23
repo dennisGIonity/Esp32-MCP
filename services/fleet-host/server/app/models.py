@@ -86,6 +86,13 @@ class DeviceView(BaseModel):
     mode: str | None = None               # ACTIVE / STANDBY / INFERENCE_ACTIVE / FAILSAFE ...
     sleeping_until: float | None = None   # set while the board is in LOW_POWER_SLEEP
     mcp_url: str | None = None            # the board's own MCP endpoint (fw >= 2.0)
+    protocol: Literal["json", "ewp1"] = "json"   # fw 2.x JSON topics, or EWP/1 (fw 3 / Pi agent 2)
+    kind: Literal["esp32", "pi", "pico", "other"] = "other"
+    mac: str | None = None
+    chip: str | None = None
+    tools: list[str] = Field(default_factory=list)
+    dns: dict[str, Any] | None = None     # NetObserve forwarder counters (EWP nodes with dns_mode=forward)
+    watchlist_version: int | None = None
 
 
 class Alert(BaseModel):

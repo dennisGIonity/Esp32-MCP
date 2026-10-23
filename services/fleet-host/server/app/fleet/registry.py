@@ -160,6 +160,45 @@ class FleetRegistry:
         self._emit("on_state", d, s.state,
                    f"sleeping {s.sleep_s}s" if s.state == "sleeping" else "")
 
+    # -- EWP/1 nodes (app/ewp/hub.py) ----------------------------------------
+    def touch_node(self, device_id: str) -> None:
+        """A HELLO arrived: the node is alive even before its first telemetry."""
+        d = self.devices.get(device_id)
+        if d is None:
+            return
+        d["last_seen"] = time.time()
+        d["lwt_offline"] = False
+        d.pop("sleeping_until", None)
+        self._emit("on_state", d, "online", "hello")
+
+    def node_status(self, device_id: str, state: str, transport: str | None = None,
+                    sleep_s: int | None = None) -> None:
+        d = self.devices.get(device_id)
+        if d is None:
+            return
+        was = self._health(d)
+        if transport:
+            d["transport"] = transport
+        if state == "offline":
+            d["last_seen"] = d.get("last_seen") or time.time()
+            d["lwt_offline"] = True
+            d.pop("sleeping_until", None)
+        elif state == "sleeping":
+            d["lwt_offline"] = True
+            d["sleeping_until"] = time.time() + (sleep_s or 0)
+        else:
+            d["lwt_offline"] = False
+            d["last_seen"] = time.time()
+            d.pop("sleeping_until", None)
+        if self._health(d) != was:
+            self._emit("on_state", d, state, "")
+
+    def record_event(self, rec: dict[str, Any]) -> None:
+        """Device events (EWP EVENT frames other than DNS) next to command replies."""
+        self.cmd_results.append({"received_at": rec.get("received_at", time.time()),
+                                 "device_id": rec.get("device_id"), "cmd_id": None, "ok": True,
+                                 "detail": {"event": rec.get("event"), **(rec.get("detail") or {})}})
+
     # -- durable writer ----------------------------------------------------
     async def _writer_loop(self) -> None:
         BATCH, FLUSH_S = 200, 1.0
@@ -276,6 +315,15 @@ class FleetRegistry:
             mode=d.get("mode") or _mode_from_metrics(d.get("metrics", {})),
             sleeping_until=d.get("sleeping_until"),
             mcp_url=d.get("mcp_url"),
+            protocol=d.get("protocol") or "json",
+            kind=d.get("kind") or ("pi" if device_id.startswith("pi-") else
+                                   "pico" if device_id.startswith("pico-") else
+                                   "esp32" if device_id.startswith("esp32-") else "other"),
+            mac=d.get("mac"),
+            chip=d.get("chip"),
+            tools=list(d.get("tools") or []),
+            dns=d.get("dns"),
+            watchlist_version=(d.get("net") or {}).get("watchVer") if isinstance(d.get("net"), dict) else None,
         )
 
     def list_views(self, site=None, group=None, health=None,

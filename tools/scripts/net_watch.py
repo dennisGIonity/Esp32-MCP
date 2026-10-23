@@ -175,7 +175,7 @@ def main() -> None:
     mcp = Mcp(a.base.rstrip("/") + "/api/v1/mcp/rpc", env_value("IONITY_ADMIN_TOKEN"))
     report = Path(a.report)
     key = lambda r: (r.get("ts"), r.get("client_ip"), r.get("qname"), r.get("qtype"))
-    seen = {key(r) for r in find_rows(mcp.call("dns_recent", {"limit": 200}), "qname")}
+    seen = {key(r) for r in find_rows(mcp.call("query_dns_activity", {"limit": 200}), "qname")}
     events: list = []
     labels: dict = {}
     state = {"on": False, "last_hit": 0.0}
@@ -183,7 +183,7 @@ def main() -> None:
 
     def set_light(on: bool) -> None:
         try:
-            r = mcp.call("device_call_tool", {"device_id": a.device, "tool": "set_actuator",
+            r = mcp.call("device_call_tool", {"device_id": a.device, "tool": "set_actuator", "confirm": True,
                                               "arguments": {"channel": a.channel, "value": 1 if on else 0}}, timeout=25)
             state["on"] = on
             log(f"LED {a.channel} on {a.device} -> {'ON (red)' if on else 'off'}   board said: {json.dumps(r)[:110]}")
@@ -201,7 +201,7 @@ def main() -> None:
                     for d in find_rows(mcp.call("list_lan_devices", {}), "ip"):
                         labels[d.get("ip")] = d.get("label") or d.get("hostname") or d.get("vendor") or ""
                     last_labels = now
-                rows = find_rows(mcp.call("dns_recent", {"limit": 100}), "qname")
+                rows = find_rows(mcp.call("query_dns_activity", {"limit": 100}), "qname")
                 for r in sorted(rows, key=lambda r: r.get("ts") or 0):
                     k = key(r)
                     if k in seen:

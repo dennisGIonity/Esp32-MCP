@@ -6,6 +6,7 @@ server change:
     ionity/+/+/telemetry
     ionity/+/+/status
     ionity/+/+/cmd/result
+    ionity/ewp1/+/+/{hello,st,tm,ev,rs}   EWP/1 nodes (firmware 3, Pi agent 2) -> app/ewp/hub.py
 Publishes commands to:
     ionity/<site>/<device_id>/cmd      (or ionity/broadcast/cmd)
 
@@ -39,8 +40,9 @@ log = logging.getLogger("ionity.mqtt")
 
 
 class MqttBridge:
-    def __init__(self, registry: FleetRegistry):
+    def __init__(self, registry: FleetRegistry, ewp_hub=None):
         self.registry = registry
+        self.ewp = ewp_hub
         self.loop: asyncio.AbstractEventLoop | None = None
         self.client: paho.Client | None = None
         self.connected = False
@@ -65,6 +67,8 @@ class MqttBridge:
         c.reconnect_delay_set(min_delay=1, max_delay=30)
         self.client = c
         self.registry.command_publisher = self.publish_command
+        if self.ewp is not None:
+            self.ewp.publisher = self.publish_raw
 
         # connect_async + loop_start: never blocks startup, and paho keeps
         # retrying on its own thread until the broker appears.
@@ -88,9 +92,12 @@ class MqttBridge:
             return
         self.connected = True
         root = settings.mqtt_root
-        client.subscribe([(f"{root}/+/+/telemetry", 0),
-                          (f"{root}/+/+/status", 1),
-                          (f"{root}/+/+/cmd/result", 1)])
+        subs = [(f"{root}/+/+/telemetry", 0), (f"{root}/+/+/status", 1), (f"{root}/+/+/cmd/result", 1)]
+        if self.ewp is not None:
+            from app.ewp import ewp_protocol as P
+            subs += [(f"{P.TOPIC_ROOT}/+/+/{ch}", pol["qos"]) for ch, pol in P.CHANNEL_POLICY.items()
+                     if pol["dir"] == "up"]
+        client.subscribe(subs)
         log.info("MQTT connected to %s:%s", settings.mqtt_host, settings.mqtt_port)
 
     def _on_disconnect(self, client, userdata, *args):

@@ -69,9 +69,17 @@ async def test_every_tool_has_annotations_and_schema():
         assert t["name"] not in names, "duplicate tool name"
         names.add(t["name"])
         assert t["inputSchema"]["type"] == "object"
+        assert t["inputSchema"].get("additionalProperties") is False      # strict: unknown args refused
+        assert t["description"] and t["title"]
         a = t["annotations"]
-        assert a["readOnlyHint"] is (t["name"] not in T.MAY_WRITE_TOOLS)
-    assert T.TOOL_INDEX["send_command"]["annotations"]["destructiveHint"] is True
+        assert set(a) == {"title", "readOnlyHint", "destructiveHint", "idempotentHint", "openWorldHint"}
+    by = {t["name"]: t for t in T.MCP_TOOLS}
+    for required in ("list_devices", "get_device_telemetry", "query_dns_activity", "get_flagged_alerts",
+                     "manage_dns_watchlist", "manage_device_labels", "trigger_node_action"):
+        assert required in by
+    assert by["send_command"]["annotations"]["destructiveHint"] is True
+    assert by["trigger_node_action"]["annotations"]["readOnlyHint"] is False
+    assert by["query_dns_activity"]["annotations"]["readOnlyHint"] is True
 
 
 @pytest.mark.asyncio
@@ -81,9 +89,9 @@ async def test_missing_and_bad_args_are_tool_errors(mcp):
     assert r["result"]["isError"] and "device_id" in text(r)
     r = await srv.handle(rpc(2, "tools/call", {"name": "list_devices",
                                                 "arguments": {"health": "sleepy"}}))
-    assert r["result"]["isError"] and "must be one of" in text(r)
+    assert r["result"]["isError"] and "health" in text(r)
     r = await srv.handle(rpc(3, "tools/call", {"name": "no_such_tool", "arguments": {}}))
-    assert r["result"]["isError"] and "Unknown tool" in text(r)
+    assert r["error"]["code"] == -32602 and "Unknown tool" in r["error"]["message"]
     r = await srv.handle(rpc(4, "tools/call", {"name": "send_command",
                                                 "arguments": {"device_id": "esp32-aaa",
                                                               "action": "set_meta"}}))
@@ -97,12 +105,18 @@ async def test_missing_and_bad_args_are_tool_errors(mcp):
     assert r["result"]["isError"]
 
 
-def test_limits_are_clamped_not_rejected():
-    out = T.validate_args("list_devices", {"limit": "999999", "offset": -5})
-    assert out["limit"] == 2000 and out["offset"] == 0
-    out = T.validate_args("send_command", {"device_id": "x", "action": "dns_probe",
-                                            "names": "a.com, b.com"})
-    assert out["names"] == ["a.com", "b.com"]
+def test_arguments_are_strict():
+    """The schema IS the validator: wrong types, ranges and unknown fields are refused."""
+    with pytest.raises(T.ToolArgError, match="limit"):
+        T.validate_args("list_devices", {"limit": 999999})
+    with pytest.raises(T.ToolArgError, match="limit"):
+        T.validate_args("list_devices", {"limit": "50"})                  # a string is not an integer
+    with pytest.raises(T.ToolArgError, match="colour: Extra inputs are not permitted"):
+        T.validate_args("list_devices", {"colour": "red"})
+    out = T.validate_args("query_dns_activity", {"since": "2026-10-23T10:00:00+02:00", "minutes": 30})
+    assert out.since == 1792742400.0 and out.minutes == 30
+    with pytest.raises(T.ToolArgError, match="since"):
+        T.validate_args("query_dns_activity", {"since": "yesterday-ish"})
 
 
 @pytest.mark.asyncio
@@ -136,7 +150,8 @@ async def test_send_command_requires_admin_when_configured(mcp):
 async def test_prompts(mcp):
     srv, _ = mcp
     lst = await srv.handle(rpc(1, "prompts/list"))
-    assert {p["name"] for p in lst["result"]["prompts"]} == {"fleet_health_check", "investigate_device"}
+    assert {p["name"] for p in lst["result"]["prompts"]} == {"fleet_health_check", "investigate_device",
+                                                              "network-activity-report", "investigate-client"}
     got = await srv.handle(rpc(2, "prompts/get", {"name": "investigate_device",
                                                    "arguments": {"device_id": "esp32-aaa"}}))
     assert "esp32-aaa" in got["result"]["messages"][0]["content"]["text"]
@@ -148,7 +163,10 @@ async def test_prompts(mcp):
 async def test_invalid_request_shapes(mcp):
     srv, _ = mcp
     assert (await srv.handle(["not", "a", "dict"]))["error"]["code"] == -32600
-    assert (await srv.handle({"jsonrpc": "2.0", "id": 9}))["error"]["code"] == -32600
+    assert (await srv.handle({"jsonrpc": "2.0", "id": 9, "method": ""}))["error"]["code"] == -32600
+    assert (await srv.handle({"id": 9, "method": "ping"}))["error"]["code"] == -32600     # no "jsonrpc"
+    assert (await srv.handle({"jsonrpc": "2.0", "id": None, "method": "ping"}))["error"]["code"] == -32600
+    assert await srv.handle({"jsonrpc": "2.0", "id": 9, "result": {}}) is None             # a client response
 
 
 def test_http_transport_auth_and_notifications(monkeypatch, tmp_path):
@@ -169,13 +187,13 @@ def test_http_transport_auth_and_notifications(monkeypatch, tmp_path):
         assert r.json()["error"]["code"] == -32700
         # command without / with token
         call = rpc(1, "tools/call", {"name": "send_command",
-                                     "arguments": {"device_id": "broadcast", "action": "ping"}})
+                                     "arguments": {"device_id": "broadcast", "action": "ping", "confirm": True}})
         assert "admin token" in c.post("/api/v1/mcp/rpc", json=call).json()["result"]["content"][0]["text"]
         ok = c.post("/api/v1/mcp/rpc", json=call, headers={"Authorization": "Bearer s3cret"}).json()
         assert "admin token" not in ok["result"]["content"][0]["text"]
         assert c.post("/api/v1/devices/broadcast/cmd", json={"action": "ping"}).status_code == 401
         h = c.get("/api/v1/health").json()
-        assert h["admin_token_required"] is True and h["mcp"]["tools"] == len(T.MCP_TOOLS)
+        assert h["admin_token_required"] is True and h["mcp"]["protocol"] == protocol.LATEST_VERSION
 
 
 def test_stdio_bridge_survives_dead_backend():

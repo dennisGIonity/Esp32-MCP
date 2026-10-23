@@ -14,7 +14,7 @@ Proves against the RUNNING lab, with raw evidence saved as JSON:
   L3  board MCP via broker    device_list_tools / device_call_tool (host -> MQTT -> board)
   L4  board MCP direct        http://<board>/mcp on :80, host bypassed
   A1  on-board inference      run_inference, all three on-chip models + synthetic frames
-  N1  host-only network view  a DNS query to the host resolver appears in dns_search;
+  N1  host-only network view  a DNS query to the host resolver appears in query_dns_activity;
                               no board is in that path
   M1  where state lives       host SQLite row counts vs the board's own runtime state
 Read-only on real boards: tools/list, read_telemetry, get_device_info, run_inference only.
@@ -307,9 +307,9 @@ def network_view(mcp: str, dns_ip: str):
     rec("N1a", all(isinstance(v, dict) for v in sent.values()),
         f"DNS sent to the HOST resolver {dns_ip}:53 (no board in the path)", sent)
     time.sleep(3.5)                          # the resolver flushes its log every 2 s
-    r, ms = rpc(mcp, "tools/call", {"name": "dns_search", "arguments": {"pattern": marker.split(".")[0]}})
+    r, ms = rpc(mcp, "tools/call", {"name": "query_dns_activity", "arguments": {"domain_pattern": marker.split(".")[0]}})
     d, err = payload(r)
-    rec("N1b", (not err) and marker in json.dumps(d), "MCP dns_search returns that exact query",
+    rec("N1b", (not err) and marker in json.dumps(d), "MCP query_dns_activity returns that exact query",
         {"pattern": marker.split(".")[0], "result": d, "ms": ms})
     r, _ = rpc(mcp, "tools/call", {"name": "dns_summary", "arguments": {}})
     d, err = payload(r)

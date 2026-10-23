@@ -9,6 +9,7 @@ import asyncio
 import json
 import logging
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -24,7 +25,13 @@ from app.ingest.net_alerts import NetworkWatch
 from app.ingest.discovery import DiscoveryService, primary_lan_ip
 from app.mcp.server import FleetMCPServer
 from app.api.routes import router, ws_clients
+from app.api.netobserve_routes import router as net_router
+from app.mcp.http_transport import router as mcp_router
 from app.integrations.datadog import DatadogForwarder
+from app.labels import LabelBook
+from app.rules.engine import RuleEngine, RuleError
+from app.dns.pipeline import DnsPipeline
+from app.ewp.hub import EwpHub
 
 logging.basicConfig(
     level=logging.INFO,
@@ -68,21 +75,44 @@ async def lifespan(app: FastAPI):
     registry = FleetRegistry(store)
     await registry.start()
 
+    labels = LabelBook(Path(settings.labels_file))
+    rules = RuleEngine(store)
+    await rules.load()
+    for dom in [d.strip() for d in settings.watch_domains.split(",") if d.strip()]:
+        if not rules.match(dom.lstrip("*.")):
+            try:
+                await rules.add_rule(dom, "custom:env")
+            except RuleError as e:
+                log.warning("IONITY_WATCH_DOMAINS entry '%s' ignored: %s", dom, e)
+    pipeline = DnsPipeline(store, rules, labels, settings)
+    await pipeline.start()
+    hub = EwpHub(registry, pipeline, rules, settings)
+
     app.state.store = store
     app.state.registry = registry
+    app.state.labels = labels
+    app.state.rules = rules
+    app.state.pipeline = pipeline
+    app.state.ewp = hub
     app.state.mqtt = None
     app.state.dns = None
 
     if settings.mqtt_enabled:
-        bridge = MqttBridge(registry)
+        bridge = MqttBridge(registry, hub)
         await bridge.start()
         app.state.mqtt = bridge
 
-    netwatch = NetworkWatch(store, registry, settings)
+    netwatch = NetworkWatch(store, registry, settings, hub)
     app.state.netwatch = netwatch
+    pipeline.flag_listeners.append(netwatch.on_flag)
+    rules.listeners.append(hub.sync_all)
+    hub.node_listeners.append(lambda hwid, state: pipeline.publish(
+        {"type": "node", "device_id": hwid, "state": state}))
     if settings.dns_enabled:
         dns = DnsService(store, settings)
-        dns.watch = netwatch                 # every query from every device -> alerts
+        dns.watch = netwatch                 # new-device alerts from the LAN sweep
+        dns.pipeline = pipeline              # every query -> attribution, rules, storage, live feed
+        dns.labels = labels
         await dns.start()
         app.state.dns = dns
     await netwatch.start()
@@ -100,7 +130,9 @@ async def lifespan(app: FastAPI):
         app.state.integrations["mqtt"] = app.state.mqtt
 
     app.state.mcp = FleetMCPServer(registry, store, dns=app.state.dns,
-                                   integrations=app.state.integrations)
+                                   integrations=app.state.integrations,
+                                   hub=hub, pipeline=pipeline, rules=rules, labels=labels)
+    await app.state.mcp.start()
 
     bcast = asyncio.create_task(broadcaster(app))
 
@@ -108,7 +140,7 @@ async def lifespan(app: FastAPI):
     log.info(" IONITY ESP32-MCP FLEET SERVER  |  %s", settings.fleet_name)
     log.info(" HTTP      http://%s:%s", settings.host, settings.port)
     log.info(" Dashboard http://%s:%s/", settings.host, settings.port)
-    log.info(" MCP RPC   http://%s:%s/api/v1/mcp/rpc", settings.host, settings.port)
+    log.info(" MCP       http://%s:%s/mcp  (Streamable HTTP; v2 JSON: /api/v1/mcp/rpc)", settings.host, settings.port)
     log.info(" Flasher   http://%s:%s/flasher/  (%s)", settings.host, settings.port,
              "built" if FLASHER_DIR.exists() else "not built: cd apps/flasher-legacy && npm run build")
     log.info(" Datadog   %s", f"-> api.{settings.dd_site} env={settings.dd_env}"
@@ -133,7 +165,14 @@ async def lifespan(app: FastAPI):
 
     yield
 
+    # Graceful shutdown (uvicorn turns SIGINT / SIGTERM into this): stop taking
+    # traffic first, then drain every queue to disk, then close the database.
     bcast.cancel()
+    for ws in list(ws_clients):
+        try:
+            await ws.close(code=1001)
+        except Exception:                    # noqa: BLE001
+            pass
     await netwatch.stop()
     await datadog.stop()
     await discovery.stop()
@@ -141,6 +180,9 @@ async def lifespan(app: FastAPI):
         await app.state.dns.stop()
     if app.state.mqtt:
         await app.state.mqtt.stop()
+    await app.state.mcp.stop()
+    await hub.stop()
+    await pipeline.stop()
     await registry.stop()
     await store.close()
     log.info("Fleet server shut down cleanly.")
@@ -164,9 +206,12 @@ app.add_middleware(
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["Mcp-Session-Id"],
 )
 
 app.include_router(router)
+app.include_router(net_router)
+app.include_router(mcp_router)
 
 @app.middleware("http")
 async def dashboard_no_cache(request, call_next):

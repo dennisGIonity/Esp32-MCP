@@ -391,9 +391,11 @@ function defaultArgs(tool) {
     aggregate_metric: '{"metric":"rssi_dbm","minutes":60}',
     get_alerts: '{"open_only":true,"limit":20}',
     send_command: JSON.stringify({ device_id: first, action: "ping" }),
+    trigger_node_action: JSON.stringify({ device_id: first, action: "ping" }),
     dns_summary: '{"minutes":60}',
     dns_top_domains: '{"minutes":1440,"limit":20}',
-    dns_recent: '{"limit":30}',
+    query_dns_activity: '{"minutes":60,"limit":30}',
+    get_flagged_alerts: '{"minutes":60}',
     list_lan_devices: "{}",
   })[tool] ?? "{}";
 }

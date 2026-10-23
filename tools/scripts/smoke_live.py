@@ -224,7 +224,9 @@ def test_mcp(h: Http) -> dict:
     ro = {
         "fleet_summary": {}, "list_devices": {}, "get_alerts": {}, "get_command_results": {"limit": 5},
         "integrations_status": {}, "dns_summary": {}, "dns_by_device": {}, "dns_top_domains": {},
-        "dns_recent": {}, "dns_search": {"pattern": "ionity"}, "list_lan_devices": {},
+        "query_dns_activity": {"domain_pattern": "ionity", "minutes": 60}, "get_flagged_alerts": {},
+        "list_lan_devices": {}, "manage_dns_watchlist": {"action": "list"},
+        "manage_device_labels": {"action": "list"},
         "query_telemetry": {"metric": "temp_c", "limit": 5},
         "aggregate_metric": {"metric": "temp_c"},
     }
