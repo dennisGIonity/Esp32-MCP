@@ -46,6 +46,22 @@ export const EWP_LIMITS = {
   sleepMaxS: 86_400,
   /** a lease longer than a day is a configuration, not a lease */
   leaseMaxMs: 86_400_000,
+  /** NetObserve: watchlist rules a node holds (REPLACE + APPEND frames together) */
+  watchRules: 128,
+  /** NetObserve: one rule suffix, e.g. "googlevideo.com" (bytes) */
+  watchSuffixBytes: 96,
+  /** NetObserve: category ids 1..watchCategories (0 = none) */
+  watchCategories: 32,
+  /** NetObserve: DNS QNAME in presentation form, RFC 1035 (bytes) */
+  qnameBytes: 253,
+  /** NetObserve: LAN host name from DHCP option 12 / mDNS (bytes) */
+  hostnameBytes: 63,
+  /** NetObserve: LAN clients a node tracks */
+  localDevices: 128,
+  /** NetObserve: upstream resolvers a node forwards to */
+  dnsUpstreams: 2,
+  /** NetObserve: entries query_dns_log returns at most */
+  dnsLogQuery: 32,
 } as const;
 
 /* ------------------------------------------------------------------------- */
@@ -69,12 +85,15 @@ export const Channel = {
 } as const;
 export type Channel = (typeof Channel)[keyof typeof Channel];
 
-/** `esp32-` + 12 lowercase hex of the base MAC (fw 2.x device_id). Also the MQTT client id. */
+/**
+ * `esp32-` + 12 lowercase hex of the base MAC (fw 2.x device_id), or `pi-` + the
+ * Raspberry Pi serial / MAC (devices/pi-agent). Also the MQTT client id.
+ */
 export type HwId = Brand<string, 'hwid'>;
 /** MQTT topic level: [a-z0-9-], 1..32 chars. */
 export type SiteId = Brand<string, 'site'>;
 
-const HWID_RE = /^esp32-[0-9a-f]{12}$/;
+const HWID_RE = /^(?:esp32-[0-9a-f]{12}|pi-[0-9a-f]{8,16})$/;
 const SITE_RE = /^[a-z0-9][a-z0-9-]{0,31}$/;
 
 export function hwid(s: string): HwId {

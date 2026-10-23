@@ -14,6 +14,7 @@
 import { defineKeys } from './keys.ts';
 import type { EventKind, LogLevel, ResetReason, StateMode } from './ids.ts';
 import type { F32, FixedBytes, U32, U8, Unit, Utf8 } from './scalars.ts';
+import type { DnsBatch, DnsFlag } from './netobserve.ts';
 
 export type EventBody =
   | {
@@ -48,6 +49,16 @@ export type EventBody =
       /** HELLO.metrics[].id */
       readonly metric: U8;
       readonly value: F32;
+    }
+  | {
+      readonly kind: typeof EventKind.DNS_BATCH;
+      readonly rid?: U32;
+      readonly dns: DnsBatch;
+    }
+  | {
+      readonly kind: typeof EventKind.DNS_FLAGGED;
+      readonly rid?: U32;
+      readonly flag: DnsFlag;
     };
 export const EventBodyKey = defineKeys<EventBody>()({
   kind: 1,
@@ -63,6 +74,8 @@ export const EventBodyKey = defineKeys<EventBody>()({
   reason: 11,
   metric: 12,
   value: 13,
+  dns: 14,
+  flag: 15,
 });
 
 export interface LogBody {

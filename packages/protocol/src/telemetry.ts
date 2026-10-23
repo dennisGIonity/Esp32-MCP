@@ -23,6 +23,7 @@
 import { defineKeys } from './keys.ts';
 import type { StateMode } from './ids.ts';
 import type { F32, I8, U16, U32, U8, Unit } from './scalars.ts';
+import type { DnsCounters } from './netobserve.ts';
 
 export interface HeapStats {
   readonly internalFree: U32;
@@ -102,6 +103,8 @@ export interface TelemetryBody {
   readonly inference?: LastInference;
   /** open metrics (fw 2.x `metrics{}`), keyed by HELLO.metrics[].id - names sent once, not per sample */
   readonly ext?: ReadonlyMap<U8, F32>;
+  /** NetObserve forwarder counters (nodes with HELLO.net only) */
+  readonly dns?: DnsCounters;
 }
 export const TelemetryBodyKey = defineKeys<TelemetryBody>()({
   seq: 1,
@@ -117,4 +120,5 @@ export const TelemetryBodyKey = defineKeys<TelemetryBody>()({
   actuators: 11,
   inference: 12,
   ext: 13,
+  dns: 14,
 });
