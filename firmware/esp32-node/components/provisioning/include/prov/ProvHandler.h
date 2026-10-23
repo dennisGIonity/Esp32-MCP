@@ -54,6 +54,10 @@ struct LiveState {
     char wifiError[80] = {};
     bool mqttUp = false;
     uint8_t mode = 0;
+    // NetObserve forwarder (fw 3.1)
+    bool dnsActive = false;
+    uint16_t dnsPort = 53;
+    uint32_t dnsQueries = 0;
 };
 
 struct TestOutcome {

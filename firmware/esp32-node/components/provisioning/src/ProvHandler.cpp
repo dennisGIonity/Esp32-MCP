@@ -162,6 +162,14 @@ void ProvHandler::writeInfo(const NodeConfig& c, const LiveState& live, int mqtt
         w_.kvNum("rssi", live.rssi);
     }
     w_.kvBool("mqtt", mqttOverride >= 0 ? mqttOverride != 0 : live.mqttUp);
+    w_.kv("dns_mode", c.dnsMode);
+    w_.kv("dns_upstream", c.dnsUpstream);
+    w_.key("dns");  // the forwarder right now (NetObserve)
+    w_.beginObject();
+    w_.kv("mode", live.dnsActive ? "forward" : "off");
+    w_.kvNum("port", live.dnsPort);
+    w_.kvNum("queries", static_cast<int64_t>(live.dnsQueries));
+    w_.endObject();
     if (strncmp(c.hostUrl, "mqtt://", 7) == 0) {  // fw 2.x tools display server + port
         w_.kv("server", c.server);
         w_.kvNum("mqtt_port", c.mqttPort);

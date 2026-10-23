@@ -36,7 +36,8 @@ Pick the variant by the port the board is plugged in on: `_usb` = the chip's nat
 | `main/NodeApp.*` | glue: applied settings, link supervisor, provisioning backend, telemetry hooks |
 | `components/ewp` | EWP/1 header, bounded CBOR, CRC-32 (portable) |
 | `components/mcp_server` | `MCPServer` (registry, job pool, worker), `Uplink` (frame pool, single publisher), `os.h` |
-| `components/tools` | `read_telemetry`, `get_device_info`, `identify`; TELEMETRY/HELLO/STATUS encoders; ESP probes |
+| `components/tools` | `read_telemetry`, `get_device_info`, `identify`, `set_actuator`, `reboot`; actuator bank (LEDC PWM / relay, lease + failsafe); TELEMETRY/HELLO/STATUS encoders; ESP probes |
+| `components/netobserve` | LAN DNS forwarder + cache, query ring log, watchlist, client table (ARP/DHCP/mDNS), `scan_lan`; tools 0x40-0x46; DNS_BATCH / DNS_FLAGGED encoders |
 | `components/net` | Wi-Fi station manager, MQTT 5 link + `net_task` |
 | `components/provisioning` | `ionity-prov/2` handler, NVS config + fw 2.x migration, console + log hook |
 | `test/host` | unit tests, fuzz loops, interop helpers (ASan/UBSan/TSan) |
@@ -44,6 +45,24 @@ Pick the variant by the port the board is plugged in on: `_usb` = the chip's nat
 
 The wire constants come from `packages/protocol/generated/ewp_protocol.h` (generated from the
 TypeScript contract) - build inside the monorepo or set `EWP_PROTOCOL_DIR`.
+
+## NetObserve (fw 3.1)
+
+Off by default. With `dns_mode = "forward"` (prov/2 field, NVS `dns_mode`) the node listens on UDP 53
+and forwards to `dns_upstream` (1-2 IPv4 resolvers, `""` = `1.1.1.1,8.8.8.8`); the router's DHCP must
+hand out the node's IP as DNS. The node's own lookups go straight to the upstreams.
+
+- Answers are cached (NOERROR with answers only, TTL clamped 15-3600 s); unanswered queries are
+  retried after 1.5 s and answered SERVFAIL after 3 s. Only private/own-subnet clients are served.
+- Every query lands in a byte ring (`CONFIG_IONITY_DNS_LOG_BYTES`). `DNS_BATCH` goes up every
+  `CONFIG_IONITY_DNS_BATCH_PERIOD_S` (10 s) or when the ring is 75 % full, only while the MQTT link is up.
+- A watchlist hit sends `DNS_FLAGGED` at once (same name + client at most every 30 s) and drives the
+  local alert: a pulse on `pwm0` if configured, else the status LED, for `CONFIG_IONITY_ALERT_HOLD_S`.
+- Watchlist: built-in defaults, replaced/appended with `set_watchlist`, stored in NVS (`watchlist`).
+- HELLO carries `net` (capabilities), TELEMETRY carries `dns` counters.
+
+Kconfig (`menuconfig` -> Ionity node): actuator pins `PWM0/PWM1/RELAY0` (-1 = none; NVS pins override),
+`DNS_BATCH_PERIOD_S`, `ALERT_HOLD_S`, `DNS_CACHE_ENTRIES`, `DNS_LOG_BYTES`, `DNS_PENDING`.
 
 ## Test (no board needed)
 

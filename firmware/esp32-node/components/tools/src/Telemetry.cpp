@@ -9,6 +9,19 @@
 
 namespace tools {
 
+void encodeDnsCounters(ewp::CborWriter& w, const DnsCountersSnap& d) {
+    ewp::CborMap m(w);
+    m.key(EWP_K_DNS_COUNTERS_MODE).uint(d.mode);
+    m.key(EWP_K_DNS_COUNTERS_QUERIES).uint(d.queries);
+    m.key(EWP_K_DNS_COUNTERS_FORWARDED).uint(d.forwarded);
+    m.key(EWP_K_DNS_COUNTERS_CACHE_HITS).uint(d.cacheHits);
+    m.key(EWP_K_DNS_COUNTERS_UPSTREAM_FAIL).uint(d.upstreamFail);
+    m.key(EWP_K_DNS_COUNTERS_DROPPED).uint(d.dropped);
+    m.key(EWP_K_DNS_COUNTERS_FLAGGED).uint(d.flagged);
+    m.key(EWP_K_DNS_COUNTERS_CLIENTS).uint(d.clients);
+    m.key(EWP_K_DNS_COUNTERS_LAN_DEVICES).uint(d.lanDevices);
+}
+
 void encodeTelemetryBody(ewp::CborWriter& w, const TelemetrySnapshot& s, uint8_t sections) {
     ewp::CborMap m(w);
     m.key(EWP_K_TELEMETRY_BODY_SEQ).uint(s.seq);
@@ -74,6 +87,8 @@ void encodeTelemetryBody(ewp::CborWriter& w, const TelemetrySnapshot& s, uint8_t
         m.key(EWP_K_TELEMETRY_BODY_ACTUATORS).array(n);
         for (uint8_t i = 0; i < n; ++i) w.f32(s.actuators[i]);
     }
+
+    if (s.hasDns) encodeDnsCounters(m.key(EWP_K_TELEMETRY_BODY_DNS), s.dns);
 }
 
 }  // namespace tools

@@ -10,6 +10,7 @@
 #include <time.h>
 
 #include "driver/gpio.h"
+#include "driver/ledc.h"
 #include "driver/temperature_sensor.h"
 #include "esp_adc/adc_cali.h"
 #include "esp_adc/adc_cali_scheme.h"
@@ -253,8 +254,81 @@ void EspTelemetrySource::collect(TelemetrySnapshot& out, uint8_t sections) {
             }
         }
     }
-    // Actuators: none in this phase (set_actuator registers channels later).
-    out.actuatorCount = 0;
+    if ((sections & EWP_TM_ACTUATORS) && hooks_.actuators != nullptr) {
+        out.actuatorCount = hooks_.actuators(hooks_.user, out.actuators, static_cast<uint8_t>(kMaxActuators));
+    }
+    // NetObserve counters ride on every sample (the host derives query rates from them).
+    if (hooks_.dns != nullptr) {
+        hooks_.dns(hooks_.user, out.dns);
+        out.hasDns = true;
+    }
+}
+
+/* ------------------------------------------------------------------------- */
+/* actuator outputs                                                            */
+/* ------------------------------------------------------------------------- */
+
+bool pinUsableForOutput(int gpio) {
+    if (gpio < 0 || !GPIO_IS_VALID_OUTPUT_GPIO(gpio)) return false;
+#if CONFIG_IDF_TARGET_ESP32S3
+    // strapping 0/3/45/46, USB D-/D+ 19/20, flash 26-32, octal PSRAM 33-37, UART0 43/44
+    if (gpio == 0 || gpio == 3 || gpio == 45 || gpio == 46 || gpio == 19 || gpio == 20) return false;
+    if ((gpio >= 26 && gpio <= 37) || gpio == 43 || gpio == 44) return false;
+#elif CONFIG_IDF_TARGET_ESP32C6
+    // strapping 8/9/15, USB D-/D+ 12/13, UART0 16/17, flash 24-30
+    if (gpio == 8 || gpio == 9 || gpio == 15 || gpio == 12 || gpio == 13 || gpio == 16 || gpio == 17) return false;
+    if (gpio >= 24) return false;
+#endif
+    return true;
+}
+
+bool EspActuatorHw::configure(uint8_t ch, uint8_t kind, int gpio, uint8_t resBits) {
+    if (ch >= ActuatorBank::kMaxChannels || !pinUsableForOutput(gpio)) {
+        ESP_LOGW(TAG, "actuator %u: GPIO %d refused (not an output-safe pin on this chip)", ch, gpio);
+        return false;
+    }
+    gpio_[ch] = gpio;
+    if (kind == EWP_ACT_PWM) {
+        if (!timerReady_) {
+            ledc_timer_config_t t = {};
+            t.speed_mode = LEDC_LOW_SPEED_MODE;
+            t.duty_resolution = static_cast<ledc_timer_bit_t>(resBits);
+            t.timer_num = LEDC_TIMER_0;
+            t.freq_hz = 5000;
+            t.clk_cfg = LEDC_AUTO_CLK;
+            if (ledc_timer_config(&t) != ESP_OK) return false;
+            timerReady_ = true;
+        }
+        if (nextLedc_ >= static_cast<int>(LEDC_CHANNEL_MAX)) return false;
+        ledc_channel_config_t c = {};
+        c.gpio_num = gpio;
+        c.speed_mode = LEDC_LOW_SPEED_MODE;
+        c.channel = static_cast<ledc_channel_t>(nextLedc_);
+        c.timer_sel = LEDC_TIMER_0;
+        c.duty = 0;
+        if (ledc_channel_config(&c) != ESP_OK) return false;
+        ledc_[ch] = nextLedc_++;
+        return true;
+    }
+    gpio_config_t io = {};
+    io.pin_bit_mask = 1ULL << gpio;
+    io.mode = GPIO_MODE_OUTPUT;
+    return gpio_config(&io) == ESP_OK;
+}
+
+float EspActuatorHw::write(uint8_t ch, uint8_t kind, float value) {
+    if (ch >= ActuatorBank::kMaxChannels || gpio_[ch] < 0) return 0.0f;
+    if (kind == EWP_ACT_PWM && ledc_[ch] >= 0) {
+        const uint32_t maxDuty = (1u << ActuatorBank::kPwmResBits) - 1;
+        const uint32_t duty = static_cast<uint32_t>(value * static_cast<float>(maxDuty) + 0.5f);
+        const ledc_channel_t lc = static_cast<ledc_channel_t>(ledc_[ch]);
+        ledc_set_duty(LEDC_LOW_SPEED_MODE, lc, duty);
+        ledc_update_duty(LEDC_LOW_SPEED_MODE, lc);
+        return static_cast<float>(duty) / static_cast<float>(maxDuty);
+    }
+    const bool on = value >= 0.5f;
+    gpio_set_level(static_cast<gpio_num_t>(gpio_[ch]), on ? 1 : 0);
+    return on ? 1.0f : 0.0f;
 }
 
 /* ------------------------------------------------------------------------- */

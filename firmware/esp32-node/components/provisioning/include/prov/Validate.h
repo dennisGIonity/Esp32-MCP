@@ -30,6 +30,9 @@ struct Limits {
     static constexpr size_t kCaPem = 3072;
     static constexpr size_t kTopicLevel = 32;
     static constexpr size_t kUuid = 36;
+    /** "255.255.255.255,255.255.255.255" (EWP_LIMITS.dnsUpstreams = 2) */
+    static constexpr size_t kDnsUpstream = 31;
+    static constexpr size_t kDnsUpstreams = 2;
 };
 
 /** C0 controls, DEL and C1 controls (U+0080..U+009F, i.e. 0xC2 0x80..0x9F in UTF-8). */
@@ -61,6 +64,23 @@ bool normalizeUuid(const char* s, size_t n, char out[37]);
 
 /** One PEM certificate, <= 3072 bytes, base64 body only (one block). Structure only. */
 bool validPemCert(const char* s, size_t n, const char** err);
+
+/**
+ * One strict IPv4 dotted quad ("0" or no leading zeros, 0-255) -> host-order
+ * address in *out (a.b.c.d = a<<24 | ...). False for anything else.
+ */
+bool parseIpv4(const char* s, size_t n, uint32_t* out);
+
+/**
+ * dns_upstream (@ionity/prov dns.ts): "" (firmware default) or 1-2
+ * comma-separated dotted quads, no spaces, no duplicates, never 0/8,
+ * loopback, multicast, reserved or broadcast. ips[] receives the addresses
+ * (host order), *count how many. Error text in *err.
+ */
+bool parseDnsUpstream(const char* s, size_t n, uint32_t ips[Limits::kDnsUpstreams], size_t* count, const char** err);
+
+/** dns_mode: "off" | "forward". */
+bool validDnsMode(const char* s, size_t n);
 
 /** fw 2.x had no rules for site/group: make a valid topic level out of anything. */
 void sanitizeTopicLevel(const char* in, char* out, size_t outCap, const char* fallback);

@@ -40,14 +40,18 @@
 #include "mcp/Uplink.h"
 #include "net/MqttLink.h"
 #include "net/WifiManager.h"
+#include "netobserve/EspNetPlatform.h"
+#include "netobserve/NetObserve.h"
 #include "prov/Config.h"
 #include "prov/Console.h"
 #include "prov/EspNvs.h"
 #include "prov/ProvHandler.h"
 #include "sdkconfig.h"
+#include "tools/Actuators.h"
 #include "tools/EdgeTools.h"
 #include "tools/EspPlatform.h"
 #include "tools/Identity.h"
+#include "tools/SystemTools.h"
 
 namespace {
 
@@ -66,6 +70,7 @@ constexpr unsigned kWorkerPrio = 4;  // below net_task (Phase 1 rule 9)
 constexpr unsigned kNetPrio = 6;      // above mqtt_task (esp-mqtt default priority 5)
 constexpr unsigned kConsolePrio = 3;
 constexpr unsigned kProvPrio = 2;
+constexpr unsigned kNetObsPrio = 4;  // below net_task (6) and mqtt_task (5): the uplink always drains
 
 // Kconfig booleans that are "n" are simply not defined: map them to constants once.
 #ifdef CONFIG_IONITY_WIFI_POWER_SAVE
@@ -89,6 +94,7 @@ constexpr uint32_t kNetStack = 5120;
 constexpr uint32_t kWorkerStack = 6144;
 constexpr uint32_t kConsoleStack = 6144;
 constexpr uint32_t kProvStack = 4096;
+constexpr uint32_t kNetObsStack = 6144;
 
 /* ---- long-lived objects (static storage: never freed, no heap churn) ------------ */
 prov::NvsKv s_kv;
@@ -103,6 +109,60 @@ prov::ProvHandler s_prov;
 app::EspProvBackend s_provBackend;
 esp_timer_handle_t s_telemetryTimer = nullptr;
 uint32_t s_telemetryTicks = 0;  // esp_timer task only
+tools::ActuatorBank s_bank;     // pwm0 (alert) / pwm1 / relay0 from NVS pins or Kconfig
+tools::EspActuatorHw s_actHw;
+tools::SystemTools s_system;    // set_actuator, reboot
+netobs::NetObserve s_netobs;    // LAN DNS forwarder + discovery (NetObserve tools)
+netobs::EspNetPlatform s_netPlatform;
+esp_timer_handle_t s_actuatorTimer = nullptr;
+esp_timer_handle_t s_restartTimer = nullptr;
+
+/** NVS pin (prov pins{}): absent = the board default from Kconfig; -1 = channel not fitted. */
+int pinOrDefault(int32_t nvs, int kconfigDefault) { return nvs == prov::kPinUnset ? kconfigDefault : nvs; }
+
+/** LEASE_EXPIRED (EventBody kind 3): the host learns a channel went back to its safe value. */
+void onLeaseExpired(void*, uint8_t ch, float revertedTo) {
+    if (!net::MqttLink::instance().connected()) return;
+    const int slot = s_uplink.acquire(0);
+    if (slot < 0) return;
+    const size_t len = tools::buildDeviceFrame(s_uplink.buffer(slot), s_uplink.slotSize(), EWP_MSG_EVENT,
+                                               s_edge.nextDeviceRid(), [&](ewp::CborWriter& w) {
+        ewp::CborMap m(w);
+        m.key(EWP_K_EVENT_BODY_KIND).uint(EWP_EVENT_LEASE_EXPIRED);
+        m.key(EWP_K_EVENT_BODY_CHANNEL).uint(ch);
+        m.key(EWP_K_EVENT_BODY_REVERTED_TO).f32(revertedTo);
+    });
+    if (len == 0 || !s_uplink.submit(slot, len, 0, 0)) {
+        if (len == 0) s_uplink.release(slot);
+    }
+}
+
+void onActuatorTimer(void*) { s_bank.service(esp_timer_get_time()); }
+
+void onRestartTimer(void*) { app::restartNow(); }
+
+/** reboot tool: the RES is already queued; restart after delayMs from the esp_timer task. */
+void scheduleRestart(void*, uint32_t delayMs) {
+    if (s_restartTimer == nullptr) {
+        esp_timer_create_args_t a = {};
+        a.callback = &onRestartTimer;
+        a.dispatch_method = ESP_TIMER_TASK;
+        a.name = "reboot";
+        if (esp_timer_create(&a, &s_restartTimer) != ESP_OK) return;
+    }
+    esp_timer_stop(s_restartTimer);
+    esp_timer_start_once(s_restartTimer, static_cast<uint64_t>(delayMs) * 1000u);
+}
+
+/** NetObserve flagged an ALERT rule: the red light (pwm0), else the identify LED. */
+void onDnsAlert(void*, uint8_t, uint32_t holdMs) {
+    const int ch = s_bank.find("pwm0");
+    if (ch >= 0) {
+        s_bank.pulse(static_cast<uint8_t>(ch), holdMs, esp_timer_get_time());
+    } else {
+        s_led.blink(holdMs > 10000 ? 10000 : holdMs);
+    }
+}
 
 /** esp_timer callback (esp_timer task, Core 0): hand the work to Core 1 and return. */
 void onTelemetryTimer(void*) {
@@ -175,6 +235,7 @@ extern "C" void app_main(void) {
     s_identity.addTask(app::kTaskTcpip, "tiT", kNetCore, CONFIG_LWIP_TCPIP_TASK_STACK_SIZE);
     s_identity.addTask(app::kTaskEvents, "sys_evt", -1, CONFIG_ESP_SYSTEM_EVENT_TASK_STACK_SIZE);
     s_identity.addTask(app::kTaskTimer, "esp_timer", 0, CONFIG_ESP_TIMER_TASK_STACK_SIZE);
+    s_identity.addTask(app::kTaskNetObs, "netobs", kNetCore, kNetObsStack);
     ESP_LOGI(TAG, "%s fw %s (IDF %s) on %s rev %u, %u MB flash, %u MB PSRAM, reset reason %u", s_identity.hwid,
              s_identity.fwVersion, s_identity.idf, chipName(s_identity.chipModel), s_identity.chipRev,
              s_identity.flashMb, s_identity.psramMb, s_identity.resetReason);
@@ -198,9 +259,43 @@ extern "C" void app_main(void) {
     }
     //    b) tools: EdgeTools::begin() registers read_telemetry (0x02), get_device_info
     //       (0x01) and - with a LED configured - identify (0x06), plus the telemetry tick;
+    //    a') outputs: pins from NVS (provisioning pins{}), else the board defaults.
+    s_bank.addChannel("pwm0", EWP_ACT_PWM, pinOrDefault(node.pinPwm0, CONFIG_IONITY_PWM0_GPIO), 0.0f, false);
+    s_bank.addChannel("pwm1", EWP_ACT_PWM, pinOrDefault(node.pinPwm1, CONFIG_IONITY_PWM1_GPIO), 0.0f, false);
+    s_bank.addChannel("relay0", EWP_ACT_RELAY, pinOrDefault(node.pinRelay0, CONFIG_IONITY_RELAY0_GPIO), 0.0f, true);
+    s_bank.begin(s_actHw, &onLeaseExpired, nullptr);
+    if (node.mode == EWP_MODE_FAILSAFE) s_bank.allSafe(esp_timer_get_time());  // latched FAILSAFE
+    s_identity.actuators = &s_bank;
+    {
+        esp_timer_create_args_t a = {};
+        a.callback = &onActuatorTimer;
+        a.dispatch_method = ESP_TIMER_TASK;
+        a.name = "actuators";
+        if (esp_timer_create(&a, &s_actuatorTimer) == ESP_OK) esp_timer_start_periodic(s_actuatorTimer, 50 * 1000);
+    }
+    //    a'') NetObserve: the LAN DNS forwarder (on when dns_mode = forward) and its tools.
+    netobs::Config nc;
+    app::dnsSettings(node, nc.forward, nc.upstreams, nc.upstreamCount);
+    nc.batchPeriodMs = CONFIG_IONITY_DNS_BATCH_PERIOD_S * 1000u;
+    nc.alertHoldMs = CONFIG_IONITY_DNS_ALERT_HOLD_S * 1000u;
+    nc.cache.entries = CONFIG_IONITY_DNS_CACHE_ENTRIES;
+    nc.cache.preferPsram = psram;
+    nc.logBytes = CONFIG_IONITY_DNS_LOG_BYTES;
+    nc.pendingSlots = CONFIG_IONITY_DNS_PENDING;
+    nc.preferPsram = psram;
+    netobs::EspNetPlatform::Hooks nh;
+    nh.linkUp = [](void*) { return net::MqttLink::instance().connected(); };
+    nh.alert = &onDnsAlert;
+    s_netPlatform.begin(nh);
+    const bool netobsOk = s_netobs.begin(nc, s_netPlatform, s_uplink);
+    if (!netobsOk) ESP_LOGE(TAG, "NetObserve start failed (out of memory?) - no LAN DNS forwarder");
+    if (netobsOk) s_identity.net = &s_netobs;
+
     static tools::EspTelemetrySource::Hooks hooks;
     hooks.net = &app::netStats;
     hooks.runUsMax = &app::taskRunUsMax;
+    hooks.actuators = [](void*, float* out, uint8_t max) { return s_bank.values(out, max); };
+    if (netobsOk) hooks.dns = [](void*, tools::DnsCountersSnap& d) { s_netobs.counters(d); };
     s_probes.begin(s_identity, hooks, CONFIG_IONITY_ADC_GPIO);
     tools::EdgeToolsConfig ec;
     ec.identity = &s_identity;
@@ -211,6 +306,12 @@ extern "C" void app_main(void) {
     ec.linkUp = [](void*) { return net::MqttLink::instance().connected(); };
     ec.initialMode = node.mode;
     if (!s_edge.begin(ec, s_server)) ESP_LOGE(TAG, "tool registration failed");
+    tools::SystemToolsConfig stc;
+    stc.actuators = &s_bank;
+    stc.edge = &s_edge;
+    stc.scheduleRestart = &scheduleRestart;
+    if (!s_system.begin(stc, s_server)) ESP_LOGE(TAG, "set_actuator / reboot registration failed");
+    if (netobsOk && !s_netobs.registerTools(s_server)) ESP_LOGE(TAG, "NetObserve tool registration failed");
     //    c) job pool (CONFIG_IONITY_JOB_SLOTS x 4 KiB) and mcp_worker, pinned to the tool core.
     mcp::ServerConfig sc;
     sc.slots = CONFIG_IONITY_JOB_SLOTS;
@@ -229,6 +330,7 @@ extern "C" void app_main(void) {
     wiring.uplink = &s_uplink;
     wiring.edge = &s_edge;
     wiring.prov = &s_prov;
+    wiring.netobs = netobsOk ? &s_netobs : nullptr;
     wiring.hwid = s_identity.hwid;
     wiring.autoStartLink = node.provisioned() && !node.standalone();
     app::wire(wiring);
@@ -241,6 +343,9 @@ extern "C" void app_main(void) {
     link.begin(s_server, s_uplink, s_edge);
     link.setSupervisor(&app::superviseLink, nullptr);
     link.startTask(kNetPrio, kNetCore, kNetStack);
+    // NetObserve's loop (sockets need esp_netif up). Binding waits for nothing: it
+    // listens on 0.0.0.0:53 and starts answering as soon as the station has an address.
+    if (netobsOk && !s_netobs.startTask(kNetObsPrio, kNetCore, kNetObsStack)) ESP_LOGE(TAG, "netobs task failed");
 
     // 7. Provisioning tasks, then the boot announcement (obligation 1).
     s_provBackend.begin(kProvPrio, kProvStack);

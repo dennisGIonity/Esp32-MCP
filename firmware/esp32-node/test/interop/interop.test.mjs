@@ -20,6 +20,10 @@ import {
   AckBodyKey, ChipInfoKey, EWP_HEADER_LEN, EWP_MAGIC, EWP_VERSION, ErrorBodyKey, ExecTimingKey, FirmwareInfoKey,
   FrameFlag, HEADER_LAYOUT, HeapStatsKey, HelloBodyKey, MsgType, NetStatsKey, ResultBodyKey, Status,
   StatusBodyKey, TelemetryBodyKey, TelemetrySection, ToolId,
+  EventBodyKey, EventKind, DnsBatchKey, DnsFlagKey, DnsCountersKey, NetObserveInfoKey, ActuatorDescriptorKey,
+  SetWatchlistArgsKey, WatchlistResultKey, GetWatchlistResultKey, NetworkStatsResultKey, LocalDevicesResultKey,
+  SetActuatorArgsKey, SetActuatorResultKey, WatchlistOp, RuleFlag, DnsQueryFlag, DnsMode, NetCap,
+  DEFAULT_WATCHLIST_VERSION, DEFAULT_RULES,
 } from '@ionity/ewp';
 
 const BUILD = process.env.FW_HOST_BUILD ?? path.resolve('build/host');
@@ -251,4 +255,116 @@ test('EWP/1: a TS-encoded read_telemetry REQ runs through the C++ MCPServer', ()
   assert.equal(err.h.status, Status.INVALID_ARGS);
   keysIn(err.body, ErrorBodyKey, 'ERR');
   assert.equal(err.body.get(ErrorBodyKey.argKey), 1);
+});
+
+/* ---------------------------------------------------------------- NetObserve */
+
+test('NetObserve: C++ DNS_FLAGGED / DNS_BATCH / HELLO.net / TELEMETRY.dns decode with the TS key tables', () => {
+  const lines = execFileSync(bin('ewp_dump'), ['netobs'], { encoding: 'utf8' }).trim().split('\n').map((l) => l.split(' '));
+  const frames = Object.fromEntries(lines);
+
+  const flag = decodeFrame(frames.flag);
+  assert.equal(flag.h.type, MsgType.EVENT);
+  keysIn(flag.body, EventBodyKey, 'EVENT');
+  assert.equal(flag.body.get(EventBodyKey.kind), EventKind.DNS_FLAGGED);
+  const f = flag.body.get(EventBodyKey.flag);
+  keysIn(f, DnsFlagKey, 'DnsFlag');
+  const [ip, mac, host] = f.get(DnsFlagKey.client);
+  assert.deepEqual([...ip], [127, 0, 0, 1]);
+  assert.deepEqual([...mac], [0x3c, 0x22, 0xfb, 0x12, 0x34, 0x56]);
+  assert.equal(typeof host, 'string');
+  assert.equal(f.get(DnsFlagKey.qname), 'www.youtube.com');
+  assert.equal(f.get(DnsFlagKey.rule), 'youtube.com');
+  assert.equal(f.get(DnsFlagKey.category), 1);
+  assert.equal(f.get(DnsFlagKey.watchVer), DEFAULT_WATCHLIST_VERSION);
+
+  const batch = decodeFrame(frames.batch);
+  assert.equal(batch.body.get(EventBodyKey.kind), EventKind.DNS_BATCH);
+  const b = batch.body.get(EventBodyKey.dns);
+  keysIn(b, DnsBatchKey, 'DnsBatch');
+  assert.equal(b.get(DnsBatchKey.clients).length, 1);
+  const qs = b.get(DnsBatchKey.queries);
+  assert.equal(qs.length, 2);
+  const yt = qs.find((q) => q[2] === 'www.youtube.com');
+  assert.equal(yt.length, 9);
+  assert.equal(yt[1], 0);              // client index
+  assert.equal(yt[3], 1);              // A
+  assert.ok(yt[7] & DnsQueryFlag.FLAGGED);
+  assert.equal(yt[8], 1);              // category youtube
+  assert.equal(qs.find((q) => q[2] === 'example.org')[3], 28);
+
+  const hello = decodeFrame(frames.hello);
+  keysIn(hello.body, HelloBodyKey, 'HELLO');
+  const net = hello.body.get(HelloBodyKey.net);
+  keysIn(net, NetObserveInfoKey, 'HELLO.net');
+  assert.equal(net.get(NetObserveInfoKey.mode), DnsMode.FORWARD);
+  assert.ok(net.get(NetObserveInfoKey.caps) & NetCap.DNS_FORWARD);
+  assert.equal(net.get(NetObserveInfoKey.watchVer), DEFAULT_WATCHLIST_VERSION);
+  assert.equal(net.get(NetObserveInfoKey.watchRules), DEFAULT_RULES.length);
+  const acts = hello.body.get(HelloBodyKey.actuators);
+  assert.equal(acts.length, 2);
+  for (const a of acts) keysIn(a, ActuatorDescriptorKey, 'actuator');
+  assert.equal(acts[0].get(ActuatorDescriptorKey.name), 'pwm0');
+  const toolIds = hello.body.get(HelloBodyKey.tools).map((t) => t[0]);
+  for (const id of [ToolId.SET_WATCHLIST, ToolId.GET_WATCHLIST, ToolId.GET_NETWORK_STATS, ToolId.GET_LOCAL_DEVICES,
+    ToolId.QUERY_DNS_LOG, ToolId.SCAN_LAN, ToolId.FLUSH_DNS_CACHE, ToolId.SET_ACTUATOR, ToolId.REBOOT]) {
+    assert.ok(toolIds.includes(id), `tool ${id} in HELLO`);
+  }
+
+  const tm = decodeFrame(frames.telemetry);
+  keysIn(tm.body, TelemetryBodyKey, 'TELEMETRY');
+  const dns = tm.body.get(TelemetryBodyKey.dns);
+  keysIn(dns, DnsCountersKey, 'TELEMETRY.dns');
+  assert.equal(dns.get(DnsCountersKey.queries), 2);
+  assert.equal(dns.get(DnsCountersKey.flagged), 1);
+});
+
+test('NetObserve: TS-encoded set_watchlist / get_watchlist / set_actuator run through the C++ node', () => {
+  const W = SetWatchlistArgsKey;
+  const set = encodeRequest({
+    rid: 0x01000100, tool: ToolId.SET_WATCHLIST, deadlineMs: 3000,
+    args: new Map([
+      [W.op, WatchlistOp.REPLACE], [W.version, 1761213600],
+      [W.rules, [['youtube.com', 1, RuleFlag.ALERT], ['googlevideo.com', 1, RuleFlag.ALERT | RuleFlag.SUBDOMAINS_ONLY], ['netflix.com', 3, 0]]],
+      [W.categories, [[1, 'video_streaming:youtube'], [3, 'video_streaming:netflix']]],
+    ]),
+  });
+  const get = encodeRequest({ rid: 0x01000101, tool: ToolId.GET_WATCHLIST, args: new Map() });
+  const stats = encodeRequest({ rid: 0x01000102, tool: ToolId.GET_NETWORK_STATS, args: new Map() });
+  const devs = encodeRequest({ rid: 0x01000103, tool: ToolId.GET_LOCAL_DEVICES, args: new Map([[1, 10]]) });
+  const led = encodeRequest({
+    rid: 0x01000104, tool: ToolId.SET_ACTUATOR,
+    args: new Map([[SetActuatorArgsKey.channel, 0], [SetActuatorArgsKey.value, 1], [SetActuatorArgsKey.leaseMs, 20000]]),
+  });
+  const out = execFileSync(bin('ewp_dump'), ['netobs', set, get, stats, devs, led], { encoding: 'utf8' })
+    .trim().split('\n').map((l) => l.split(' ')).filter(([n]) => n === 'reply').map(([, hex]) => decodeFrame(hex));
+  const byRid = new Map(out.map((f) => [f.h.rid, f]));
+
+  const s = byRid.get(0x01000100);
+  assert.equal(s.h.type, MsgType.RES);
+  const sr = s.body.get(ResultBodyKey.result);
+  keysIn(sr, WatchlistResultKey, 'set_watchlist');
+  assert.equal(sr.get(WatchlistResultKey.version), 1761213600);
+  assert.equal(sr.get(WatchlistResultKey.rules), 3);
+
+  const g = byRid.get(0x01000101).body.get(ResultBodyKey.result);
+  keysIn(g, GetWatchlistResultKey, 'get_watchlist');
+  assert.deepEqual(g.get(GetWatchlistResultKey.rules)[1], ['googlevideo.com', 1, RuleFlag.ALERT | RuleFlag.SUBDOMAINS_ONLY]);
+  assert.deepEqual(g.get(GetWatchlistResultKey.categories)[1], [3, 'video_streaming:netflix']);
+
+  const st = byRid.get(0x01000102).body.get(ResultBodyKey.result);
+  keysIn(st, NetworkStatsResultKey, 'get_network_stats');
+  keysIn(st.get(NetworkStatsResultKey.dns), DnsCountersKey, 'stats.dns');
+
+  const d = byRid.get(0x01000103).body.get(ResultBodyKey.result);
+  keysIn(d, LocalDevicesResultKey, 'get_local_devices');
+  assert.equal(d.get(LocalDevicesResultKey.total), 1);
+  assert.equal(d.get(LocalDevicesResultKey.devices)[0].length, 6);
+
+  const a = byRid.get(0x01000104);
+  assert.equal(a.h.type, MsgType.RES);
+  const ar = a.body.get(ResultBodyKey.result);
+  keysIn(ar, SetActuatorResultKey, 'set_actuator');
+  assert.equal(ar.get(SetActuatorResultKey.applied), 1);
+  assert.equal(ar.get(SetActuatorResultKey.leaseRemainingMs), 20000);
 });

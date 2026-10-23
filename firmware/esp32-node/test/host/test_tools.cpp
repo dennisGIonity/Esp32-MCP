@@ -8,13 +8,16 @@
  */
 #include <string.h>
 
+#include <atomic>
 #include <string>
 
 #include "check.h"
 #include "fakes.h"
 #include "frames.h"
 #include "mcp/MCPServer.h"
+#include "tools/Actuators.h"
 #include "tools/EdgeTools.h"
+#include "tools/SystemTools.h"
 
 using namespace tf;
 
@@ -313,4 +316,153 @@ TEST(tool_periodic_telemetry_frame) {
     for (int i = 0; i < 100 && !rig.srv.postTick(); ++i) os::delayMs(1);
     CHECK(!pop(rig.up, o, 60));
     CHECK_EQ(rig.edge.telemetrySkipped(), 1u);
+}
+
+/* ---- actuators + system tools ------------------------------------------------------- */
+
+
+namespace {
+
+class FakeHw final : public tools::ActuatorHw {
+public:
+    float pin[3] = {-1, -1, -1};
+    bool configure(uint8_t, uint8_t, int gpio, uint8_t) override { return gpio != 13; }  // GPIO 13 "broken"
+    float write(uint8_t ch, uint8_t kind, float v) override {
+        // 10-bit LEDC quantisation for PWM
+        const float q = kind == EWP_ACT_PWM ? static_cast<float>(static_cast<int>(v * 1023.0f + 0.5f)) / 1023.0f : v;
+        pin[ch] = q;
+        return q;
+    }
+};
+
+struct SysRig {
+    tools::Identity id;
+    fakes::Source src;
+    mcp::Uplink up;
+    mcp::MCPServer srv;
+    tools::EdgeTools edge;
+    tools::ActuatorBank bank;
+    FakeHw hw;
+    tools::SystemTools sys;
+    std::atomic<uint32_t> restartIn{0};
+    int expired = 0;
+
+    SysRig() {
+        fakes::identity(id);
+        CHECK(bank.addChannel("pwm0", EWP_ACT_PWM, 5, 0.0f, false));
+        CHECK(bank.addChannel("pwm1", EWP_ACT_PWM, 6, 0.0f, false));
+        CHECK(bank.addChannel("relay0", EWP_ACT_RELAY, 7, 0.0f, true));
+        CHECK(bank.begin(hw, [](void* u, uint8_t, float) { ++static_cast<SysRig*>(u)->expired; }, this));
+        id.actuators = &bank;
+        CHECK(up.begin(8, 2048, false));
+        tools::EdgeToolsConfig ec;
+        ec.identity = &id;
+        ec.source = &src;
+        ec.uplink = &up;
+        CHECK(edge.begin(ec, srv));
+        tools::SystemToolsConfig sc;
+        sc.actuators = &bank;
+        sc.edge = &edge;
+        sc.scheduleRestart = [](void* u, uint32_t ms) { static_cast<SysRig*>(u)->restartIn.store(ms); };
+        sc.user = this;
+        CHECK(sys.begin(sc, srv));
+        mcp::ServerConfig cfg;
+        cfg.workerCore = -1;
+        CHECK(srv.begin(cfg, up));
+    }
+    ~SysRig() { srv.shutdown(); }
+    Out call(uint32_t rid, uint8_t tool, const Bytes& body) {
+        const Bytes f = req(rid, tool, 0, 2000, body);
+        srv.onDownlink(f.data(), f.size(), ewp::Topic::Unicast);
+        Out o;
+        CHECK(pop(up, o));
+        return o;
+    }
+};
+
+Bytes setArgsInt(uint8_t ch, uint64_t v) {
+    return Bytes{0xA2, EWP_K_SET_ACTUATOR_ARGS_CHANNEL, ch, EWP_K_SET_ACTUATOR_ARGS_VALUE, static_cast<uint8_t>(v)};
+}
+
+}  // namespace
+
+TEST(actuators_set_lease_pulse_and_failsafe) {
+    SysRig rig;
+    Out o = rig.call(1, EWP_TOOL_SET_ACTUATOR, setArgsInt(0, 1));  // pwm0 = 1 (an int is a valid float)
+    CHECK_EQ(o.h.type, EWP_MSG_RES);
+    CHECK_EQ(rig.hw.pin[0], 1.0f);
+    o = rig.call(2, EWP_TOOL_SET_ACTUATOR, setArgsInt(2, 1));  // relay0 on
+    CHECK_EQ(o.h.type, EWP_MSG_RES);
+    // relay takes 0/1 only; unknown channel; value > 1
+    uint8_t half[] = {0xA2, 0x01, 0x02, 0x02, 0xFA, 0x3F, 0x00, 0x00, 0x00};  // {1: 2, 2: 0.5f}
+    o = rig.call(3, EWP_TOOL_SET_ACTUATOR, Bytes(half, half + sizeof half));
+    CHECK_EQ(o.h.status, EWP_ST_INVALID_ARGS);
+    o = rig.call(4, EWP_TOOL_SET_ACTUATOR, setArgsInt(9, 1));
+    CHECK_EQ(o.h.status, EWP_ST_INVALID_ARGS);
+    o = rig.call(5, EWP_TOOL_SET_ACTUATOR, setArgsInt(0, 2));
+    CHECK_EQ(o.h.status, EWP_ST_INVALID_ARGS);
+    o = rig.call(6, EWP_TOOL_SET_ACTUATOR, Bytes{0xA1, 0x01, 0x00});
+    CHECK_EQ(o.h.status, EWP_ST_INVALID_ARGS);  // value missing
+
+    // lease: reverts to safe and reports the expiry
+    const int64_t t0 = os::nowUs();
+    CHECK_EQ(rig.bank.set(1, 0.5f, 0, 100, false, t0).status, EWP_ST_OK);
+    CHECK(rig.hw.pin[1] > 0.49f && rig.hw.pin[1] < 0.51f);
+    rig.bank.service(t0 + 50000);
+    CHECK(rig.hw.pin[1] > 0.4f);
+    rig.bank.service(t0 + 150000);
+    CHECK_EQ(rig.hw.pin[1], 0.0f);
+    CHECK_EQ(rig.expired, 1);
+    // pulse overlays without forgetting the host's value
+    CHECK_EQ(rig.bank.set(1, 0.25f, 0, 0, false, t0).status, EWP_ST_OK);
+    rig.bank.pulse(1, 100, t0);
+    CHECK_EQ(rig.hw.pin[1], 1.0f);
+    rig.bank.service(t0 + 200000);
+    CHECK(rig.hw.pin[1] > 0.24f && rig.hw.pin[1] < 0.26f);
+    // ramp
+    CHECK_EQ(rig.bank.set(1, 1.0f, 1000, 0, false, t0).status, EWP_ST_OK);
+    rig.bank.service(t0 + 500000);
+    CHECK(rig.hw.pin[1] > 0.55f && rig.hw.pin[1] < 0.7f);
+    rig.bank.service(t0 + 1100000);
+    CHECK_EQ(rig.hw.pin[1], 1.0f);
+
+    float vals[4];
+    CHECK_EQ(rig.bank.values(vals, 4), 3u);
+    // FAILSAFE locks the outputs
+    rig.edge.setMode(EWP_MODE_FAILSAFE);
+    o = rig.call(7, EWP_TOOL_SET_ACTUATOR, setArgsInt(0, 0));
+    CHECK_EQ(o.h.status, EWP_ST_FAILSAFE_LOCKED);
+    rig.bank.allSafe(t0);
+    CHECK_EQ(rig.hw.pin[0], 0.0f);
+    CHECK_EQ(rig.hw.pin[2], 0.0f);
+}
+
+TEST(system_reboot_and_hello_actuators) {
+    SysRig rig;
+    Out o = rig.call(1, EWP_TOOL_REBOOT, Bytes{0xA0});
+    CHECK_EQ(o.h.type, EWP_MSG_RES);
+    CHECK_EQ(rig.restartIn.load(), 500u);
+    o = rig.call(2, EWP_TOOL_REBOOT, Bytes{0xA1, 0x01, 0x00});
+    CHECK_EQ(rig.restartIn.load(), 300u);  // never before the reply can leave
+    o = rig.call(3, EWP_TOOL_REBOOT, Bytes{0xA1, 0x01, 0x19, 0x27, 0x11});
+    CHECK_EQ(o.h.status, EWP_ST_INVALID_ARGS);
+
+    uint8_t buf[1024];
+    ewp::CborWriter w(buf, sizeof buf);
+    rig.edge.encodeHello(w);
+    CHECK(w.ok());
+    const uint8_t* a = nullptr;
+    size_t an = 0;
+    CHECK(getRaw(buf, w.size(), EWP_K_HELLO_BODY_ACTUATORS, a, an));
+    ewp::CborReader r(a, an);
+    uint32_t n = 0;
+    CHECK(r.readArray(n) && n == 3);
+    std::string name;
+    CHECK(getText(a + 1, an - 1, EWP_K_ACTUATOR_DESCRIPTOR_NAME, name));
+    CHECK_STR(name.c_str(), "pwm0");
+    const uint8_t* tl = nullptr;
+    size_t tn = 0;
+    CHECK(getRaw(buf, w.size(), EWP_K_HELLO_BODY_TOOLS, tl, tn));
+    ewp::CborReader tr(tl, tn);
+    CHECK(tr.readArray(n) && n == 4);  // read_telemetry, get_device_info, set_actuator, reboot
 }

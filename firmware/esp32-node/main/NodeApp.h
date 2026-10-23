@@ -18,6 +18,7 @@
 #include "mcp/MCPServer.h"
 #include "mcp/Uplink.h"
 #include "mcp/os.h"
+#include "netobserve/NetObserve.h"
 #include "prov/Config.h"
 #include "prov/ProvHandler.h"
 #include "tools/EdgeTools.h"
@@ -35,6 +36,7 @@ enum TaskId : uint8_t {
     kTaskTcpip = 6,     // tiT: lwIP
     kTaskEvents = 7,    // sys_evt: default event loop
     kTaskTimer = 8,     // esp_timer
+    kTaskNetObs = 9,    // netobs: LAN DNS forwarder + discovery (Core 0)
 };
 
 /** Everything the glue needs, set once in main.cpp before any task starts. */
@@ -44,6 +46,7 @@ struct Wiring {
     mcp::Uplink* uplink = nullptr;
     tools::EdgeTools* edge = nullptr;
     prov::ProvHandler* prov = nullptr;
+    netobs::NetObserve* netobs = nullptr;  // nullptr when the forwarder could not be set up
     const char* hwid = nullptr;
     bool autoStartLink = false;  // provisioned node at boot: start MQTT on the first address
 };
@@ -60,6 +63,14 @@ bool linkApplied(const prov::NodeConfig& c);
 
 /** net_task hook: start the link and SNTP on the first address. */
 void superviseLink(void* unused);
+
+/**
+ * dns_mode / dns_upstream -> forwarder settings: upstreams from the provisioned
+ * list, else 1.1.1.1 + 8.8.8.8 (never the DHCP-learned server).
+ */
+void dnsSettings(const prov::NodeConfig& c, bool& forward, uint32_t upstreams[2], uint8_t& count);
+/** Apply changed dns_mode / dns_upstream to the running forwarder (no reboot). */
+void applyDnsConfig(const prov::NodeConfig& c);
 
 /** TELEMETRY hooks. */
 void netStats(void* unused, tools::NetStats& out);

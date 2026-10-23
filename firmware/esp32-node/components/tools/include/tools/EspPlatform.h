@@ -7,6 +7,8 @@
  *   fillChipIdentity()  chip, flash, PSRAM, MAC -> hwid, app version/ELF hash, reset reason
  *   EspTelemetrySource  heap / CPU / task / die-temperature / ADC probes
  *   GpioIndicator       non-blocking identify blink on a LED GPIO
+ *   EspActuatorHw       LEDC (PWM) and GPIO (relay) outputs behind ActuatorBank
+ *   pinUsableForOutput  refuses strapping / flash / PSRAM / USB / console pins per chip
  * Device build only (not part of the host tests).
  */
 #pragma once
@@ -17,6 +19,7 @@
 
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
+#include "tools/Actuators.h"
 #include "tools/EdgeTools.h"
 #include "tools/Identity.h"
 #include "tools/Telemetry.h"
@@ -36,6 +39,10 @@ public:
         void (*net)(void* user, NetStats& out) = nullptr;
         /** Worst loop time of one of OUR tasks (by HELLO task id); 0 when unknown. */
         uint32_t (*runUsMax)(void* user, uint8_t taskId) = nullptr;
+        /** NetObserve counters (TELEMETRY.dns); nullptr = no forwarder component. */
+        void (*dns)(void* user, DnsCountersSnap& out) = nullptr;
+        /** Current actuator outputs (TELEMETRY.actuators). */
+        uint8_t (*actuators)(void* user, float* out, uint8_t max) = nullptr;
         void* user = nullptr;
     };
 
@@ -64,6 +71,25 @@ private:
     int64_t cpuLastUs_ = 0;
     configRUN_TIME_COUNTER_TYPE cpuLastIdle_[2] = {0, 0};
     CpuStats cpuLast_;
+};
+
+/**
+ * True when `gpio` may be driven as an output on this chip: valid output pin and
+ * not a strapping, flash/PSRAM, native-USB or console-UART pin (fw 2.x rules).
+ */
+bool pinUsableForOutput(int gpio);
+
+/** ActuatorBank hardware: PWM channels on LEDC (low-speed timer 0, 5 kHz, 10 bit), relays on plain GPIO. */
+class EspActuatorHw final : public ActuatorHw {
+public:
+    bool configure(uint8_t ch, uint8_t kind, int gpio, uint8_t resBits) override;
+    float write(uint8_t ch, uint8_t kind, float value) override;
+
+private:
+    int gpio_[ActuatorBank::kMaxChannels] = {-1, -1, -1};
+    int ledc_[ActuatorBank::kMaxChannels] = {-1, -1, -1};
+    int nextLedc_ = 0;
+    bool timerReady_ = false;
 };
 
 /** identify: blink a LED from an esp_timer callback; blink() returns at once. */

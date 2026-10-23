@@ -11,6 +11,7 @@ import {
   crc32,
   crc32Hex,
   formatRequest,
+  parseDnsUpstream,
   normalizeBoard,
   normalizeTest,
   normalizeUuid,
@@ -193,4 +194,40 @@ test('redaction hides every secret', () => {
   assert.equal(r['pass'], '•••');
   assert.equal(r['ca_pem'], '<6 chars>');
   assert.equal(r['ssid'], 'Lab');
+});
+
+test('LAN DNS fields: upstream parsing, form validation, plan per firmware', () => {
+  assert.deepEqual(parseDnsUpstream(''), { ok: true, value: '' });
+  assert.deepEqual(parseDnsUpstream(' 1.1.1.1 , 9.9.9.9 '), { ok: true, value: '1.1.1.1,9.9.9.9' });
+  for (const bad of ['1.1.1', '1.1.1.1,8.8.8.8,9.9.9.9', '256.1.1.1', '01.1.1.1', '127.0.0.1', '0.0.0.0', '224.0.0.251', '255.255.255.255', '1.1.1.1,1.1.1.1', 'dns.google']) {
+    assert.equal(parseDnsUpstream(bad).ok, false, bad);
+  }
+  assert.equal(NVS_KEY.dns_mode, 'dns_mode');
+  assert.equal(NVS_KEY.dns_upstream, 'dns_upstream');
+
+  const bad = validateForm(form({ dnsUpstream: '1.1.1.1,2.2.2.2,3.3.3.3' }));
+  assert.ok(!bad.ok && bad.errors.dnsUpstream);
+  const r = validateForm(form({ dnsMode: 'forward', dnsUpstream: '9.9.9.9, 1.1.1.1' }));
+  assert.ok(r.ok);
+  assert.equal(r.value.dnsUpstream, '9.9.9.9,1.1.1.1');
+  assert.ok(r.warnings.some((w) => w.includes('DHCP DNS')));
+
+  const fw31 = { ...v2Hello, setFields: new Set([...v2Hello.setFields, 'dns_mode', 'dns_upstream']) };
+  const p = planSet(r.value, fw31);
+  assert.equal(p.fields.dns_mode, 'forward');
+  assert.equal(p.fields.dns_upstream, '9.9.9.9,1.1.1.1');
+  // fw 3.0 and fw 2.x: never sent, a warning instead
+  for (const b of [v2Hello, v1Hello]) {
+    const q = planSet(r.value, b);
+    assert.equal(q.fields.dns_mode, undefined);
+    assert.equal(q.fields.dns_upstream, undefined);
+    assert.ok(q.warnings.some((w) => w.includes('DNS forwarder')));
+  }
+  // empty = unchanged
+  const keep = validateForm(form({}));
+  assert.ok(keep.ok);
+  assert.equal('dns_mode' in planSet(keep.value, fw31).fields, false);
+  const b = normalizeBoard({ op: 'hello', prov: 2, hwid: 'esp32-98a316e5d18c', dns_mode: 'forward', dns_upstream: '', dns: { mode: 'forward', port: 53, queries: 12 } });
+  assert.equal(b.dnsMode, 'forward');
+  assert.deepEqual(b.dns, { mode: 'forward', port: 53, queries: 12 });
 });

@@ -33,6 +33,10 @@ export interface SetFields {
   site?: string;
   group?: string;
   label?: string;
+  /** prov/2, fw >= 3.1: LAN DNS forwarder on/off (see dns.ts) */
+  dns_mode?: 'off' | 'forward';
+  /** prov/2, fw >= 3.1: "" = 1.1.1.1,8.8.8.8, else 1-2 comma-separated IPv4 resolvers */
+  dns_upstream?: string;
 }
 
 export type SetFieldName = keyof SetFields;
@@ -56,6 +60,8 @@ export const NVS_KEY = {
   site: 'site',
   group: 'group',
   label: 'label',
+  dns_mode: 'dns_mode',
+  dns_upstream: 'dns_upstream',
 } as const satisfies Record<SetFieldName, string>;
 
 /** Never echoed by the board, never shown in the terminal, never stored by the portal. */
@@ -78,6 +84,8 @@ export const LIMITS = {
   userBytes: 64,
   secretBytes: 128,
   caPemBytes: 3072,
+  /** "255.255.255.255,255.255.255.255" */
+  dnsUpstreamBytes: 31,
 } as const;
 
 const SECRET_SET: ReadonlySet<string> = new Set(SECRET_FIELDS);

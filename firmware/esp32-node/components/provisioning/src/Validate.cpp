@@ -158,6 +158,73 @@ bool validToken(const char* s, size_t n) {
     return true;
 }
 
+bool parseIpv4(const char* s, size_t n, uint32_t* out) {
+    uint32_t addr = 0;
+    size_t i = 0;
+    for (int part = 0; part < 4; ++part) {
+        if (part > 0) {
+            if (i >= n || s[i] != '.') return false;
+            ++i;
+        }
+        const size_t start = i;
+        uint32_t v = 0;
+        while (i < n && isDigit(s[i]) && i - start < 3) v = v * 10 + static_cast<uint32_t>(s[i++] - '0');
+        const size_t digits = i - start;
+        if (digits == 0 || v > 255 || (digits > 1 && s[start] == '0')) return false;
+        if (i < n && isDigit(s[i])) return false;  // a fourth digit
+        addr = (addr << 8) | v;
+    }
+    if (i != n) return false;
+    if (out != nullptr) *out = addr;
+    return true;
+}
+
+bool parseDnsUpstream(const char* s, size_t n, uint32_t ips[Limits::kDnsUpstreams], size_t* count, const char** err) {
+    *count = 0;
+    if (n == 0) return true;  // firmware default
+    if (n > Limits::kDnsUpstream) {
+        *err = "at most 2 IPv4 resolvers, e.g. 1.1.1.1,8.8.8.8";
+        return false;
+    }
+    size_t i = 0;
+    while (i <= n) {
+        size_t j = i;
+        while (j < n && s[j] != ',') ++j;
+        if (*count >= Limits::kDnsUpstreams) {
+            *err = "at most 2 upstream resolvers";
+            return false;
+        }
+        uint32_t ip = 0;
+        if (!parseIpv4(s + i, j - i, &ip)) {
+            *err = "dns_upstream must be IPv4 addresses separated by a comma, no spaces";
+            return false;
+        }
+        const uint32_t a = ip >> 24;
+        if (a == 0 || a == 127 || a >= 224) {
+            *err = "loopback, multicast and reserved addresses cannot be a DNS upstream";
+            return false;
+        }
+        for (size_t k = 0; k < *count; ++k) {
+            if (ips[k] == ip) {
+                *err = "an upstream is listed twice";
+                return false;
+            }
+        }
+        ips[(*count)++] = ip;
+        if (j == n) break;
+        i = j + 1;
+        if (i == n) {
+            *err = "dns_upstream must not end with a comma";
+            return false;
+        }
+    }
+    return true;
+}
+
+bool validDnsMode(const char* s, size_t n) {
+    return (n == 3 && memcmp(s, "off", 3) == 0) || (n == 7 && memcmp(s, "forward", 7) == 0);
+}
+
 bool validText(const char* s, size_t n, size_t maxBytes, const char** err) {
     if (n > maxBytes) {
         *err = "too long";

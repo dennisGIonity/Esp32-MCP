@@ -12,6 +12,7 @@
 import { crc32Hex } from '../crc32.ts';
 import { PROV_PREFIX, PROV_V1_LINE_MAX, PROV_V2_LINE_MAX } from '../framing.ts';
 import { V1_SET_FIELDS, type SetFieldName } from '../fields.ts';
+import { DNS_MODES, parseDnsUpstream } from '../dns.ts';
 
 const timers = globalThis as unknown as { setTimeout(fn: () => void, ms: number): unknown };
 
@@ -54,7 +55,7 @@ const SECRET_KEYS = new Set(['pass', 'mqtt_pass', 'fleet_token', 'mcp_token', 'o
 const ENVELOPE: ReadonlySet<string> = new Set(['ionity', 'op', 'v', 'id']);
 const V2_FIELDS: readonly SetFieldName[] = [
   'ssid', 'pass', 'host_url', 'device_uuid', 'ca_pem', 'mqtt_user', 'mqtt_pass',
-  'fleet_token', 'mcp_token', 'ota_pass', 'role', 'site', 'group', 'label',
+  'fleet_token', 'mcp_token', 'ota_pass', 'role', 'site', 'group', 'label', 'dns_mode', 'dns_upstream',
 ];
 
 export class FakeBoard {
@@ -256,6 +257,13 @@ export class FakeBoard {
       for (const k of Object.keys(req)) {
         if (!ENVELOPE.has(k) && !allowed.has(k)) return fail(k, 'unknown field');
       }
+      const mode = req['dns_mode'];
+      if (mode !== undefined && !(DNS_MODES as readonly unknown[]).includes(mode)) return fail('dns_mode', 'dns_mode must be off|forward');
+      const up = req['dns_upstream'];
+      if (up !== undefined) {
+        const r = typeof up === 'string' ? parseDnsUpstream(up) : { ok: false as const, error: 'must be a string' };
+        if (!r.ok || (typeof up === 'string' && r.value !== up)) return fail('dns_upstream', r.ok ? 'use a,b with no spaces' : r.error);
+      }
     }
     const changed: string[] = [];
     let netChanged = false;
@@ -369,6 +377,9 @@ export class FakeBoard {
       base['device_uuid'] = String(this.nvs.get('dev_uuid') ?? '');
       base['has_ca'] = this.nvs.has('ca_pem');
       base['has_mqtt_pass'] = this.nvs.has('mqtt_pass');
+      base['dns_mode'] = String(this.nvs.get('dns_mode') ?? 'off');
+      base['dns_upstream'] = String(this.nvs.get('dns_upstream') ?? '');
+      base['dns'] = { mode: this.#wifiUp ? base['dns_mode'] : 'off', port: 53, queries: 0 };
     } else {
       base['server'] = String(this.nvs.get('server') ?? '');
       base['mqtt_port'] = Number(this.nvs.get('mqtt_port') ?? 1883);

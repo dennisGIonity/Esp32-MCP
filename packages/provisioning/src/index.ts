@@ -9,6 +9,7 @@
 export * from './text.ts';
 export * from './crc32.ts';
 export * from './fields.ts';
+export * from './dns.ts';
 export * from './framing.ts';
 export * from './host-url.ts';
 export * from './uuid.ts';

@@ -118,6 +118,12 @@ public:
      */
     void fail(uint8_t status, const char* detail, int argKey = -1, uint32_t retryAfterMs = 0);
     bool failed() const { return failStatus_ != EWP_ST_OK; }
+    /**
+     * The result is complete but shortened to fit the uplink buffer (a list
+     * trimmed to what fits). Sets FrameFlag.TRUNCATED on the RES.
+     */
+    void setTruncated() { truncated_ = true; }
+    bool truncated() const { return truncated_; }
 
 private:
     friend class MCPServer;
@@ -136,6 +142,7 @@ private:
     uint8_t tool_ = 0;
     uint8_t flags_ = 0;
     uint8_t failStatus_ = EWP_ST_OK;
+    bool truncated_ = false;
 };
 
 struct ServerConfig {
@@ -174,7 +181,7 @@ struct ServerStats {
 
 class MCPServer {
 public:
-    static constexpr size_t kMaxTools = 8;
+    static constexpr size_t kMaxTools = 16;
     static constexpr size_t kMaxSlots = 8;
     /** REQ rids remembered for duplicate detection (QoS 1 redelivery, gateway retry). */
     static constexpr size_t kDedupeWindow = 16;
