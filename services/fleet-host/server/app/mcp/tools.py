@@ -21,7 +21,8 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, Awaitable, Callable, Literal
+from typing import Any, Literal
+from collections.abc import Awaitable, Callable
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 

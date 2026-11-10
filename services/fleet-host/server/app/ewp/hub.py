@@ -24,7 +24,8 @@ import random
 import re
 import time
 from collections import deque
-from typing import Any, Callable
+from typing import Any
+from collections.abc import Callable
 
 from app.ewp import ewp_protocol as P
 from app.ewp.codec import FrameError, decode_frame, encode_frame, ip4, keyed, mac, named, num

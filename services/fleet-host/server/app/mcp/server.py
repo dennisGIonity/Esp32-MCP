@@ -22,7 +22,8 @@ import logging
 import secrets
 import time
 from dataclasses import dataclass, field
-from typing import Any, Awaitable, Callable
+from typing import Any
+from collections.abc import Awaitable, Callable
 
 from app.mcp import protocol
 from app.mcp import resources as res

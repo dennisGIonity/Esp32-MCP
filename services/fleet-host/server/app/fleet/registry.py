@@ -14,7 +14,8 @@ import json
 import logging
 import time
 from collections import deque
-from typing import Any, Callable, Awaitable
+from typing import Any
+from collections.abc import Callable, Awaitable
 
 from app.config import settings
 from app.models import TelemetryIn, StatusIn, DeviceView, Alert, FleetSummary

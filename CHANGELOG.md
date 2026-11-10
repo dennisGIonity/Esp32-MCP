@@ -5,6 +5,30 @@ AEDI - IONITY GLOBAL | DOC-2026-09-ESP32MCP-CHG | Policy 986 AED
 
 # Changelog
 
+## 3.0.0-rc — 2026-11-10 (NetObserve v3 · branch `feat/netobserve-v3`, not yet pushed)
+
+### In this branch (committed)
+- **Protocol EWP/1 NetObserve** (`packages/protocol`): DNS batch / flag events, watchlist, LAN devices, reboot;
+  generated C header + Python modules (`npm run check:gen`, `check:c`).
+- **Firmware 3.1.0** (`firmware/esp32-node`): on-device DNS forwarder, edge watchlist, LAN discovery, actuators,
+  reboot; `ionity-prov/2` gains `dns_mode` + `dns_upstream`.
+- **Pi agent 2.0.0** (`devices/pi-agent`): same EWP/1 contract, UDP+TCP DNS forwarder, DHCP/mDNS/ARP discovery.
+- **Fleet host 3.0** (`services/fleet-host`): EWP/1 hub (MQTT + HTTP), DNS pipeline, watchlist rule engine, device
+  labels, node actions, MCP 2025-11-25 (Streamable HTTP `/mcp` + stdio bridge), ingest auth + rate limits.
+- **Portal 3** (`apps/portal`): Board / Fleet / Network activity / Watchlist; served at `/portal/`, `/flasher/` redirects.
+
+### Brush-over (2026-11-10)
+- Host DNS resolver and host LAN sweep now **default off** (`IONITY_DNS_ENABLED`, `IONITY_LAN_SWEEP_ENABLED`),
+  as PLAN-v3-ESP-CENTRIC requires; the POC kit (`poc.ps1 setup`) and tester kit (`tester.env`) switch both on
+  explicitly so the boardroom demo is unchanged. Guard test: `tests/test_v3_defaults.py`.
+- `.gitattributes`: `* text=auto` so Windows checkouts stop showing every file as modified (CRLF churn).
+- Fleet host: ruff pyupgrade fixes (PEP 585/604 annotations, `TimeoutError` alias).
+
+### Still open — see `docs/HANDOFF-2026-11-10.md`
+- `ping_host` (EWP tool 0x47), MQTT reconnect back-off with jitter, sentinel real-data parsing: described in the
+  23 Oct status note but **not present in any saved copy**; must be re-implemented.
+- Live test with real boards.
+
 ## 2.2.0 — 2026-10-10 (whole-network view + network alerts · POC package v1.2)
 
 ### Fleet server

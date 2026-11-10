@@ -107,7 +107,7 @@ Resolve-DnsName ionity.today            # then check it appears in the dashboard
 
 | `.env` key | Default | Note |
 |---|---|---|
-| `IONITY_DNS_ENABLED` | `true` | Set false to disable the resolver entirely |
+| `IONITY_DNS_ENABLED` | `false` | Lab fallback since fleet host 3.0 (the ESP node is the resolver). The POC and tester kits set it `true` |
 | `IONITY_DNS_BIND` | `0.0.0.0` | Listen address |
 | `IONITY_DNS_PORT` | `53` | Use `5353` to test without touching the real DNS path |
 | `IONITY_DNS_UPSTREAMS` | `1.1.1.1,8.8.8.8` | Tried in order |

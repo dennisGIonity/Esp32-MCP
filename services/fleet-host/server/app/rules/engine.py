@@ -28,7 +28,8 @@ import logging
 import re
 
 from dataclasses import dataclass, field
-from typing import Any, Awaitable, Callable
+from typing import Any
+from collections.abc import Awaitable, Callable
 
 from app.ewp import ewp_protocol as P
 
@@ -95,7 +96,7 @@ class Match:
 
 @dataclass
 class _Node:
-    children: dict[str, "_Node"] = field(default_factory=dict)
+    children: dict[str, _Node] = field(default_factory=dict)
     exact: Rule | None = None          # rule that matches this name AND its subdomains
     sub_only: Rule | None = None       # rule that matches subdomains only
 

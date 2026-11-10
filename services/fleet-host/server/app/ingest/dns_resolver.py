@@ -177,7 +177,7 @@ class _SockSender:
 class _ServerProtocol:
     """Hands each received datagram to the service."""
 
-    def __init__(self, svc: "DnsService"):
+    def __init__(self, svc: DnsService):
         self.svc = svc
 
     def error_received(self, exc):
@@ -306,7 +306,7 @@ class DnsService:
         while not self._stopping:
             try:
                 data, addr = sock.recvfrom(4096)
-            except socket.timeout:
+            except TimeoutError:
                 continue
             except OSError as e:
                 if self._stopping or sock.fileno() == -1:
@@ -517,7 +517,7 @@ class DnsService:
         # Anything else (the Pi, a printer) is named in config/device_labels.json (app/labels.py).
         book = self.labels
         # Whole-network sweep: make every live device show up in ARP.
-        if getattr(self.s, "lan_sweep_enabled", True):
+        if getattr(self.s, "lan_sweep_enabled", False):
             nets = self._sweep_targets()
             t0 = time.time()
             try:

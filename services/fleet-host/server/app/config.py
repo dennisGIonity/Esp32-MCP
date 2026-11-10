@@ -88,7 +88,9 @@ class Settings(BaseSettings):
     # An ESP32 WiFi client cannot see other devices' DNS (per-client WPA keys
     # + switched unicast). So the resolver runs here instead: point the
     # router's DHCP at this host as LAN DNS and every query arrives by design.
-    dns_enabled: bool = True
+    # v3 (PLAN-v3-ESP-CENTRIC): the ESP node is the resolver; this host resolver
+    # is a lab-only fallback and OFF by default. The POC/tester kits switch it on.
+    dns_enabled: bool = False
     dns_bind: str = "0.0.0.0"
     dns_port: int = 53                   # 5353 is handy for testing unprivileged
     dns_upstreams: str = "1.1.1.1,8.8.8.8"
@@ -102,7 +104,8 @@ class Settings(BaseSettings):
     # --- Whole-network view + alerts (v2.1) --------------------------------
     # Every LAN subnet this host sits on is swept (one UDP poke per address, so
     # the OS ARPs it) so EVERY device appears, not only the ones using our DNS.
-    lan_sweep_enabled: bool = True
+    # v3: off by default (each ESP reports its own LAN via get_local_devices).
+    lan_sweep_enabled: bool = False
     lan_sweep_interval_s: int = 60
     # Watchlist: the rule engine (app/rules, API /api/v1/watchlist, MCP manage_dns_watchlist)
     # is the source of truth, seeded with the built-in YouTube/TikTok rules. Domains listed

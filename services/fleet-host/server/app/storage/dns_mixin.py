@@ -20,7 +20,8 @@ Retention: rows older than dns_retention_days AND beyond dns_max_rows go.
 from __future__ import annotations
 
 import time
-from typing import Any, Iterable
+from typing import Any
+from collections.abc import Iterable
 
 DNS_SCHEMA = """
 CREATE TABLE IF NOT EXISTS dns_queries (

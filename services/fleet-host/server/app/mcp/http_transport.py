@@ -41,7 +41,7 @@ KEEPALIVE_S = 15.0
 
 def _origin_ok(request: Request) -> bool:
     origin = request.headers.get("origin")
-    if not origin or origin == "null" and request.client and request.client.host in ("127.0.0.1", "::1"):
+    if not origin or (origin == "null" and request.client and request.client.host in ("127.0.0.1", "::1")):
         return True
     try:
         o = urlsplit(origin)
