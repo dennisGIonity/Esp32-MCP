@@ -7,11 +7,15 @@
 
 #include <string.h>
 
+#include <atomic>
+
 #include "esp_log.h"
 #include "esp_netif.h"
 #include "esp_netif_net_stack.h"
 #include "lwip/etharp.h"
 #include "lwip/inet.h"
+#include "lwip/netdb.h"
+#include "ping/ping_sock.h"
 #include "lwip/netif.h"
 #include "nvs.h"
 
@@ -23,6 +27,37 @@ constexpr const char* kNs = "ionity";
 constexpr const char* kKey = "watchlist";
 
 esp_netif_t* sta() { return esp_netif_get_handle_from_ifkey("WIFI_STA_DEF"); }
+
+/* ping_host counters: written by the esp_ping task, read by the MCP worker. */
+struct PingState {
+    std::atomic<uint32_t> sent{0};
+    std::atomic<uint32_t> received{0};
+    std::atomic<uint32_t> rttMin{0};
+    std::atomic<uint32_t> rttMax{0};
+    std::atomic<uint32_t> rttSum{0};
+    std::atomic<bool> done{false};
+    void reset() {
+        sent = 0;
+        received = 0;
+        rttMin = 0;
+        rttMax = 0;
+        rttSum = 0;
+        done = false;
+    }
+};
+PingState g_ping;
+
+void onPingSuccess(esp_ping_handle_t h, void*) {
+    uint32_t ms = 0;
+    esp_ping_get_profile(h, ESP_PING_PROF_TIMEGAP, &ms, sizeof ms);
+    g_ping.sent.fetch_add(1);
+    const uint32_t n = g_ping.received.fetch_add(1) + 1;
+    g_ping.rttSum.fetch_add(ms);
+    if (n == 1 || ms < g_ping.rttMin.load()) g_ping.rttMin = ms;
+    if (ms > g_ping.rttMax.load()) g_ping.rttMax = ms;
+}
+void onPingTimeout(esp_ping_handle_t, void*) { g_ping.sent.fetch_add(1); }
+void onPingEnd(esp_ping_handle_t, void*) { g_ping.done = true; }
 
 struct LookupCtx {
     esp_netif_t* nif;
@@ -152,6 +187,65 @@ bool EspNetPlatform::saveWatchlist(const uint8_t* buf, size_t len) {
     nvs_close(h);
     if (e != ESP_OK) ESP_LOGW(TAG, "watchlist not saved: %s", esp_err_to_name(e));
     return e == ESP_OK;
+}
+
+bool EspNetPlatform::resolveHost(const char* host, uint32_t& ip) {
+    ip4_addr_t a;
+    if (ip4addr_aton(host, &a) != 0) {
+        ip = lwip_ntohl(a.addr);
+        return true;
+    }
+    addrinfo hints = {};
+    hints.ai_family = AF_INET;
+    addrinfo* res = nullptr;
+    if (lwip_getaddrinfo(host, nullptr, &hints, &res) != 0 || res == nullptr) return false;
+    ip = lwip_ntohl(reinterpret_cast<sockaddr_in*>(res->ai_addr)->sin_addr.s_addr);
+    lwip_freeaddrinfo(res);
+    return true;
+}
+
+bool EspNetPlatform::pingStart(uint32_t ip, uint8_t count, uint16_t timeoutMs, uint16_t intervalMs) {
+    pingStop();
+    g_ping.reset();
+    esp_ping_config_t cfg = ESP_PING_DEFAULT_CONFIG();
+    cfg.count = count;
+    cfg.timeout_ms = timeoutMs;
+    cfg.interval_ms = intervalMs;
+    cfg.target_addr.type = IPADDR_TYPE_V4;
+    cfg.target_addr.u_addr.ip4.addr = lwip_htonl(ip);
+    cfg.task_stack_size = 3072;
+    esp_ping_callbacks_t cbs = {};
+    cbs.on_ping_success = &onPingSuccess;
+    cbs.on_ping_timeout = &onPingTimeout;
+    cbs.on_ping_end = &onPingEnd;
+    esp_ping_handle_t h = nullptr;
+    if (esp_ping_new_session(&cfg, &cbs, &h) != ESP_OK) {
+        ESP_LOGW(TAG, "ping_host: no ping session (socket or memory)");
+        return false;
+    }
+    if (esp_ping_start(h) != ESP_OK) {
+        esp_ping_delete_session(h);
+        return false;
+    }
+    ping_ = h;
+    return true;
+}
+
+void EspNetPlatform::pingStatus(PingStats& out) {
+    out.sent = static_cast<uint8_t>(g_ping.sent.load());
+    out.received = static_cast<uint8_t>(g_ping.received.load());
+    out.rttMinMs = g_ping.rttMin.load();
+    out.rttMaxMs = g_ping.rttMax.load();
+    out.rttSumMs = g_ping.rttSum.load();
+    out.done = g_ping.done.load();
+}
+
+void EspNetPlatform::pingStop() {
+    if (ping_ == nullptr) return;
+    auto h = static_cast<esp_ping_handle_t>(ping_);
+    esp_ping_stop(h);
+    esp_ping_delete_session(h);
+    ping_ = nullptr;
 }
 
 }  // namespace netobs

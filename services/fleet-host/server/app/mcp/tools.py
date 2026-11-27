@@ -595,6 +595,34 @@ async def _node_action(a: NodeActionArgs, ctx: Ctx):
     return r
 
 
+class PingFromNodeArgs(DeviceArgs):
+    target: str = Field(..., min_length=1, max_length=253,
+                        description="host name or IPv4 address to ping FROM the node, e.g. 192.168.0.1 or youtube.com")
+    count: int = Field(4, ge=1, le=10, description="echo requests (1-10)")
+    timeout_ms: int = Field(1000, ge=100, le=5000, description="wait per echo, ms")
+    interval_ms: int = Field(1000, ge=200, le=5000, description="gap between echoes, ms")
+
+
+@tool("ping_from_node", "Ping a host from a node",
+      """Send ICMP echo requests FROM an ESP32 (firmware 3.2+) or Pi (agent 2.1+) node to a host and report
+      reachability as that board sees it: resolved address, sent / received, loss %, RTT min / avg / max in ms.
+      Use it to tell 'the board is offline' apart from 'the board is fine but cannot reach X' (router, upstream
+      DNS, a website). error is none, resolve_failed, timeout, not_permitted or busy. Takes about
+      (count - 1) x interval_ms + timeout_ms.""", PingFromNodeArgs,
+      read_only=True, destructive=False, idempotent=True, open_world=True)
+async def _ping_from_node(a: PingFromNodeArgs, ctx: Ctx):
+    from app.fleet.actions import ActionError, node_action
+    _device(ctx, a.device_id)
+    params = {"target": a.target, "count": a.count, "timeout_ms": a.timeout_ms, "interval_ms": a.interval_ms}
+    try:
+        r = await node_action(a.device_id, "ping_target", params, registry=ctx.registry, hub=ctx.hub)
+    except ActionError as e:
+        raise ToolArgError(str(e)) from None
+    if r.get("ok") is False:
+        raise ToolFailure(r.get("error") or "ping_host failed")
+    return r
+
+
 # ---- legacy commands + node tools -------------------------------------------------------------
 @tool("send_command", "Send a fw 2.x command",
       """Commands for fw 2.x JSON boards (or 'broadcast'): reboot, identify, ping, set_meta, set_display,

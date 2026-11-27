@@ -9,6 +9,8 @@
  */
 #pragma once
 
+#include <stdio.h>
+
 #include <arpa/inet.h>
 #include <fcntl.h>
 #include <netinet/in.h>
@@ -42,6 +44,13 @@ public:
     std::atomic<uint8_t> lastAlertCategory{0};
     Bytes blob;
     int saves = 0;
+    // ping_host: replies[i] = RTT ms of echo i, or -1 for a lost echo
+    std::vector<int> pingReplies{12, 9, 15, 11};
+    bool pingPermitted = true;
+    bool pingHang = false;  // never finishes (cancel / deadline tests)
+    std::atomic<int> pingStops{0};
+    uint32_t pingedIp = 0;
+    netobs::PingStats pingSt;
 
     bool stationIp(uint32_t& a, uint32_t& m) override {
         std::lock_guard<std::mutex> lk(mu);
@@ -94,6 +103,43 @@ public:
         len = blob.size();
         return true;
     }
+    bool resolveHost(const char* host, uint32_t& out) override {
+        unsigned a, b, c, d;
+        char tail;
+        if (sscanf(host, "%u.%u.%u.%u%c", &a, &b, &c, &d, &tail) == 4 && a < 256 && b < 256 && c < 256 && d < 256) {
+            out = (a << 24) | (b << 16) | (c << 8) | d;
+            return true;
+        }
+        if (strcmp(host, "nas.lan") == 0) {
+            out = 0xC0A80007;  // 192.168.0.7
+            return true;
+        }
+        return false;  // every other name is NXDOMAIN on this fake LAN
+    }
+    bool pingStart(uint32_t target, uint8_t count, uint16_t, uint16_t) override {
+        std::lock_guard<std::mutex> lk(mu);
+        if (!pingPermitted) return false;
+        pingedIp = target;
+        pingSt = {};
+        if (pingHang) return true;
+        for (uint8_t i = 0; i < count; ++i) {
+            const int rtt = pingReplies[i % pingReplies.size()];
+            ++pingSt.sent;
+            if (rtt < 0) continue;
+            const uint32_t ms = static_cast<uint32_t>(rtt);
+            if (pingSt.received == 0 || ms < pingSt.rttMinMs) pingSt.rttMinMs = ms;
+            if (ms > pingSt.rttMaxMs) pingSt.rttMaxMs = ms;
+            pingSt.rttSumMs += ms;
+            ++pingSt.received;
+        }
+        pingSt.done = true;
+        return true;
+    }
+    void pingStatus(netobs::PingStats& out) override {
+        std::lock_guard<std::mutex> lk(mu);
+        out = pingSt;
+    }
+    void pingStop() override { pingStops.fetch_add(1); }
     bool saveWatchlist(const uint8_t* buf, size_t len) override {
         std::lock_guard<std::mutex> lk(mu);
         blob.assign(buf, buf + len);

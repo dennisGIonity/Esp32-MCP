@@ -80,6 +80,8 @@ export const ToolId = {
   /** sweep the node's /24 with ARP requests so silent devices show up */
   SCAN_LAN: 0x45,
   FLUSH_DNS_CACHE: 0x46,
+  /** ICMP echo from the node to a LAN or internet host (reachability seen from that board) */
+  PING_HOST: 0x47,
   // ---- system --------------------------------------------------------------------
   /** reply first, then restart after delayMs */
   REBOOT: 0xf0,
@@ -91,7 +93,7 @@ export const NO_TOOL = 0x00;
  * Allocation plan for tool ids (inclusive ranges). NetObserve is PLAN-v3:
  * PLAN-v3's set_flag_rules / get_flag_rules shipped as set_watchlist /
  * get_watchlist, get_dns_activity is the DNS_BATCH event stream plus
- * query_dns_log, and scan_lan / flush_dns_cache were added for the host.
+ * query_dns_log, and scan_lan / flush_dns_cache / ping_host were added for the host.
  */
 export const TOOL_ID_RANGE = {
   core: [0x01, 0x3f],
@@ -116,6 +118,7 @@ export const TOOL_NAME = {
   [ToolId.QUERY_DNS_LOG]: 'query_dns_log',
   [ToolId.SCAN_LAN]: 'scan_lan',
   [ToolId.FLUSH_DNS_CACHE]: 'flush_dns_cache',
+  [ToolId.PING_HOST]: 'ping_host',
   [ToolId.REBOOT]: 'reboot',
 } as const satisfies Record<ToolId, string>;
 
@@ -326,6 +329,20 @@ export const WatchlistOp = {
   APPEND: 1,
 } as const;
 export type WatchlistOp = ValueOf<typeof WatchlistOp>;
+
+/** PING_HOST outcome. NONE with received < sent is partial loss, not an error. */
+export const PingError = {
+  NONE: 0,
+  /** the target name did not resolve */
+  RESOLVE_FAILED: 1,
+  /** no echo reply at all within count x timeout */
+  TIMEOUT: 2,
+  /** the node may not open an ICMP socket (Pi without ping_group_range / CAP_NET_RAW) */
+  NOT_PERMITTED: 3,
+  /** another ping_host is still running on this node (one at a time) */
+  BUSY: 4,
+} as const;
+export type PingError = ValueOf<typeof PingError>;
 
 /** Where the node learned about a LAN device (bitset). */
 export const DiscoverySource = {

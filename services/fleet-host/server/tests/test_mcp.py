@@ -213,3 +213,24 @@ def test_stdio_bridge_survives_dead_backend():
     assert by_id[1]["result"]["protocolVersion"] == "2025-06-18"
     assert len(by_id[2]["result"]["tools"]) == len(T.MCP_TOOLS)
     assert by_id[4]["result"]["isError"] is True
+
+
+@pytest.mark.asyncio
+async def test_ping_from_node_schema_and_errors(mcp):
+    srv, _ = mcp
+    tools = {t["name"]: t for t in (await srv.handle(rpc(1, "tools/list")))["result"]["tools"]}
+    t = tools["ping_from_node"]
+    assert t["annotations"]["readOnlyHint"] is True and t["annotations"]["openWorldHint"] is True
+    props = t["inputSchema"]["properties"]
+    assert props["count"]["maximum"] == 10 and props["timeout_ms"]["minimum"] == 100
+    assert set(t["inputSchema"]["required"]) == {"device_id", "target"}
+    r = await srv.handle(rpc(2, "tools/call", {"name": "ping_from_node",
+                                                "arguments": {"device_id": "esp32-aaa", "target": "1.1.1.1", "count": 11}}))
+    assert r["result"]["isError"] and "count" in text(r)
+    # a fw 2.x JSON board cannot ping_host: a clear tool error, nothing sent
+    r = await srv.handle(rpc(3, "tools/call", {"name": "ping_from_node",
+                                                "arguments": {"device_id": "esp32-aaa", "target": "1.1.1.1"}}))
+    assert r["result"]["isError"] and "firmware 3.2" in text(r)
+    r = await srv.handle(rpc(4, "tools/call", {"name": "ping_from_node",
+                                                "arguments": {"device_id": "esp32-aaa", "target": "x;reboot"}}))
+    assert r["result"]["isError"] and "host name or IPv4" in text(r)

@@ -17,20 +17,46 @@ everywhere:
   network_stats   forwarder counters + upstream health
   local_devices   the node's LAN client table
   dns_log         the node's most recent queries
+  ping_target     ICMP echo FROM the node to a host (target, count?, timeout_ms?, interval_ms?) -
+                  reachability as that board sees it (EWP tool ping_host, firmware 3.2 / Pi agent 2.1)
 
 EWP/1 nodes (firmware 3, Pi agent 2) get REQ frames through the hub; fw 2.x
 JSON boards get their legacy commands where an equivalent exists.
 """
 from __future__ import annotations
 
+import re
 import time
 from typing import Any
 
 from app.ewp import ewp_protocol as P
 
 ACTIONS = ("ping", "identify", "reboot", "set_alert_led", "arp_scan", "flush_dns_cache", "sync_watchlist",
-           "network_stats", "local_devices", "dns_log")
+           "network_stats", "local_devices", "dns_log", "ping_target")
 DESTRUCTIVE = {"reboot", "set_alert_led"}
+
+_TARGET_RE = re.compile(
+    r"^(?=.{1,253}$)[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*\.?$")
+PING_ERRORS = {v: k.lower() for k, v in ((n[len("PING_"):], getattr(P, n)) for n in dir(P)
+                                        if n.startswith("PING_") and n != "PING_NAMES")}
+
+
+def ping_args(p: dict[str, Any]) -> dict[str, Any]:
+    """Validate ping_target params against the EWP contract (EWP_LIMITS.ping*) -> PingHostArgs fields."""
+    L = P.LIMITS
+    target = str(p.get("target") or "").strip()
+    if not _TARGET_RE.match(target):
+        raise ActionError("ping_target needs target: a host name or IPv4 address")
+
+    def bounded(name: str, default: int, lo: int, hi: int) -> int:
+        v = p.get(name, default)
+        if isinstance(v, bool) or not isinstance(v, int) or not lo <= v <= hi:
+            raise ActionError(f"ping_target {name} must be an integer {lo}-{hi}")
+        return v
+    return {"target": target,
+            "count": bounded("count", 4, 1, L["pingCountMax"]),
+            "timeoutMs": bounded("timeout_ms", 1000, L["pingTimeoutMinMs"], L["pingTimeoutMaxMs"]),
+            "intervalMs": bounded("interval_ms", 1000, L["pingIntervalMinMs"], L["pingIntervalMaxMs"])}
 
 
 class ActionError(ValueError):
@@ -44,6 +70,11 @@ async def node_action(device_id: str, action: str, params: dict[str, Any] | None
     d = registry.devices.get(device_id)
     if d is None:
         raise ActionError(f"unknown device '{device_id}'")
+    if action == "ping_target":
+        args = ping_args(params)              # validate before anything is sent
+        if d.get("protocol") != "ewp1":
+            raise ActionError(f"'ping_target' needs firmware 3.2+ or Pi agent 2.1+ - {device_id} runs the fw 2.x protocol")
+        return await _ping_target(device_id, args, hub)
     if d.get("protocol") == "ewp1":
         return await _ewp(device_id, action, params, hub)
     return await _legacy(device_id, action, params, registry)
@@ -89,6 +120,21 @@ async def _ewp(hwid: str, action: str, p: dict[str, Any], hub) -> dict[str, Any]
         r = await hub.call(hwid, P.TOOL_QUERY_DNS_LOG, {"limit": int(p.get("limit", 16)),
                                                         "flaggedOnly": bool(p.get("flagged_only", False))})
     return {"device_id": hwid, "action": action, **r}
+
+
+async def _ping_target(hwid: str, args: dict[str, Any], hub) -> dict[str, Any]:
+    # The node answers after count x interval + timeout; give it that plus the round trip.
+    budget_s = ((args["count"] - 1) * args["intervalMs"] + args["timeoutMs"]) / 1000.0 + 2.0
+    r = await hub.call(hwid, P.TOOL_PING_HOST, args, timeout_s=budget_s)
+    out: dict[str, Any] = {"device_id": hwid, "action": "ping_target", "target": args["target"], **r}
+    res = r.get("result") if r.get("ok") else None
+    if isinstance(res, dict):
+        err = res.get("error", 0)
+        out["reachable"] = err == P.PING_NONE and (res.get("received") or 0) > 0
+        out["result"] = {**res, "error": PING_ERRORS.get(err, err)}
+        sent = res.get("sent") or 0
+        out["loss_pct"] = round(100.0 * (sent - (res.get("received") or 0)) / sent, 1) if sent else None
+    return out
 
 
 async def _legacy(device_id: str, action: str, p: dict[str, Any], registry) -> dict[str, Any]:

@@ -12,7 +12,7 @@
  */
 import type { BoardInfo } from '@ionity/prov';
 import { useState } from 'react';
-import { fmtBytes, fmtUptime, fmtVersion, metric, type FleetDevice, type NodeActionName } from '../../lib/api/client.ts';
+import { checkPingTarget, fmtBytes, fmtUptime, fmtVersion, metric, pingSummary, type FleetDevice, type NodeActionName } from '../../lib/api/client.ts';
 import { ConfirmDialog } from '../../ui/ConfirmDialog.tsx';
 import { useAnnounce } from '../../ui/announcer.tsx';
 import { useFleetDevice, useHost } from '../fleet/HostContext.tsx';
@@ -133,6 +133,96 @@ function FleetFacts({ d }: { readonly d: FleetDevice }) {
 
 const ACTION_TEXT: Partial<Record<NodeActionName, string>> = { ping: 'Ping', identify: 'Identify', sync_watchlist: 'Sync watchlist' };
 
+/** ping_host (EWP 0x47): ICMP sent BY the board - "is the board offline, or can it not reach X?" */
+function PingFromBoard({ d, name }: { readonly d: FleetDevice; readonly name: string }) {
+  const host = useHost();
+  const announce = useAnnounce();
+  const [target, setTarget] = useState('');
+  const [count, setCount] = useState(4);
+  const [busy, setBusy] = useState(false);
+  const [out, setOut] = useState<{ ok: boolean; text: string } | null>(null);
+  const formId = `ping-${d.device_id}`;
+  const problem = target.trim() ? checkPingTarget(target) : null;
+
+  async function go(): Promise<void> {
+    const err = checkPingTarget(target);
+    if (err) {
+      setOut({ ok: false, text: err });
+      return;
+    }
+    setBusy(true);
+    setOut(null);
+    try {
+      const r = await host.api.pingFromNode(d.device_id, target, { count });
+      const ok = r.ok !== false && r.reachable === true;
+      const text = pingSummary(r);
+      setOut({ ok, text });
+      announce(`${name}: ping ${text}`, ok ? undefined : { assertive: true });
+    } catch (e) {
+      const text = (e as Error).message;
+      setOut({ ok: false, text });
+      announce(`${name}: ping failed, ${text}`, { assertive: true });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <form
+      className="flex flex-col gap-2 border-t border-slate-200 pt-3 dark:border-slate-700"
+      aria-labelledby={`${formId}-h`}
+      onSubmit={(e) => {
+        e.preventDefault();
+        void go();
+      }}
+      data-testid="ping-from-board"
+    >
+      <h4 id={`${formId}-h`} className="text-sm font-semibold">Ping from this board</h4>
+      <div className="flex flex-wrap items-end gap-2">
+        <label className="flex flex-col text-sm" htmlFor={`${formId}-target`}>
+          Host or IP
+          <input
+            id={`${formId}-target`}
+            className="field-input"
+            value={target}
+            placeholder="192.168.0.1 or youtube.com"
+            autoComplete="off"
+            spellCheck={false}
+            aria-invalid={problem ? true : undefined}
+            aria-describedby={problem ? `${formId}-err` : undefined}
+            onChange={(e) => setTarget(e.target.value)}
+          />
+        </label>
+        <label className="flex flex-col text-sm" htmlFor={`${formId}-count`}>
+          Echoes
+          <input
+            id={`${formId}-count`}
+            className="field-input w-20"
+            type="number"
+            min={1}
+            max={10}
+            value={count}
+            onChange={(e) => setCount(Math.min(10, Math.max(1, Number(e.target.value) || 1)))}
+          />
+        </label>
+        <button type="submit" className="btn-secondary" disabled={busy || !target.trim() || problem !== null}>
+          {busy ? 'Pinging…' : 'Ping host'}
+        </button>
+      </div>
+      {problem ? (
+        <p id={`${formId}-err`} className="text-sm text-bad">
+          {problem}
+        </p>
+      ) : null}
+      {out ? (
+        <p className={`text-sm font-semibold ${out.ok ? 'text-ok' : 'text-bad'}`} data-testid="ping-result" role="status">
+          {out.text}
+        </p>
+      ) : null}
+    </form>
+  );
+}
+
 export function FleetBoardCard({ d }: { readonly d: FleetDevice }) {
   const host = useHost();
   const announce = useAnnounce();
@@ -214,6 +304,7 @@ export function FleetBoardCard({ d }: { readonly d: FleetDevice }) {
           {result.text}
         </p>
       ) : null}
+      {ewp && d.tools.includes('ping_host') ? <PingFromBoard d={d} name={name} /> : null}
       <ConfirmDialog
         open={confirmReboot}
         title={`Reboot ${name}?`}

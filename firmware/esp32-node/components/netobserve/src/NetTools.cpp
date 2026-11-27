@@ -4,7 +4,7 @@
  * (c) 2018-2026 Antwerp Designs | Ionity (Pty) Ltd | Ionity Global (Pty) Ltd
  *
  * What NetObserve says on the wire: DNS_BATCH frames, HELLO.net,
- * TELEMETRY.dns and the NetObserve tools (0x40-0x46). Bodies follow
+ * TELEMETRY.dns and the NetObserve tools (0x40-0x47). Bodies follow
  * packages/protocol/src/netobserve.ts key for key.
  *
  *   0x40 set_watchlist     {1 op, 2 version, 3 rules[[suffix,cat,flags]], 4 categories?[[id,name]]}
@@ -15,6 +15,9 @@
  *   0x44 query_dns_log     {1 limit?, 2 client?, 3 flaggedOnly?} -> {1 clients[], 2 queries[]} newest first
  *   0x45 scan_lan          {} -> {1 targets, 2 etaMs}
  *   0x46 flush_dns_cache   {} -> {1 flushed}
+ *   0x47 ping_host         {1 target, 2 count?, 3 timeoutMs?, 4 intervalMs?}
+ *                          -> {1 error, 2 resolvedIp?, 3 sent, 4 received, 5-7 rtt min/avg/max ms?}
+ *                          long-running: waits on the worker, polls cancel/deadline, feeds the WDT
  */
 #include <string.h>
 
@@ -233,6 +236,8 @@ bool NetObserve::registerTools(mcp::MCPServer& s) {
     ok = ok && s.registerTool({EWP_TOOL_QUERY_DNS_LOG, 1, RO, EWP_TOOL_NAME_QUERY_DNS_LOG, &NetObserve::toolQueryLog, this});
     ok = ok && s.registerTool({EWP_TOOL_SCAN_LAN, 1, 0, EWP_TOOL_NAME_SCAN_LAN, &NetObserve::toolScanLan, this});
     ok = ok && s.registerTool({EWP_TOOL_FLUSH_DNS_CACHE, 1, ID, EWP_TOOL_NAME_FLUSH_DNS_CACHE, &NetObserve::toolFlushCache, this});
+    ok = ok && s.registerTool({EWP_TOOL_PING_HOST, 1, RO | EWP_TOOL_FLAG_LONG_RUNNING, EWP_TOOL_NAME_PING_HOST,
+                               &NetObserve::toolPingHost, this});
     return ok;
 }
 
@@ -567,6 +572,134 @@ void NetObserve::toolFlushCache(mcp::ToolContext& ctx) {
     }
     ewp::CborMap m(ctx.out());
     m.key(EWP_K_FLUSH_DNS_CACHE_RESULT_FLUSHED).uint(n);
+}
+
+/* ---- 0x47 ping_host --------------------------------------------------------------- */
+
+namespace {
+
+/** RFC 1123 host name or dotted IPv4: letters, digits, '-', '.'; labels 1-63, no leading/trailing '-'. */
+bool validTarget(const char* s, size_t n) {
+    if (n == 0 || n > EWP_LIMIT_QNAME_BYTES) return false;
+    size_t label = 0;
+    for (size_t i = 0; i < n; ++i) {
+        const char c = s[i];
+        if (c == '.') {
+            if (label == 0 || s[i - 1] == '-') return false;
+            label = 0;
+            continue;
+        }
+        const bool alnum = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9');
+        if (!alnum && !(c == '-' && label > 0)) return false;
+        if (++label > 63) return false;
+    }
+    return s[n - 1] != '-';
+}
+
+void encodePing(ewp::CborWriter& w, uint8_t error, bool haveIp, uint32_t ip, const PingStats& st) {
+    ewp::CborMap m(w);
+    m.key(EWP_K_PING_HOST_RESULT_ERROR).uint(error);
+    if (haveIp) {
+        uint8_t b[4];
+        ipBytes(ip, b);
+        m.key(EWP_K_PING_HOST_RESULT_RESOLVED_IP).bytes(b, 4);
+    }
+    m.key(EWP_K_PING_HOST_RESULT_SENT).uint(st.sent);
+    m.key(EWP_K_PING_HOST_RESULT_RECEIVED).uint(st.received);
+    if (st.received > 0) {
+        const auto clamp = [](uint32_t v) -> uint64_t { return v > 0xFFFFu ? 0xFFFFu : v; };
+        m.key(EWP_K_PING_HOST_RESULT_RTT_MIN_MS).uint(clamp(st.rttMinMs));
+        m.key(EWP_K_PING_HOST_RESULT_RTT_AVG_MS).uint(clamp((st.rttSumMs + st.received / 2u) / st.received));  // rounded, like the Pi agent
+        m.key(EWP_K_PING_HOST_RESULT_RTT_MAX_MS).uint(clamp(st.rttMaxMs));
+    }
+}
+
+}  // namespace
+
+void NetObserve::toolPingHost(mcp::ToolContext& ctx) {
+    NetObserve* self = static_cast<NetObserve*>(ctx.user());
+    char target[EWP_LIMIT_QNAME_BYTES + 1] = {};
+    bool haveTarget = false;
+    uint64_t count = 4;
+    uint64_t timeoutMs = 1000;
+    uint64_t intervalMs = 1000;
+    const bool ok = tools::parseArgs(ctx, [&](uint64_t key, ewp::CborReader& r) {
+        switch (key) {
+            case EWP_K_PING_HOST_ARGS_TARGET: {
+                const char* s = nullptr;
+                size_t n = 0;
+                if (!r.readText(s, n) || !validTarget(s, n)) {
+                    ctx.fail(EWP_ST_INVALID_ARGS, "target must be a host name or IPv4 address", EWP_K_PING_HOST_ARGS_TARGET);
+                    return false;
+                }
+                memcpy(target, s, n);
+                target[n] = '\0';
+                return (haveTarget = true);
+            }
+            case EWP_K_PING_HOST_ARGS_COUNT:
+                if (!r.readUint(count) || count < 1 || count > EWP_LIMIT_PING_COUNT_MAX) {
+                    ctx.fail(EWP_ST_INVALID_ARGS, "count must be 1-10", EWP_K_PING_HOST_ARGS_COUNT);
+                    return false;
+                }
+                return true;
+            case EWP_K_PING_HOST_ARGS_TIMEOUT_MS:
+                if (!r.readUint(timeoutMs) || timeoutMs < EWP_LIMIT_PING_TIMEOUT_MIN_MS || timeoutMs > EWP_LIMIT_PING_TIMEOUT_MAX_MS) {
+                    ctx.fail(EWP_ST_INVALID_ARGS, "timeoutMs must be 100-5000", EWP_K_PING_HOST_ARGS_TIMEOUT_MS);
+                    return false;
+                }
+                return true;
+            case EWP_K_PING_HOST_ARGS_INTERVAL_MS:
+                if (!r.readUint(intervalMs) || intervalMs < EWP_LIMIT_PING_INTERVAL_MIN_MS ||
+                    intervalMs > EWP_LIMIT_PING_INTERVAL_MAX_MS) {
+                    ctx.fail(EWP_ST_INVALID_ARGS, "intervalMs must be 200-5000", EWP_K_PING_HOST_ARGS_INTERVAL_MS);
+                    return false;
+                }
+                return true;
+            default: return tools::skipUnknownArg(r);
+        }
+    });
+    if (!ok) return;
+    if (!haveTarget) return ctx.fail(EWP_ST_INVALID_ARGS, "target is required", EWP_K_PING_HOST_ARGS_TARGET);
+
+    // The whole session must fit the request deadline, or the result could never be sent.
+    const int64_t needUs = static_cast<int64_t>((count - 1) * intervalMs + timeoutMs + 250) * 1000;
+    if (needUs > ctx.remainingUs()) {
+        return ctx.fail(EWP_ST_INVALID_ARGS, "count x intervalMs + timeoutMs exceeds the request deadline",
+                        EWP_K_PING_HOST_ARGS_COUNT);
+    }
+
+    PingStats st;
+    uint32_t ip = 0;
+    if (self->pingBusy_.exchange(true, std::memory_order_acq_rel)) {
+        encodePing(ctx.out(), EWP_PING_BUSY, false, 0, st);
+        return;
+    }
+    struct Release {
+        NetObserve* s;
+        ~Release() {
+            s->platform_->pingStop();
+            s->pingBusy_.store(false, std::memory_order_release);
+        }
+    } release{self};
+
+    if (!self->platform_->resolveHost(target, ip) || ip == 0) {
+        encodePing(ctx.out(), EWP_PING_RESOLVE_FAILED, false, 0, st);
+        return;
+    }
+    if (!self->platform_->pingStart(ip, static_cast<uint8_t>(count), static_cast<uint16_t>(timeoutMs),
+                                    static_cast<uint16_t>(intervalMs))) {
+        encodePing(ctx.out(), EWP_PING_NOT_PERMITTED, true, ip, st);
+        return;
+    }
+    for (;;) {
+        self->platform_->pingStatus(st);
+        if (st.done) break;
+        if (ctx.cancelled()) return ctx.fail(EWP_ST_CANCELLED, "cancelled");
+        if (ctx.remainingUs() < 150000) break;  // answer with what we have rather than miss the deadline
+        ctx.keepAlive();
+        os::delayMs(20);
+    }
+    encodePing(ctx.out(), st.received > 0 ? EWP_PING_NONE : EWP_PING_TIMEOUT, true, ip, st);
 }
 
 }  // namespace netobs

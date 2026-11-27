@@ -3,7 +3,7 @@
 # (c) 2018-2026 Antwerp Designs | Ionity (Pty) Ltd | Ionity Global (Pty) Ltd
 #
 # NetObserve (PLAN-v3): the LAN DNS forwarder, watchlist flagging, LAN device
-# discovery (ARP / DHCP / mDNS) and the NetObserve EWP tools 0x40-0x46.
+# discovery (ARP / DHCP / mDNS) and the NetObserve EWP tools 0x40-0x47.
 # Everything except EspNetPlatform.cpp is portable and host-tested (test/host).
 
 idf_component_register(

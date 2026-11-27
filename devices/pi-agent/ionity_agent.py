@@ -21,7 +21,7 @@ per device and checked against the watchlist (YouTube built in).
 
 Tools: get_device_info, read_telemetry, identify, set_actuator (alert LED),
 set_watchlist, get_watchlist, get_network_stats, get_local_devices,
-query_dns_log, scan_lan, flush_dns_cache, reboot.
+query_dns_log, scan_lan, flush_dns_cache, ping_host, reboot.
 
 No broker? Frames are POSTed unchanged to the host
 (POST /api/v1/ewp/<hwid>/<channel>, X-Fleet-Token); commands need MQTT.
@@ -59,13 +59,14 @@ if str(HERE) not in sys.path:
 import ewp_cbor as cbor            # noqa: E402
 import ewp_protocol as P           # noqa: E402
 import netobserve as nob           # noqa: E402
+import pinger                      # noqa: E402
 
 try:
     import paho.mqtt.client as paho            # type: ignore
 except Exception:                              # noqa: BLE001
     paho = None
 
-FW_VERSION = "2.0.0"   # 2.0.0: EWP/1 (same contract as firmware 3), NetObserve DNS forwarder, watchlist
+FW_VERSION = "2.1.0"   # 2.1.0: ping_host (0x47). 2.0.0: EWP/1 (same contract as firmware 3), NetObserve DNS forwarder
 PRODUCT_FALLBACK = "linux-sbc"
 DEFAULT_CONF = "/etc/ionity-agent.conf"
 MQTT_FAIL_THRESHOLD = 3
@@ -370,6 +371,7 @@ class Agent:
         self.min_free: int | None = None
         self.stop = threading.Event()
         self.led = Led(find_led(cfg.get("led", "")))
+        self.pinger = pinger.Pinger()
         self.alert_led = Led(find_led(cfg.get("alert_led", ""))) if cfg.get("alert_led") else self.led
         self.alert_hold = max(1.0, float(cfg.get("alert_hold_s", "20")))
         self._alert_until = 0.0
@@ -397,7 +399,8 @@ class Agent:
     def tools(self) -> list:
         ro = P.TOOL_FLAG_READ_ONLY | P.TOOL_FLAG_IDEMPOTENT
         t = [[P.TOOL_GET_DEVICE_INFO, 1, ro], [P.TOOL_READ_TELEMETRY, 1, ro], [P.TOOL_IDENTIFY, 1, 0],
-             [P.TOOL_REBOOT, 1, P.TOOL_FLAG_DESTRUCTIVE]]
+             [P.TOOL_REBOOT, 1, P.TOOL_FLAG_DESTRUCTIVE],
+             [P.TOOL_PING_HOST, 1, P.TOOL_FLAG_READ_ONLY | P.TOOL_FLAG_LONG_RUNNING]]
         if self.alert_led.path:
             t.append([P.TOOL_SET_ACTUATOR, 1, P.TOOL_FLAG_DESTRUCTIVE])
         if self.dns:
@@ -649,6 +652,8 @@ class Agent:
             return reboot, cbor.keyed("RebootResult", {"inMs": delay})
         if tool == P.TOOL_SET_ACTUATOR:
             return None, self.set_actuator(a)
+        if tool == P.TOOL_PING_HOST:
+            return None, self.ping_host(a)
         if not self.dns:
             raise ToolError(P.ST_NOT_READY, "the DNS forwarder is off (dns_mode = forward)")
         if tool == P.TOOL_SET_WATCHLIST:
@@ -697,6 +702,18 @@ class Agent:
         if tool == P.TOOL_FLUSH_DNS_CACHE:
             return None, cbor.keyed("FlushDnsCacheResult", {"flushed": min(self.dns.flush_cache(), 0xFFFF)})
         raise ToolError(P.ST_UNKNOWN_TOOL, "unknown tool")
+
+    def ping_host(self, a: dict) -> dict:
+        kp = P.KEYS["PingHostArgs"]
+        L = P.LIMITS
+        target = a.get(kp["target"])
+        if not isinstance(target, str) or not pinger.valid_target(target.strip()):
+            raise ToolError(P.ST_INVALID_ARGS, "target must be a host name or IPv4 address", kp["target"])
+        count = _u(a.get(kp["count"], 4), 1, L["pingCountMax"], kp["count"])
+        timeout = _u(a.get(kp["timeoutMs"], 1000), L["pingTimeoutMinMs"], L["pingTimeoutMaxMs"], kp["timeoutMs"])
+        interval = _u(a.get(kp["intervalMs"], 1000), L["pingIntervalMinMs"], L["pingIntervalMaxMs"], kp["intervalMs"])
+        r = self.pinger.ping(target.strip(), count, timeout, interval)
+        return cbor.keyed("PingHostResult", r)
 
     def set_actuator(self, a: dict) -> dict:
         ka = P.KEYS["SetActuatorArgs"]

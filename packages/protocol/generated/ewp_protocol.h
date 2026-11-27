@@ -52,6 +52,11 @@ EWP_STATIC_ASSERT(__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__, "EWP wire format is
 #define EWP_LIMIT_LOCAL_DEVICES        128u
 #define EWP_LIMIT_DNS_UPSTREAMS        2u
 #define EWP_LIMIT_DNS_LOG_QUERY        32u
+#define EWP_LIMIT_PING_COUNT_MAX       10u
+#define EWP_LIMIT_PING_TIMEOUT_MIN_MS  100u
+#define EWP_LIMIT_PING_TIMEOUT_MAX_MS  5000u
+#define EWP_LIMIT_PING_INTERVAL_MIN_MS 200u
+#define EWP_LIMIT_PING_INTERVAL_MAX_MS 5000u
 
 /* ---- topics: ionity/ewp1/<site>/<hwid>/<channel> ----------------------- */
 #define EWP_TOPIC_ROOT            "ionity/ewp1"
@@ -112,6 +117,7 @@ typedef enum {
     EWP_TOOL_QUERY_DNS_LOG = 0x44,
     EWP_TOOL_SCAN_LAN = 0x45,
     EWP_TOOL_FLUSH_DNS_CACHE = 0x46,
+    EWP_TOOL_PING_HOST = 0x47,
     EWP_TOOL_REBOOT = 0xF0,
 } ewp_tool_id_t;
 
@@ -274,6 +280,14 @@ typedef enum {
 } ewp_watchlist_op_t;
 
 typedef enum {
+    EWP_PING_NONE = 0,
+    EWP_PING_RESOLVE_FAILED = 1,
+    EWP_PING_TIMEOUT = 2,
+    EWP_PING_NOT_PERMITTED = 3,
+    EWP_PING_BUSY = 4,
+} ewp_ping_error_t;
+
+typedef enum {
     EWP_DISC_ARP = 0x01,
     EWP_DISC_DHCP = 0x02,
     EWP_DISC_MDNS = 0x04,
@@ -305,6 +319,7 @@ typedef enum {
 #define EWP_TOOL_NAME_QUERY_DNS_LOG        "query_dns_log"
 #define EWP_TOOL_NAME_SCAN_LAN             "scan_lan"
 #define EWP_TOOL_NAME_FLUSH_DNS_CACHE      "flush_dns_cache"
+#define EWP_TOOL_NAME_PING_HOST            "ping_host"
 #define EWP_TOOL_NAME_REBOOT               "reboot"
 
 /* ---- CBOR map keys (all 0..23 => one byte on the wire) ----------------- */
@@ -494,6 +509,19 @@ typedef enum {
 #define EWP_K_NETWORK_STATS_RESULT_CACHE_ENTRIES       3u
 #define EWP_K_NETWORK_STATS_RESULT_PENDING             4u
 #define EWP_K_NETWORK_STATS_RESULT_LAST_CLIENT_QUERY_AGO_MS 5u
+/* PingHostArgs */
+#define EWP_K_PING_HOST_ARGS_TARGET                    1u
+#define EWP_K_PING_HOST_ARGS_COUNT                     2u
+#define EWP_K_PING_HOST_ARGS_TIMEOUT_MS                3u
+#define EWP_K_PING_HOST_ARGS_INTERVAL_MS               4u
+/* PingHostResult */
+#define EWP_K_PING_HOST_RESULT_ERROR                   1u
+#define EWP_K_PING_HOST_RESULT_RESOLVED_IP             2u
+#define EWP_K_PING_HOST_RESULT_SENT                    3u
+#define EWP_K_PING_HOST_RESULT_RECEIVED                4u
+#define EWP_K_PING_HOST_RESULT_RTT_MIN_MS              5u
+#define EWP_K_PING_HOST_RESULT_RTT_AVG_MS              6u
+#define EWP_K_PING_HOST_RESULT_RTT_MAX_MS              7u
 /* QueryDnsLogArgs */
 #define EWP_K_QUERY_DNS_LOG_ARGS_LIMIT                 1u
 #define EWP_K_QUERY_DNS_LOG_ARGS_CLIENT                2u

@@ -62,6 +62,14 @@ export const EWP_LIMITS = {
   dnsUpstreams: 2,
   /** NetObserve: entries query_dns_log returns at most */
   dnsLogQuery: 32,
+  /** NetObserve ping_host: echo requests per call (default 4) */
+  pingCountMax: 10,
+  /** NetObserve ping_host: per-echo timeout bounds, ms (default 1000) */
+  pingTimeoutMinMs: 100,
+  pingTimeoutMaxMs: 5000,
+  /** NetObserve ping_host: gap between echoes, ms (default 1000) */
+  pingIntervalMinMs: 200,
+  pingIntervalMaxMs: 5000,
 } as const;
 
 /* ------------------------------------------------------------------------- */

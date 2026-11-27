@@ -84,6 +84,7 @@ const enums: Record<string, Readonly<Record<string, number>>> = {
   DNSQ: ewp.DnsQueryFlag,
   RULE: ewp.RuleFlag,
   WATCH_OP: ewp.WatchlistOp,
+  PING: ewp.PingError,
   DISC: ewp.DiscoverySource,
   NETCAP: ewp.NetCap,
 };

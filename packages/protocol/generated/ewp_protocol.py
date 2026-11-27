@@ -17,7 +17,7 @@ RULE_FLAGS_KNOWN = 3
 NO_TOOL = 0
 
 # hard limits
-LIMITS = {"downlinkFrame": 4096, "uplinkFrame": 8192, "maxInflight": 4, "inlineTensorBytes": 2048, "maxTensorRank": 4, "topK": 8, "actuatorChannels": 16, "models": 8, "customMetrics": 32, "taskStats": 12, "backtraceDepth": 16, "defaultDeadlineMs": 5000, "sleepMinS": 5, "sleepMaxS": 86400, "leaseMaxMs": 86400000, "watchRules": 128, "watchSuffixBytes": 96, "watchCategories": 32, "qnameBytes": 253, "hostnameBytes": 63, "localDevices": 128, "dnsUpstreams": 2, "dnsLogQuery": 32}
+LIMITS = {"downlinkFrame": 4096, "uplinkFrame": 8192, "maxInflight": 4, "inlineTensorBytes": 2048, "maxTensorRank": 4, "topK": 8, "actuatorChannels": 16, "models": 8, "customMetrics": 32, "taskStats": 12, "backtraceDepth": 16, "defaultDeadlineMs": 5000, "sleepMinS": 5, "sleepMaxS": 86400, "leaseMaxMs": 86400000, "watchRules": 128, "watchSuffixBytes": 96, "watchCategories": 32, "qnameBytes": 253, "hostnameBytes": 63, "localDevices": 128, "dnsUpstreams": 2, "dnsLogQuery": 32, "pingCountMax": 10, "pingTimeoutMinMs": 100, "pingTimeoutMaxMs": 5000, "pingIntervalMinMs": 200, "pingIntervalMaxMs": 5000}
 
 # topics: ionity/ewp1/<site>/<hwid>/<channel>
 TOPIC_ROOT = "ionity/ewp1"
@@ -61,8 +61,9 @@ TOOL_GET_LOCAL_DEVICES = 67
 TOOL_QUERY_DNS_LOG = 68
 TOOL_SCAN_LAN = 69
 TOOL_FLUSH_DNS_CACHE = 70
+TOOL_PING_HOST = 71
 TOOL_REBOOT = 240
-TOOL_NAMES = {"1": "GET_DEVICE_INFO", "2": "READ_TELEMETRY", "3": "RUN_INFERENCE", "4": "SET_ACTUATOR", "5": "SET_STATE_MODE", "6": "IDENTIFY", "64": "SET_WATCHLIST", "65": "GET_WATCHLIST", "66": "GET_NETWORK_STATS", "67": "GET_LOCAL_DEVICES", "68": "QUERY_DNS_LOG", "69": "SCAN_LAN", "70": "FLUSH_DNS_CACHE", "240": "REBOOT"}
+TOOL_NAMES = {"1": "GET_DEVICE_INFO", "2": "READ_TELEMETRY", "3": "RUN_INFERENCE", "4": "SET_ACTUATOR", "5": "SET_STATE_MODE", "6": "IDENTIFY", "64": "SET_WATCHLIST", "65": "GET_WATCHLIST", "66": "GET_NETWORK_STATS", "67": "GET_LOCAL_DEVICES", "68": "QUERY_DNS_LOG", "69": "SCAN_LAN", "70": "FLUSH_DNS_CACHE", "71": "PING_HOST", "240": "REBOOT"}
 
 # TOOL_FLAG
 TOOL_FLAG_READ_ONLY = 1
@@ -222,6 +223,14 @@ WATCH_OP_REPLACE = 0
 WATCH_OP_APPEND = 1
 WATCH_OP_NAMES = {"0": "REPLACE", "1": "APPEND"}
 
+# PING
+PING_NONE = 0
+PING_RESOLVE_FAILED = 1
+PING_TIMEOUT = 2
+PING_NOT_PERMITTED = 3
+PING_BUSY = 4
+PING_NAMES = {"0": "NONE", "1": "RESOLVE_FAILED", "2": "TIMEOUT", "3": "NOT_PERMITTED", "4": "BUSY"}
+
 # DISC
 DISC_ARP = 1
 DISC_DHCP = 2
@@ -239,7 +248,7 @@ NETCAP_DNS_CACHE = 32
 NETCAP_NAMES = {"1": "DNS_FORWARD", "2": "DNS_TCP", "4": "MDNS_LISTEN", "8": "DHCP_SNIFF", "16": "ARP_SCAN", "32": "DNS_CACHE"}
 
 # LLM-facing tool names by id
-TOOL_NAME = {1: "get_device_info", 2: "read_telemetry", 3: "run_inference", 4: "set_actuator", 5: "set_state_mode", 6: "identify", 64: "set_watchlist", 65: "get_watchlist", 66: "get_network_stats", 67: "get_local_devices", 68: "query_dns_log", 69: "scan_lan", 70: "flush_dns_cache", 240: "reboot"}
+TOOL_NAME = {1: "get_device_info", 2: "read_telemetry", 3: "run_inference", 4: "set_actuator", 5: "set_state_mode", 6: "identify", 64: "set_watchlist", 65: "get_watchlist", 66: "get_network_stats", 67: "get_local_devices", 68: "query_dns_log", 69: "scan_lan", 70: "flush_dns_cache", 71: "ping_host", 240: "reboot"}
 TOOL_ID = {v: k for k, v in TOOL_NAME.items()}
 RETRYABLE_STATUS = frozenset({32, 33, 36, 38})
 
@@ -274,6 +283,8 @@ KEYS = {
     "NetObserveInfo": {"mode": 1, "port": 2, "upstreams": 3, "caps": 4, "watchVer": 5, "watchRules": 6},
     "NetStats": {"rssiDbm": 1, "channel": 2, "txFail": 3, "reconnects": 4, "uplinkQueued": 5},
     "NetworkStatsResult": {"dns": 1, "upstreams": 2, "cacheEntries": 3, "pending": 4, "lastClientQueryAgoMs": 5},
+    "PingHostArgs": {"target": 1, "count": 2, "timeoutMs": 3, "intervalMs": 4},
+    "PingHostResult": {"error": 1, "resolvedIp": 2, "sent": 3, "received": 4, "rttMinMs": 5, "rttAvgMs": 6, "rttMaxMs": 7},
     "QueryDnsLogArgs": {"limit": 1, "client": 2, "flaggedOnly": 3},
     "ReadTelemetryArgs": {"sections": 1},
     "RebootArgs": {"delayMs": 1},

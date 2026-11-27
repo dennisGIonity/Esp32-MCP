@@ -23,7 +23,9 @@
  * the frame was published it happened. The host stamps receive-time - ageMs.
  */
 import { defineKeys } from './keys.ts';
-import type { DnsMode, WatchlistOp } from './ids.ts';
+import type { DnsMode, PingError, WatchlistOp } from './ids.ts';
+import { EWP_LIMITS } from './constants.ts';
+import { utf8ByteLength } from './scalars.ts';
 import type { Bytes, FixedBytes, U16, U32, U8, Utf8 } from './scalars.ts';
 
 /* ------------------------------------------------------------------------- */
@@ -166,7 +168,7 @@ export const NetObserveInfoKey = defineKeys<NetObserveInfo>()({
 });
 
 /* ------------------------------------------------------------------------- */
-/* Tool bodies (0x40 - 0x46, 0xF0)                                            */
+/* Tool bodies (0x40 - 0x47, 0xF0)                                            */
 /* ------------------------------------------------------------------------- */
 
 /** 0x40 set_watchlist. REPLACE clears the list first; APPEND must carry the same version. */
@@ -258,6 +260,74 @@ export interface FlushDnsCacheResult {
   readonly flushed: U16;
 }
 export const FlushDnsCacheResultKey = defineKeys<FlushDnsCacheResult>()({ flushed: 1 });
+
+/** 0x47 ping_host. Bounds are EWP_LIMITS.ping*; out-of-range args are INVALID_ARGS on the node. */
+export interface PingHostArgs {
+  /** host name or dotted IPv4 */
+  readonly target: Utf8<253>;
+  /** 1..pingCountMax, default 4 */
+  readonly count?: U8;
+  /** per echo, pingTimeoutMinMs..pingTimeoutMaxMs, default 1000 */
+  readonly timeoutMs?: U16;
+  /** gap between echoes, pingIntervalMinMs..pingIntervalMaxMs, default 1000 */
+  readonly intervalMs?: U16;
+}
+export const PingHostArgsKey = defineKeys<PingHostArgs>()({ target: 1, count: 2, timeoutMs: 3, intervalMs: 4 });
+
+/** RTT fields are present only when received > 0. */
+export interface PingHostResult {
+  readonly error: PingError;
+  /** the address actually pinged (absent when the name did not resolve) */
+  readonly resolvedIp?: FixedBytes<4>;
+  readonly sent: U8;
+  readonly received: U8;
+  readonly rttMinMs?: U16;
+  readonly rttAvgMs?: U16;
+  readonly rttMaxMs?: U16;
+}
+export const PingHostResultKey = defineKeys<PingHostResult>()({
+  error: 1,
+  resolvedIp: 2,
+  sent: 3,
+  received: 4,
+  rttMinMs: 5,
+  rttAvgMs: 6,
+  rttMaxMs: 7,
+});
+
+export const PING_DEFAULTS = { count: 4, timeoutMs: 1000, intervalMs: 1000 } as const;
+
+/** RFC 1123 host name (letters, digits, hyphens; dot-separated labels) or dotted IPv4. */
+const PING_TARGET_RE = /^(?=.{1,253}$)([A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)(\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*\.?$/;
+
+/**
+ * Checks ping_host arguments against the contract and fills defaults. The
+ * gateway calls it before encoding; nodes apply the same bounds on decode.
+ * Throws RangeError naming the offending field.
+ */
+export function checkPingHostArgs(a: {
+  target: string;
+  count?: number;
+  timeoutMs?: number;
+  intervalMs?: number;
+}): Required<{ target: string; count: number; timeoutMs: number; intervalMs: number }> {
+  const target = a.target.trim();
+  if (utf8ByteLength(target) > EWP_LIMITS.qnameBytes || !PING_TARGET_RE.test(target)) {
+    throw new RangeError(`ping_host.target: not a host name or IPv4 address: ${JSON.stringify(a.target)}`);
+  }
+  const L = EWP_LIMITS;
+  const range = (name: string, v: number | undefined, def: number, lo: number, hi: number): number => {
+    const n = v ?? def;
+    if (!Number.isInteger(n) || n < lo || n > hi) throw new RangeError(`ping_host.${name}: ${n} not in ${lo}..${hi}`);
+    return n;
+  };
+  return {
+    target,
+    count: range('count', a.count, PING_DEFAULTS.count, 1, L.pingCountMax),
+    timeoutMs: range('timeoutMs', a.timeoutMs, PING_DEFAULTS.timeoutMs, L.pingTimeoutMinMs, L.pingTimeoutMaxMs),
+    intervalMs: range('intervalMs', a.intervalMs, PING_DEFAULTS.intervalMs, L.pingIntervalMinMs, L.pingIntervalMaxMs),
+  };
+}
 
 /** 0xF0 reboot. */
 export interface RebootArgs {

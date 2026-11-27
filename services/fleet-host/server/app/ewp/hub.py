@@ -50,7 +50,7 @@ ARGS_BODY = {
     P.TOOL_SET_ACTUATOR: "SetActuatorArgs", P.TOOL_SET_STATE_MODE: "SetStateModeArgs",
     P.TOOL_IDENTIFY: "IdentifyArgs", P.TOOL_SET_WATCHLIST: "SetWatchlistArgs",
     P.TOOL_GET_LOCAL_DEVICES: "GetLocalDevicesArgs", P.TOOL_QUERY_DNS_LOG: "QueryDnsLogArgs",
-    P.TOOL_REBOOT: "RebootArgs",
+    P.TOOL_REBOOT: "RebootArgs", P.TOOL_PING_HOST: "PingHostArgs",
 }
 RESULT_BODY = {
     P.TOOL_GET_DEVICE_INFO: "HelloBody", P.TOOL_READ_TELEMETRY: "TelemetryBody",
@@ -59,7 +59,7 @@ RESULT_BODY = {
     P.TOOL_GET_WATCHLIST: "GetWatchlistResult", P.TOOL_GET_NETWORK_STATS: "NetworkStatsResult",
     P.TOOL_GET_LOCAL_DEVICES: "LocalDevicesResult", P.TOOL_QUERY_DNS_LOG: "DnsLogResult",
     P.TOOL_SCAN_LAN: "ScanLanResult", P.TOOL_FLUSH_DNS_CACHE: "FlushDnsCacheResult",
-    P.TOOL_REBOOT: "RebootResult",
+    P.TOOL_REBOOT: "RebootResult", P.TOOL_PING_HOST: "PingHostResult",
 }
 MODE_NAMES = {v: k for k, v in {"ACTIVE": 0, "STANDBY": 1, "INFERENCE_ACTIVE": 2, "LOW_POWER_SLEEP": 3,
                                  "FAILSAFE": 4}.items()}

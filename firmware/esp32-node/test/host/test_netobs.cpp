@@ -530,13 +530,13 @@ struct NobRig {
         srv.shutdown();
         nob.stop();
     }
-    Out call(uint32_t rid, uint8_t tool, const Bytes& body = {0xA0}) {
-        const Bytes f = req(rid, tool, 0, 2000, body);
+    Out call(uint32_t rid, uint8_t tool, const Bytes& body = {0xA0}, uint16_t deadlineMs = 2000) {
+        const Bytes f = req(rid, tool, 0, deadlineMs, body);
         srv.onDownlink(f.data(), f.size(), ewp::Topic::Unicast);
         Out o;
         // skip any NetObserve events that are already queued
         for (;;) {
-            CHECK(pop(up, o));
+            CHECK(pop(up, o, deadlineMs + 500u));
             if (o.h.type != EWP_MSG_EVENT) break;
         }
         return o;
@@ -754,4 +754,139 @@ TEST(netobs_reconfigure_off_and_on) {
     nob.reconfigure(false, ups, 1);
     nob.runOnce(1);
     CHECK_EQ(nob.listenPort(), 0u);
+}
+
+/* ---- 0x47 ping_host ------------------------------------------------------------------- */
+
+namespace {
+Bytes pingArgs(const char* target, int count = -1, int timeoutMs = -1, int intervalMs = -1) {
+    uint8_t buf[512];
+    ewp::CborWriter w(buf, sizeof buf);
+    {
+        ewp::CborMap m(w);
+        m.key(EWP_K_PING_HOST_ARGS_TARGET).text(target);
+        if (count >= 0) m.key(EWP_K_PING_HOST_ARGS_COUNT).uint(static_cast<uint64_t>(count));
+        if (timeoutMs >= 0) m.key(EWP_K_PING_HOST_ARGS_TIMEOUT_MS).uint(static_cast<uint64_t>(timeoutMs));
+        if (intervalMs >= 0) m.key(EWP_K_PING_HOST_ARGS_INTERVAL_MS).uint(static_cast<uint64_t>(intervalMs));
+    }
+    return Bytes(buf, buf + w.size());
+}
+}  // namespace
+
+TEST(netobs_ping_host_results) {
+    NobRig rig(static_cast<uint16_t>(testPort() + 6));
+    const uint8_t* r = nullptr;
+    size_t rn = 0;
+
+    // all four echoes answered; defaults count=4, timeout=1000, interval=1000 need a 4.25 s deadline
+    Out o = rig.call(30, EWP_TOOL_PING_HOST, pingArgs("nas.lan"), 6000);
+    CHECK(res(o, r, rn));
+    CHECK_EQ(mapUint(r, rn, EWP_K_PING_HOST_RESULT_ERROR), static_cast<uint64_t>(EWP_PING_NONE));
+    CHECK_EQ(mapUint(r, rn, EWP_K_PING_HOST_RESULT_SENT), 4u);
+    CHECK_EQ(mapUint(r, rn, EWP_K_PING_HOST_RESULT_RECEIVED), 4u);
+    CHECK_EQ(mapUint(r, rn, EWP_K_PING_HOST_RESULT_RTT_MIN_MS), 9u);
+    CHECK_EQ(mapUint(r, rn, EWP_K_PING_HOST_RESULT_RTT_AVG_MS), 12u);  // (12+9+15+11)/4 = 11.75, rounded
+    CHECK_EQ(mapUint(r, rn, EWP_K_PING_HOST_RESULT_RTT_MAX_MS), 15u);
+    {
+        std::lock_guard<std::mutex> lk(rig.plat.mu);
+        CHECK_EQ(rig.plat.pingedIp, 0xC0A80007u);
+    }
+
+    // partial loss is a result, not an error
+    {
+        std::lock_guard<std::mutex> lk(rig.plat.mu);
+        rig.plat.pingReplies = {20, -1, -1, 30};
+    }
+    o = rig.call(31, EWP_TOOL_PING_HOST, pingArgs("192.168.0.1", 4, 200, 200), 3000);
+    CHECK(res(o, r, rn));
+    CHECK_EQ(mapUint(r, rn, EWP_K_PING_HOST_RESULT_ERROR), static_cast<uint64_t>(EWP_PING_NONE));
+    CHECK_EQ(mapUint(r, rn, EWP_K_PING_HOST_RESULT_RECEIVED), 2u);
+    CHECK_EQ(mapUint(r, rn, EWP_K_PING_HOST_RESULT_RTT_AVG_MS), 25u);
+
+    // nothing answered: TIMEOUT, and no RTT keys
+    {
+        std::lock_guard<std::mutex> lk(rig.plat.mu);
+        rig.plat.pingReplies = {-1};
+    }
+    o = rig.call(32, EWP_TOOL_PING_HOST, pingArgs("192.168.0.99", 2, 100, 200), 3000);
+    CHECK(res(o, r, rn));
+    CHECK_EQ(mapUint(r, rn, EWP_K_PING_HOST_RESULT_ERROR), static_cast<uint64_t>(EWP_PING_TIMEOUT));
+    CHECK_EQ(mapUint(r, rn, EWP_K_PING_HOST_RESULT_SENT), 2u);
+    const uint8_t* v = nullptr;
+    size_t vn = 0;
+    CHECK(!getRaw(r, rn, EWP_K_PING_HOST_RESULT_RTT_AVG_MS, v, vn));
+
+    // unknown name: RESOLVE_FAILED, no address
+    o = rig.call(33, EWP_TOOL_PING_HOST, pingArgs("nowhere.example", 1, 100, 200), 3000);
+    CHECK(res(o, r, rn));
+    CHECK_EQ(mapUint(r, rn, EWP_K_PING_HOST_RESULT_ERROR), static_cast<uint64_t>(EWP_PING_RESOLVE_FAILED));
+    CHECK(!getRaw(r, rn, EWP_K_PING_HOST_RESULT_RESOLVED_IP, v, vn));
+
+    // the stack refuses an ICMP socket
+    {
+        std::lock_guard<std::mutex> lk(rig.plat.mu);
+        rig.plat.pingPermitted = false;
+    }
+    o = rig.call(34, EWP_TOOL_PING_HOST, pingArgs("192.168.0.1", 1, 100, 200), 3000);
+    CHECK(res(o, r, rn));
+    CHECK_EQ(mapUint(r, rn, EWP_K_PING_HOST_RESULT_ERROR), static_cast<uint64_t>(EWP_PING_NOT_PERMITTED));
+    CHECK(rig.plat.pingStops.load() >= 5);  // every call released its session
+}
+
+TEST(netobs_ping_host_bounds_deadline_cancel) {
+    NobRig rig(static_cast<uint16_t>(testPort() + 7));
+    const struct {
+        Bytes body;
+        int key;
+    } bad[] = {
+        {pingArgs("bad host"), EWP_K_PING_HOST_ARGS_TARGET},
+        {pingArgs("-lead.example"), EWP_K_PING_HOST_ARGS_TARGET},
+        {pingArgs("x;reboot"), EWP_K_PING_HOST_ARGS_TARGET},
+        {pingArgs(""), EWP_K_PING_HOST_ARGS_TARGET},
+        {pingArgs("ok.lan", 0), EWP_K_PING_HOST_ARGS_COUNT},
+        {pingArgs("ok.lan", 11), EWP_K_PING_HOST_ARGS_COUNT},
+        {pingArgs("ok.lan", 1, 99), EWP_K_PING_HOST_ARGS_TIMEOUT_MS},
+        {pingArgs("ok.lan", 1, 5001), EWP_K_PING_HOST_ARGS_TIMEOUT_MS},
+        {pingArgs("ok.lan", 1, 100, 199), EWP_K_PING_HOST_ARGS_INTERVAL_MS},
+        {pingArgs("ok.lan", 1, 100, 5001), EWP_K_PING_HOST_ARGS_INTERVAL_MS},
+    };
+    uint32_t rid = 40;
+    for (const auto& b : bad) {
+        Out o = rig.call(rid++, EWP_TOOL_PING_HOST, b.body, 3000);
+        CHECK_EQ(o.h.type, EWP_MSG_ERR);
+        CHECK_EQ(o.h.status, EWP_ST_INVALID_ARGS);
+    }
+    // missing target
+    Out o = rig.call(rid++, EWP_TOOL_PING_HOST, {0xA0}, 3000);
+    CHECK_EQ(o.h.status, EWP_ST_INVALID_ARGS);
+    // 10 echoes 1 s apart cannot fit a 2 s deadline: refused up front, nothing sent
+    o = rig.call(rid++, EWP_TOOL_PING_HOST, pingArgs("192.168.0.1", 10, 1000, 1000), 2000);
+    CHECK_EQ(o.h.status, EWP_ST_INVALID_ARGS);
+
+    // a session that never finishes answers with what it has just before the deadline
+    {
+        std::lock_guard<std::mutex> lk(rig.plat.mu);
+        rig.plat.pingHang = true;
+    }
+    const int64_t t0 = os::nowUs();
+    o = rig.call(rid++, EWP_TOOL_PING_HOST, pingArgs("192.168.0.1", 1, 100, 200), 1500);
+    const uint8_t* r = nullptr;
+    size_t rn = 0;
+    CHECK(res(o, r, rn));
+    CHECK_EQ(mapUint(r, rn, EWP_K_PING_HOST_RESULT_ERROR), static_cast<uint64_t>(EWP_PING_TIMEOUT));
+    CHECK((os::nowUs() - t0) / 1000 < 1500);
+
+    // CANCEL stops a running session
+    const uint32_t cr = rid++;
+    const Bytes f = req(cr, EWP_TOOL_PING_HOST, 0, 3000, pingArgs("192.168.0.1", 1, 100, 200));
+    rig.srv.onDownlink(f.data(), f.size(), ewp::Topic::Unicast);
+    os::delayMs(100);
+    const Bytes c = cancel(cr);
+    rig.srv.onDownlink(c.data(), c.size(), ewp::Topic::Unicast);
+    for (;;) {
+        CHECK(pop(rig.up, o, 3500));
+        if (o.h.type != EWP_MSG_EVENT) break;
+    }
+    CHECK_EQ(o.h.type, EWP_MSG_ERR);
+    CHECK_EQ(o.h.status, EWP_ST_CANCELLED);
 }

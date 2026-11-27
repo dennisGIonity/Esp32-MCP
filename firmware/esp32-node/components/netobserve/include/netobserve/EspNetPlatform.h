@@ -8,7 +8,9 @@
  * the node's own resolver (esp_netif DNS info), the watchlist blob in NVS
  * (namespace "ionity", key "watchlist" - erased by factory_reset with the
  * rest of the settings). Link state and the alert output are hooks into the
- * application (MQTT link, actuator bank).
+ * application (MQTT link, actuator bank). ping_host uses lwIP's esp_ping
+ * (ping/ping_sock.h): the session runs in its own small task and the
+ * callbacks only update counters, so the MCP worker just polls them.
  */
 #pragma once
 
@@ -36,9 +38,14 @@ public:
     }
     bool loadWatchlist(uint8_t* buf, size_t cap, size_t& len) override;
     bool saveWatchlist(const uint8_t* buf, size_t len) override;
+    bool resolveHost(const char* host, uint32_t& ip) override;
+    bool pingStart(uint32_t ip, uint8_t count, uint16_t timeoutMs, uint16_t intervalMs) override;
+    void pingStatus(PingStats& out) override;
+    void pingStop() override;
 
 private:
     Hooks hooks_;
+    void* ping_ = nullptr;  // esp_ping_handle_t
 };
 
 }  // namespace netobs

@@ -96,6 +96,7 @@ enumBlock('ewp_dns_mode_t', 'EWP_DNS_MODE', ewp.DnsMode, false);
 enumBlock('ewp_dns_query_flag_t', 'EWP_DNSQ', ewp.DnsQueryFlag);
 enumBlock('ewp_rule_flag_t', 'EWP_RULE', ewp.RuleFlag);
 enumBlock('ewp_watchlist_op_t', 'EWP_WATCH_OP', ewp.WatchlistOp, false);
+enumBlock('ewp_ping_error_t', 'EWP_PING', ewp.PingError, false);
 enumBlock('ewp_discovery_source_t', 'EWP_DISC', ewp.DiscoverySource);
 enumBlock('ewp_net_cap_t', 'EWP_NETCAP', ewp.NetCap);
 line(`#define EWP_RULE_FLAGS_KNOWN      ${hex(ewp.RULE_FLAGS_KNOWN_MASK)}u`);

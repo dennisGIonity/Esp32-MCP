@@ -5,7 +5,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { manifestCandidates } from '../src/features/flash/FlashPanel.tsx';
 import { categoryText } from '../src/features/network/FlaggedBanner.tsx';
-import { ApiError, FleetApi, defaultsToForm, fmtUptime, fmtVersion, metric, qtypeName, wsUrl, type DnsQuery, type FlagEvent } from '../src/lib/api/client.ts';
+import { ApiError, FleetApi, checkPingTarget, defaultsToForm, fmtUptime, fmtVersion, metric, pingSummary, qtypeName, wsUrl, type DnsQuery, type FlagEvent } from '../src/lib/api/client.ts';
 import { EMPTY_LIVE, LiveSocket, MAX_FEED, activeFlags, backoffDelay, filterFeed, liveReducer, matchesDomain, parseFleetTick } from '../src/lib/api/live.ts';
 import { checkCategory, checkPattern } from '../src/lib/api/watchlist.ts';
 
@@ -245,5 +245,34 @@ describe('LiveSocket', () => {
     expect(states).toContain('retrying');
     expect(states.at(-1)).toBe('closed');
     vi.useRealTimers();
+  });
+});
+
+describe('ping_target (EWP ping_host from the board)', () => {
+  it('posts ping_target with a timeout long enough for the session', async () => {
+    let body: unknown = null;
+    let signal: AbortSignal | undefined;
+    const fetchImpl: typeof fetch = async (_url, init) => {
+      body = JSON.parse(String(init?.body));
+      signal = init?.signal ?? undefined;
+      return json(200, {
+        ok: true, target: 'youtube.com', reachable: true, loss_pct: 25,
+        result: { error: 'none', resolvedIp: '142.250.1.1', sent: 4, received: 3, rttMinMs: 9, rttAvgMs: 12, rttMaxMs: 20 },
+      });
+    };
+    const api = new FleetApi('', { fetchImpl });
+    const r = await api.pingFromNode('esp32-98a316e5d18c', ' youtube.com ', { count: 4 });
+    expect(body).toEqual({ action: 'ping_target', params: { target: 'youtube.com', count: 4 } });
+    expect(signal).toBeDefined();
+    expect(pingSummary(r)).toBe('youtube.com (142.250.1.1): 3/4 replies, 25 % loss, rtt 9/12/20 ms (min/avg/max)');
+  });
+
+  it('explains node-side errors and validates targets before sending', () => {
+    expect(pingSummary({ ok: true, target: 'nowhere.example', result: { error: 'resolve_failed', sent: 0, received: 0 } }))
+      .toBe('nowhere.example: the name did not resolve on the board');
+    expect(pingSummary({ ok: false, error: '429 too many requests' })).toBe('429 too many requests');
+    expect(checkPingTarget('192.168.0.1')).toBeNull();
+    expect(checkPingTarget('router.lan')).toBeNull();
+    for (const bad of ['', 'bad host', 'x;reboot', '-x.com', 'a'.repeat(254)]) expect(checkPingTarget(bad)).not.toBeNull();
   });
 });

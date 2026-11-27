@@ -24,6 +24,8 @@ import type {
   GetWatchlistResult,
   LocalDevicesResult,
   NetworkStatsResult,
+  PingHostArgs,
+  PingHostResult,
   QueryDnsLogArgs,
   RebootArgs,
   RebootResult,
@@ -311,6 +313,7 @@ export interface ToolContract {
   readonly [ToolId.QUERY_DNS_LOG]: { readonly args: QueryDnsLogArgs; readonly result: DnsLogResult };
   readonly [ToolId.SCAN_LAN]: { readonly args: EmptyBody; readonly result: ScanLanResult };
   readonly [ToolId.FLUSH_DNS_CACHE]: { readonly args: EmptyBody; readonly result: FlushDnsCacheResult };
+  readonly [ToolId.PING_HOST]: { readonly args: PingHostArgs; readonly result: PingHostResult };
   readonly [ToolId.REBOOT]: { readonly args: RebootArgs; readonly result: RebootResult };
 }
 

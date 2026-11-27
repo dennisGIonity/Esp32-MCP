@@ -10,7 +10,7 @@ Node ingest (fleet token, rate limited):
 Operators (reads open on the LAN, writes need the admin token):
   POST   /api/v1/nodes/{id}/action            {action, params}: ping, identify, reboot, set_alert_led,
                                               arp_scan, flush_dns_cache, sync_watchlist, network_stats,
-                                              local_devices, dns_log
+                                              local_devices, dns_log, ping_target (rate limited)
   GET    /api/v1/dns/queries                  filtered, paginated DNS log
   GET    /api/v1/dns/flagged                  watchlist hits with client attribution + hit counts
   GET    /api/v1/watchlist                    rules + categories + version
@@ -39,7 +39,7 @@ from app.config import settings
 from app.ewp import ewp_protocol as P
 from app.fleet.actions import ACTIONS, DESTRUCTIVE, ActionError, node_action
 from app.rules.engine import RuleError
-from app.security import check_fleet_token, ingest_limiter, rate_limit, require_admin
+from app.security import TokenBucket, check_fleet_token, ingest_limiter, rate_limit, require_admin
 
 router = APIRouter()
 MAX_FRAME = P.LIMITS["uplinkFrame"]
@@ -98,10 +98,16 @@ class ActionIn(BaseModel):
     params: dict[str, Any] = Field(default_factory=dict)
 
 
+# ping_target makes a board send ICMP: at most one every 2 s per caller (burst 3).
+ping_limiter = TokenBucket(0.5, 3)
+
+
 @router.post("/api/v1/nodes/{device_id}/action")
 async def node_action_route(request: Request, device_id: str, a: ActionIn):
     if a.action not in ACTIONS:
         raise HTTPException(status_code=422, detail=f"action must be one of {', '.join(ACTIONS)}")
+    if a.action == "ping_target":
+        rate_limit(request, ping_limiter)
     if a.action in DESTRUCTIVE or a.action in ("arp_scan", "flush_dns_cache", "sync_watchlist"):
         require_admin(request)
     try:

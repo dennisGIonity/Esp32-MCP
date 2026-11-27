@@ -52,7 +52,7 @@ if ! getent hosts ionity-fleet.local >/dev/null 2>&1; then
 fi
 
 install -d -m 755 "$DEST"
-for f in ionity_agent.py ewp_protocol.py ewp_cbor.py netobserve.py; do
+for f in ionity_agent.py ewp_protocol.py ewp_cbor.py netobserve.py pinger.py; do
   install -m 755 "$HERE/$f" "$DEST/$f"
 done
 if [ ! -f "$CONF" ]; then

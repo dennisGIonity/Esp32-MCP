@@ -20,7 +20,7 @@
  *   |  ALERT rule hit: DNS_FLAGGED EVENT now + local alert output pulse    |
  *   +---------------------------------------------------------------------+
  *     tools on the MCP worker: set/get_watchlist, get_network_stats,
- *     get_local_devices, query_dns_log, scan_lan, flush_dns_cache
+ *     get_local_devices, query_dns_log, scan_lan, flush_dns_cache, ping_host
  *
  * The forwarder and parsers are portable (BSD sockets - lwIP on the device,
  * POSIX in the host tests); everything that touches ESP-IDF (ARP table, the
@@ -55,6 +55,16 @@
 
 namespace netobs {
 
+/** Progress of one ping_host session (a snapshot; RTTs in ms). */
+struct PingStats {
+    uint8_t sent = 0;
+    uint8_t received = 0;
+    uint32_t rttMinMs = 0;
+    uint32_t rttMaxMs = 0;
+    uint32_t rttSumMs = 0;
+    bool done = false;
+};
+
 struct ArpEntry {
     uint32_t ip;  // host order
     uint8_t mac[6];
@@ -80,6 +90,14 @@ public:
     /** Persisted watchlist blob (NVS). MCP worker / boot. */
     virtual bool loadWatchlist(uint8_t* buf, size_t cap, size_t& len) = 0;
     virtual bool saveWatchlist(const uint8_t* buf, size_t len) = 0;
+    /** ping_host (MCP worker). Host name or dotted IPv4 -> address (host order). */
+    virtual bool resolveHost(const char* host, uint32_t& ip) = 0;
+    /** Start an ICMP echo session; false when the stack refuses one (no socket / memory). */
+    virtual bool pingStart(uint32_t ip, uint8_t count, uint16_t timeoutMs, uint16_t intervalMs) = 0;
+    /** Snapshot of the running session; done once every echo was answered or timed out. */
+    virtual void pingStatus(PingStats& out) = 0;
+    /** Stop the session and release it (safe to call when none is running). */
+    virtual void pingStop() = 0;
 
 protected:
     ~Platform() = default;
@@ -128,7 +146,7 @@ public:
 
     /** Boot: buffers, watchlist (NVS or built-in), sockets. Call before registerTools/startTask. */
     bool begin(const Config& cfg, Platform& platform, mcp::Uplink& uplink);
-    /** Registers 0x40..0x46 on the MCP server. Before server.begin(). */
+    /** Registers 0x40..0x47 on the MCP server. Before server.begin(). */
     bool registerTools(mcp::MCPServer& server);
     /** Live change of dns_mode / dns_upstream (from provisioning). Any task. */
     void reconfigure(bool forward, const uint32_t* upstreams, uint8_t count);
@@ -217,6 +235,7 @@ private:
     static void toolQueryLog(mcp::ToolContext& ctx);
     static void toolScanLan(mcp::ToolContext& ctx);
     static void toolFlushCache(mcp::ToolContext& ctx);
+    static void toolPingHost(mcp::ToolContext& ctx);
     static void taskEntry(void* self);
     void persistWatchlist();
 
@@ -225,6 +244,7 @@ private:
     Config cfg_;
     Platform* platform_ = nullptr;
     mcp::Uplink* uplink_ = nullptr;
+    std::atomic<bool> pingBusy_{false};  // one ping_host session at a time
     mutable os::Mutex mu_;  // watchlist, cache, log, clients, counters, upstream stats, scan
 
     Watchlist* active_ = nullptr;   // pool-allocated

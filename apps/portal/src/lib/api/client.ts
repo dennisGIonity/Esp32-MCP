@@ -144,7 +144,54 @@ export type NodeActionName =
   | 'sync_watchlist'
   | 'network_stats'
   | 'local_devices'
-  | 'dns_log';
+  | 'dns_log'
+  | 'ping_target';
+
+/** POST /api/v1/nodes/{id}/action {action: 'ping_target'} - EWP ping_host (0x47) run ON the node. */
+export interface PingTargetResult {
+  readonly ok: boolean;
+  readonly error?: string;
+  readonly target?: string;
+  readonly reachable?: boolean;
+  readonly loss_pct?: number | null;
+  readonly result?: {
+    readonly error: 'none' | 'resolve_failed' | 'timeout' | 'not_permitted' | 'busy' | number;
+    readonly resolvedIp?: string;
+    readonly sent: number;
+    readonly received: number;
+    readonly rttMinMs?: number;
+    readonly rttAvgMs?: number;
+    readonly rttMaxMs?: number;
+  };
+}
+
+/** Bounds of EWP_LIMITS.ping* (packages/protocol) - checked before the request is sent. */
+export const PING_BOUNDS = { countMax: 10, timeoutMin: 100, timeoutMax: 5000, intervalMin: 200, intervalMax: 5000 } as const;
+const PING_TARGET_RE = /^(?=.{1,253}$)[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*\.?$/;
+
+/** null when the target is usable, otherwise a sentence for the form. */
+export function checkPingTarget(t: string): string | null {
+  return PING_TARGET_RE.test(t.trim()) ? null : 'Enter a host name (example.com) or an IPv4 address (192.168.0.1).';
+}
+
+const PING_ERROR_TEXT: Record<string, string> = {
+  resolve_failed: 'the name did not resolve on the board',
+  timeout: 'no reply',
+  not_permitted: 'the board may not send ICMP (Pi: check net.ipv4.ping_group_range)',
+  busy: 'another ping is still running on this board',
+};
+
+/** One line for the card and the screen-reader announcement. */
+export function pingSummary(r: PingTargetResult): string {
+  if (!r.ok || !r.result) return r.error ?? 'failed';
+  const x = r.result;
+  const ip = x.resolvedIp && x.resolvedIp !== r.target ? ` (${x.resolvedIp})` : '';
+  if (x.error !== 'none' && x.error !== 0) {
+    return `${r.target ?? ''}${ip}: ${PING_ERROR_TEXT[String(x.error)] ?? String(x.error)}`;
+  }
+  return `${r.target ?? ''}${ip}: ${x.received}/${x.sent} replies, ${String(r.loss_pct ?? 0)} % loss, ` +
+    `rtt ${String(x.rttMinMs)}/${String(x.rttAvgMs)}/${String(x.rttMaxMs)} ms (min/avg/max)`;
+}
 
 export class ApiError extends Error {
   readonly status: number;
@@ -201,7 +248,7 @@ export class FleetApi {
     return new FleetApi(this.base, { ...this.opts, adminToken });
   }
 
-  private async req<T>(method: string, path: string, body?: unknown): Promise<T> {
+  private async req<T>(method: string, path: string, body?: unknown, timeoutMs?: number): Promise<T> {
     const headers: Record<string, string> = { Accept: 'application/json' };
     if (body !== undefined) headers['Content-Type'] = 'application/json';
     if (this.opts.adminToken) headers['Authorization'] = `Bearer ${this.opts.adminToken}`;
@@ -211,7 +258,7 @@ export class FleetApi {
         method,
         headers,
         ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
-        signal: AbortSignal.timeout(this.opts.timeoutMs ?? 15_000),
+        signal: AbortSignal.timeout(timeoutMs ?? this.opts.timeoutMs ?? 15_000),
       });
     } catch (e) {
       const err = e as Error;
@@ -243,6 +290,17 @@ export class FleetApi {
   }
   nodeAction(deviceId: string, action: NodeActionName, params: Record<string, unknown> = {}) {
     return this.req<Record<string, unknown> & { ok?: boolean; error?: string }>('POST', `/api/v1/nodes/${encodeURIComponent(deviceId)}/action`, { action, params });
+  }
+  /** ICMP from the node itself; resolves after about (count - 1) x interval + timeout. */
+  pingFromNode(deviceId: string, target: string, opts: { count?: number; timeout_ms?: number; interval_ms?: number } = {}) {
+    const count = opts.count ?? 4;
+    const budgetMs = (count - 1) * (opts.interval_ms ?? 1000) + (opts.timeout_ms ?? 1000) + 5000;
+    return this.req<PingTargetResult>(
+      'POST',
+      `/api/v1/nodes/${encodeURIComponent(deviceId)}/action`,
+      { action: 'ping_target', params: { target: target.trim(), ...opts } },
+      Math.max(budgetMs, this.opts.timeoutMs ?? 15_000),
+    );
   }
   dnsQueries(f: DnsFilter = {}) {
     return this.req<{ queries: DnsQuery[]; has_more: boolean; next_offset: number | null }>('GET', `/api/v1/dns/queries${qs({ ...f })}`);

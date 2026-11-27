@@ -23,7 +23,7 @@ import {
   EventBodyKey, EventKind, DnsBatchKey, DnsFlagKey, DnsCountersKey, NetObserveInfoKey, ActuatorDescriptorKey,
   SetWatchlistArgsKey, WatchlistResultKey, GetWatchlistResultKey, NetworkStatsResultKey, LocalDevicesResultKey,
   SetActuatorArgsKey, SetActuatorResultKey, WatchlistOp, RuleFlag, DnsQueryFlag, DnsMode, NetCap,
-  DEFAULT_WATCHLIST_VERSION, DEFAULT_RULES,
+  DEFAULT_WATCHLIST_VERSION, DEFAULT_RULES, PingHostArgsKey, PingHostResultKey, PingError, checkPingHostArgs,
 } from '@ionity/ewp';
 
 const BUILD = process.env.FW_HOST_BUILD ?? path.resolve('build/host');
@@ -307,7 +307,7 @@ test('NetObserve: C++ DNS_FLAGGED / DNS_BATCH / HELLO.net / TELEMETRY.dns decode
   assert.equal(acts[0].get(ActuatorDescriptorKey.name), 'pwm0');
   const toolIds = hello.body.get(HelloBodyKey.tools).map((t) => t[0]);
   for (const id of [ToolId.SET_WATCHLIST, ToolId.GET_WATCHLIST, ToolId.GET_NETWORK_STATS, ToolId.GET_LOCAL_DEVICES,
-    ToolId.QUERY_DNS_LOG, ToolId.SCAN_LAN, ToolId.FLUSH_DNS_CACHE, ToolId.SET_ACTUATOR, ToolId.REBOOT]) {
+    ToolId.QUERY_DNS_LOG, ToolId.SCAN_LAN, ToolId.FLUSH_DNS_CACHE, ToolId.PING_HOST, ToolId.SET_ACTUATOR, ToolId.REBOOT]) {
     assert.ok(toolIds.includes(id), `tool ${id} in HELLO`);
   }
 
@@ -367,4 +367,32 @@ test('NetObserve: TS-encoded set_watchlist / get_watchlist / set_actuator run th
   keysIn(ar, SetActuatorResultKey, 'set_actuator');
   assert.equal(ar.get(SetActuatorResultKey.applied), 1);
   assert.equal(ar.get(SetActuatorResultKey.leaseRemainingMs), 20000);
+});
+
+test('NetObserve: TS-encoded ping_host runs through the C++ node; bad bounds are INVALID_ARGS', () => {
+  const P = PingHostArgsKey;
+  const a = checkPingHostArgs({ target: 'nas.lan', count: 2, timeoutMs: 100, intervalMs: 200 });
+  const ok = encodeRequest({
+    rid: 0x01000200, tool: ToolId.PING_HOST, deadlineMs: 3000,
+    args: new Map([[P.target, a.target], [P.count, a.count], [P.timeoutMs, a.timeoutMs], [P.intervalMs, a.intervalMs]]),
+  });
+  const bad = encodeRequest({ rid: 0x01000201, tool: ToolId.PING_HOST, deadlineMs: 3000, args: new Map([[P.target, 'nas.lan'], [P.count, 11]]) });
+  const out = execFileSync(bin('ewp_dump'), ['netobs', ok, bad], { encoding: 'utf8' })
+    .trim().split('\n').map((l) => l.split(' ')).filter(([n]) => n === 'reply').map(([, hex]) => decodeFrame(hex));
+  const byRid = new Map(out.map((f) => [f.h.rid, f]));
+
+  const r = byRid.get(0x01000200);
+  assert.equal(r.h.type, MsgType.RES);
+  const res = r.body.get(ResultBodyKey.result);
+  keysIn(res, PingHostResultKey, 'ping_host');
+  assert.equal(res.get(PingHostResultKey.error), PingError.NONE);
+  assert.deepEqual([...res.get(PingHostResultKey.resolvedIp)], [192, 168, 0, 7]);
+  assert.equal(res.get(PingHostResultKey.sent), 2);
+  assert.equal(res.get(PingHostResultKey.received), 2);
+  assert.equal(res.get(PingHostResultKey.rttMinMs), 9);
+
+  const e = byRid.get(0x01000201);
+  assert.equal(e.h.type, MsgType.ERR);
+  assert.equal(e.h.status, Status.INVALID_ARGS);
+  assert.equal(e.body.get(ErrorBodyKey.argKey), P.count);
 });
