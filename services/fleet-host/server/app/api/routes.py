@@ -376,8 +376,12 @@ async def health(request: Request):
     app = request.app
     reg = app.state.registry
     bridge = getattr(app.state, "mqtt", None)
+    # ok = the host itself is serving; degraded lists links that are enabled but down.
+    degraded = ["mqtt"] if bridge is not None and not bridge.connected else []
     return {
         "ok": True,
+        "status": "degraded" if degraded else "ok",
+        "degraded": degraded,
         "fleet": settings.fleet_name,
         "uptime_s": round(time.time() - reg.started_at, 1),
         "devices_known": len(reg.devices),
