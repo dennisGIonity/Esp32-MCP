@@ -8,7 +8,7 @@
 idf_component_register(
     SRCS "main.cpp" "NodeApp.cpp"
     INCLUDE_DIRS "."
-    REQUIRES ewp mcp_server tools net provisioning
+    REQUIRES ewp mcp_server tools net provisioning netobserve
     # espcoredump is listed explicitly: set(COMPONENTS main) trims the build to
     # main's dependency graph, and without it the CONFIG_ESP_COREDUMP_* lines in
     # sdkconfig.defaults are silently ignored (no core dump on a crash).

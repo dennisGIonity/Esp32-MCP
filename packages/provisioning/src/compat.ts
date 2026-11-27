@@ -78,6 +78,16 @@ export function planSet(form: ValidForm, board: BoardInfo): SetPlan {
   if (form.mcpToken !== '') fields.mcp_token = form.mcpToken;
   if (form.fleetToken !== '') fields.fleet_token = form.fleetToken;
 
+  // LAN DNS forwarder (fw >= 3.1): "" = leave unchanged
+  if (form.dnsMode !== '' || form.dnsUpstream !== '') {
+    if (v2 && supports('dns_mode') && supports('dns_upstream')) {
+      if (form.dnsMode !== '') fields.dns_mode = form.dnsMode;
+      if (form.dnsUpstream !== '') fields.dns_upstream = form.dnsUpstream;
+    } else {
+      warnings.push('This firmware has no LAN DNS forwarder (it arrives with firmware 3.1); the DNS settings were left out.');
+    }
+  }
+
   // Never send a field the board did not advertise (prov/2) or does not know (prov/1).
   for (const name of Object.keys(fields) as SetFieldName[]) {
     if (!supports(name)) {

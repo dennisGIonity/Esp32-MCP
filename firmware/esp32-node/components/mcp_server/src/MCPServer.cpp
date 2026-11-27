@@ -531,6 +531,7 @@ void MCPServer::runJob(uint8_t slotIndex) {
             h.rid = req.rid;
             h.tool = req.tool;
             h.status = EWP_ST_OK;
+            if (ctx.truncated()) h.flags = static_cast<uint8_t>(h.flags | EWP_FLAG_TRUNCATED);
             h.bodyLen = static_cast<uint16_t>(pw.size() + resultLen);
             ewp::encodeHeader(h, buf);
             frameLen = EWP_HEADER_LEN + h.bodyLen;

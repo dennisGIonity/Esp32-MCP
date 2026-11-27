@@ -61,4 +61,59 @@ menu "Ionity ESP32-MCP node"
         bool "Wi-Fi modem sleep (saves power, adds up to a DTIM interval of latency)"
         default n
 
+    menu "Outputs (set_actuator)"
+        config IONITY_PWM0_GPIO
+            int "pwm0 GPIO (alert output; -1 = none) when NVS pins{} has none"
+            range -1 48
+            default 5 if IDF_TARGET_ESP32S3
+            default 4 if IDF_TARGET_ESP32C6
+            default -1
+            help
+                fw 2.x default red-light pin (GPIO5 on ESP32-S3). NetObserve pulses it on a flagged
+                ALERT match. Strapping / flash / PSRAM / USB / console pins are refused at boot.
+
+        config IONITY_PWM1_GPIO
+            int "pwm1 GPIO (-1 = none)"
+            range -1 48
+            default 6 if IDF_TARGET_ESP32S3
+            default 5 if IDF_TARGET_ESP32C6
+            default -1
+
+        config IONITY_RELAY0_GPIO
+            int "relay0 GPIO (-1 = none)"
+            range -1 48
+            default 7 if IDF_TARGET_ESP32S3
+            default 18 if IDF_TARGET_ESP32C6
+            default -1
+    endmenu
+
+    menu "NetObserve (LAN DNS forwarder)"
+        config IONITY_DNS_BATCH_PERIOD_S
+            int "DNS_BATCH period in seconds (earlier when the log is 75 % full)"
+            range 2 300
+            default 10
+
+        config IONITY_DNS_ALERT_HOLD_S
+            int "Alert output stays on this long after the last watched lookup (s)"
+            range 1 3600
+            default 20
+
+        config IONITY_DNS_CACHE_ENTRIES
+            int "Answer cache entries (512 B each)"
+            range 1 256
+            default 48 if SPIRAM
+            default 24
+
+        config IONITY_DNS_LOG_BYTES
+            int "Query log ring (bytes; a query costs ~35-60 B)"
+            range 2048 131072
+            default 16384 if SPIRAM
+            default 6144
+
+        config IONITY_DNS_PENDING
+            int "Queries in flight upstream"
+            range 4 64
+            default 24
+    endmenu
+
 endmenu

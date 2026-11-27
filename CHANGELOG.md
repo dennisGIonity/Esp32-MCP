@@ -5,6 +5,47 @@ AEDI - IONITY GLOBAL | DOC-2026-09-ESP32MCP-CHG | Policy 986 AED
 
 # Changelog
 
+## 3.0.0-rc2 — 2026-11-27 (NetObserve v3 completed · branch `feat/netobserve-v3`)
+
+The four items lost from the 23 Oct session, rebuilt, plus a start-up crash found while doing it.
+
+- **ping_host (EWP 0x47)** end to end - protocol (`PingHostArgs/Result`, `PingError`, `EWP_LIMITS.ping*`,
+  `checkPingHostArgs`), firmware 3.2.0 (`esp_ping`, deadline- and CANCEL-aware, one session at a time),
+  Pi agent 2.1.0 (`pinger.py`), fleet host (`ping_target` node action, rate limited; MCP tool
+  `ping_from_node`), portal ("Ping from this board").
+- **Firmware 3.2.0 MQTT back-off**: esp-mqtt auto-reconnect off; `net/Backoff.h` (1 s doubling to 60 s,
+  ±20 % jitter, reset on CONNECTED, paused while Wi-Fi has no address); `net_task` drives the reconnect.
+- **Fleet host MQTT bridge**: start-up crashed with MQTT enabled (`publish_raw` missing); EWP/1 frames over
+  MQTT were sent down the JSON path. Fixed; `/api/v1/health` gains `status` / `degraded`; real-broker E2E test.
+- **Network sentinel - real data only**: RouterOS REST counters, DHCP leases, firewall log, real ICMP/TCP
+  probes, EskomSePush or "unavailable"; explicit `floor_interfaces`; simulation only in `core/simulation.py`,
+  opt-in and labelled. See `services/network-sentinel/README.md` "Data sources".
+- **Firmware**: `EspPlatform.cpp` temperature-sensor config set field by field (ESP-IDF 5.5.1 `-Werror`).
+- **CI**: `mqtt-e2e` job (lab broker, down/up/killed/back). Firmware host tests, S3/C6 release images and the
+  portal e2e were already in CI.
+- **Lab**: `tools/scripts/live_check.py` - the boardroom check with real boards, operator-driven.
+
+## 3.0.0-rc — 2026-11-10 (NetObserve v3 · branch `feat/netobserve-v3`)
+
+### In this branch (committed)
+- **Protocol EWP/1 NetObserve** (`packages/protocol`): DNS batch / flag events, watchlist, LAN devices, reboot;
+  generated C header + Python modules (`npm run check:gen`, `check:c`).
+- **Firmware 3.1.0** (`firmware/esp32-node`): on-device DNS forwarder, edge watchlist, LAN discovery, actuators,
+  reboot; `ionity-prov/2` gains `dns_mode` + `dns_upstream`.
+- **Pi agent 2.0.0** (`devices/pi-agent`): same EWP/1 contract, UDP+TCP DNS forwarder, DHCP/mDNS/ARP discovery.
+- **Fleet host 3.0** (`services/fleet-host`): EWP/1 hub (MQTT + HTTP), DNS pipeline, watchlist rule engine, device
+  labels, node actions, MCP 2025-11-25 (Streamable HTTP `/mcp` + stdio bridge), ingest auth + rate limits.
+- **Portal 3** (`apps/portal`): Board / Fleet / Network activity / Watchlist; served at `/portal/`, `/flasher/` redirects.
+
+### Brush-over (2026-11-10)
+- Host DNS resolver and host LAN sweep now **default off** (`IONITY_DNS_ENABLED`, `IONITY_LAN_SWEEP_ENABLED`),
+  as PLAN-v3-ESP-CENTRIC requires; the POC kit (`poc.ps1 setup`) and tester kit (`tester.env`) switch both on
+  explicitly so the boardroom demo is unchanged. Guard test: `tests/test_v3_defaults.py`.
+- `.gitattributes`: `* text=auto` so Windows checkouts stop showing every file as modified (CRLF churn).
+- Fleet host: ruff pyupgrade fixes (PEP 585/604 annotations, `TimeoutError` alias).
+
+### Was open on 2026-11-10 — done in 3.0.0-rc2 above, except the live test with real boards.
+
 ## 2.2.0 — 2026-10-10 (whole-network view + network alerts · POC package v1.2)
 
 ### Fleet server

@@ -15,6 +15,7 @@ import { defineKeys } from './keys.ts';
 import type { ActuatorKind, ChipModel, DeviceState, ModelKind, ResetReason, StateMode, TensorDType, ToolId } from './ids.ts';
 import type { TensorShape } from './tools.ts';
 import type { FixedBytes, U16, U32, U8, Unit, Utf8 } from './scalars.ts';
+import type { NetObserveInfo } from './netobserve.ts';
 
 export interface FirmwareInfo {
   /** semver, e.g. "3.0.0" */
@@ -124,6 +125,8 @@ export interface HelloBody {
   readonly label?: Utf8<48>;
   readonly resetReason: ResetReason;
   readonly bootCount: U32;
+  /** NetObserve: absent on nodes that cannot forward DNS */
+  readonly net?: NetObserveInfo;
 }
 export const HelloBodyKey = defineKeys<HelloBody>()({
   proto: 1,
@@ -143,6 +146,7 @@ export const HelloBodyKey = defineKeys<HelloBody>()({
   label: 15,
   resetReason: 16,
   bootCount: 17,
+  net: 18,
 });
 
 export interface StatusBody {

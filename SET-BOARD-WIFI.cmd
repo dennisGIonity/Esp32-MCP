@@ -15,7 +15,13 @@ set /p SSID=WiFi name [Afrihost Fibre DTM]:
 if "%SSID%"=="" set SSID=Afrihost Fibre DTM
 set PROV=tools\scripts\provision.py
 if not exist "%PROV%" set PROV=scripts\provision.py
-"%PY%" "%PROV%" %PORT% --ssid "%SSID%" --password - --role node --test
+set DNSARGS=
+echo The LAN DNS forwarder (firmware 3.1+) lets this board answer DNS for the network - only if the router
+echo hands out the board's IP as the DHCP DNS server. Most setups leave it off.
+set DNSFWD=
+set /p DNSFWD=Turn on the LAN DNS forwarder on this board? [y/N]: 
+if /i "%DNSFWD%"=="y" set DNSARGS=--dns-mode forward
+"%PY%" "%PROV%" %PORT% --ssid "%SSID%" --password - --role node --test %DNSARGS%
 echo.
 echo Done. The board appears ONLINE on http://localhost:8099/ within about a minute.
 pause

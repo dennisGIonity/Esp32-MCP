@@ -16,3 +16,5 @@ export * from './tools.ts';
 export * from './telemetry.ts';
 export * from './hello.ts';
 export * from './events.ts';
+export * from './netobserve.ts';
+export * from './watchlist.ts';

@@ -149,3 +149,19 @@ test('silence times out with a clear error', async () => {
   board.dropNextReply = true;
   await assert.rejects(client.request('scan', {}, { timeoutMs: 100, retries: 0 }), ProvTimeoutError);
 });
+
+test('fw 3.1 (prov/2): dns_mode / dns_upstream round-trip and field errors', async () => {
+  const { board, client } = wire({ prov: 2, fw: '3.1.0' });
+  board.boot();
+  const hello = await client.handshake(2000);
+  assert.ok(hello.setFields.has('dns_mode') && hello.setFields.has('dns_upstream'));
+  assert.equal(hello.dnsMode, 'off');
+  const r = await client.set({ dns_mode: 'forward', dns_upstream: '9.9.9.9' });
+  assert.deepEqual(r.changed.sort(), ['dns_mode', 'dns_upstream']);
+  assert.equal(r.board.dnsMode, 'forward');
+  assert.equal(r.board.dnsUpstream, '9.9.9.9');
+  await assert.rejects(client.request('set', { dns_mode: 'block' }), (e: unknown) => e instanceof ProvError && e.field === 'dns_mode');
+  await assert.rejects(client.request('set', { dns_upstream: '1.1.1.1,8.8.8.8,9.9.9.9' }), (e: unknown) => e instanceof ProvError && e.field === 'dns_upstream');
+  await assert.rejects(client.request('set', { dns_upstream: '127.0.0.1' }), (e: unknown) => e instanceof ProvError && e.field === 'dns_upstream');
+  assert.equal(board.nvs.get('dns_upstream'), '9.9.9.9');
+});

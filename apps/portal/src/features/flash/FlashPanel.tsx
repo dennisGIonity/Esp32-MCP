@@ -20,6 +20,8 @@ interface Props {
   readonly onBusyChange: (busy: boolean) => void;
   /** the simulator has no ROM bootloader to talk to */
   readonly simulated: boolean;
+  /** the fleet host's /api/v1/firmware/manifest, tried before the bundled release */
+  readonly hostManifestUrl?: string | null;
 }
 
 type Source = 'release' | 'file';
@@ -28,11 +30,16 @@ function defaultManifestUrl(): string {
   return new URL('firmware/manifest.json', document.baseURI).href;
 }
 
-export function FlashPanel({ device, busy, onBusyChange, simulated }: Props) {
+/** Where to look for a release, in order: an explicit preference, the fleet host, the portal's own folder. */
+export function manifestCandidates(pref: string | null, hostUrl: string | null | undefined, bundled: string): string[] {
+  return [pref, hostUrl, bundled].filter((u, i, a): u is string => Boolean(u) && a.indexOf(u) === i);
+}
+
+export function FlashPanel({ device, busy, onBusyChange, simulated, hostManifestUrl = null }: Props) {
   const announce = useAnnounce();
   const uid = useId();
   const [source, setSource] = useState<Source>('release');
-  const [manifestUrl] = useState(() => prefs.get('firmwareUrl') || defaultManifestUrl());
+  const [manifestUrl, setManifestUrl] = useState(() => prefs.get('firmwareUrl') || hostManifestUrl || defaultManifestUrl());
   const [manifest, setManifest] = useState<{ value: Manifest | null; error: string | null }>({ value: null, error: null });
   const [file, setFile] = useState<{ name: string; data: Uint8Array } | null>(null);
   const [address, setAddress] = useState('0x0');
@@ -45,16 +52,27 @@ export function FlashPanel({ device, busy, onBusyChange, simulated }: Props) {
   useEffect(() => {
     if (source !== 'release' || simulated) return;
     let cancelled = false;
-    void import('../../lib/flash/installer.ts')
-      .then(({ fetchManifest }) => fetchManifest(manifestUrl))
-      .then(
-        (m) => !cancelled && setManifest({ value: m, error: null }),
-        (e: unknown) => !cancelled && setManifest({ value: null, error: (e as Error).message }),
-      );
+    const urls = manifestCandidates(prefs.get('firmwareUrl'), hostManifestUrl, defaultManifestUrl());
+    void (async () => {
+      const { fetchManifest } = await import('../../lib/flash/installer.ts');
+      let lastError = 'no release found';
+      for (const url of urls) {
+        try {
+          const m = await fetchManifest(url);
+          if (cancelled) return;
+          setManifestUrl(url);
+          setManifest({ value: m, error: null });
+          return;
+        } catch (e) {
+          lastError = `${url}: ${(e as Error).message}`;
+        }
+      }
+      if (!cancelled) setManifest({ value: null, error: lastError });
+    })();
     return () => {
       cancelled = true;
     };
-  }, [source, manifestUrl, simulated]);
+  }, [source, hostManifestUrl, simulated]);
 
   const connected = device.snapshot.status === 'open';
   const addr = Number.parseInt(address, address.trim().toLowerCase().startsWith('0x') ? 16 : 10);
@@ -116,7 +134,7 @@ export function FlashPanel({ device, busy, onBusyChange, simulated }: Props) {
         <label className="flex min-h-11 items-center gap-3 text-sm">
           <input type="radio" name={`${uid}-src`} className="size-5" checked={source === 'release'} onChange={() => setSource('release')} />
           <span>
-            Release
+            Release{manifest.value && manifestUrl === hostManifestUrl ? ' from the fleet host' : ''}
             {manifest.value ? ` ${manifest.value.version} (${manifest.value.builds.map((b) => b.chip_family).filter((f, i, a) => a.indexOf(f) === i).join(', ')})` : ''}
           </span>
         </label>
@@ -127,7 +145,7 @@ export function FlashPanel({ device, busy, onBusyChange, simulated }: Props) {
       </fieldset>
 
       {source === 'release' && manifest.error && !simulated ? (
-        <p className="text-sm text-amber-900 dark:text-amber-200">No firmware release found at {manifestUrl} ({manifest.error}). Choose a .bin file instead.</p>
+        <p className="text-sm text-amber-900 dark:text-amber-200">No firmware release found ({manifest.error}). Choose a .bin file instead.</p>
       ) : null}
 
       {source === 'file' ? (

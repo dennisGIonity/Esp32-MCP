@@ -1,8 +1,7 @@
 import asyncio
 import logging
-import random
 import time
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 logger = logging.getLogger("sentinel.speedtest")
 
@@ -29,7 +28,7 @@ class SpeedtestEngine:
         self.committed_ul = float(st_cfg.get("committed_upload_mbps", 200.0))
         self.allow_simulation = bool(st_cfg.get("simulate_if_unavailable", False))
         self.last_result: Dict[str, Any] = {
-            "source": "none", "simulated": True,
+            "source": "none", "simulated": False,
             "download_mbps": None, "upload_mbps": None, "ping_ms": None, "jitter_ms": None,
             "server_location": None, "isp_detected": None, "speed_bar_level": 0,
             "timestamp": None, "note": "no speed test has run yet",
@@ -57,16 +56,10 @@ class SpeedtestEngine:
         }
 
     def _simulated(self) -> Dict[str, Any]:
-        dl = round(random.uniform(175.0, 198.5), 1)
-        return {
-            "source": "simulation", "simulated": True,
-            "download_mbps": dl, "upload_mbps": round(random.uniform(168.0, 195.0), 1),
-            "ping_ms": round(random.uniform(5.5, 9.8), 1), "jitter_ms": round(random.uniform(0.6, 2.1), 1),
-            "server_location": "SIMULATED", "isp_detected": "SIMULATED",
-            "speed_bar_level": int(min(100, dl / self.committed_dl * 100)),
-            "timestamp": time.time(),
-            "note": "speedtest-cli unavailable and speedtest.simulate_if_unavailable=true",
-        }
+        from core.simulation import synthetic_speedtest   # labelled demo data, opt-in only
+        r = synthetic_speedtest("speedtest-cli unavailable and speedtest.simulate_if_unavailable=true")
+        r["speed_bar_level"] = int(min(100, r["download_mbps"] / self.committed_dl * 100))
+        return r
 
     async def run_active_speedtest(self) -> Dict[str, Any]:
         if self._lock.locked():
@@ -85,12 +78,16 @@ class SpeedtestEngine:
                 await asyncio.sleep(3.0)
                 self.last_result = self._simulated()
                 return self.last_result
-            self.last_result = {**self.last_result, "source": "none", "simulated": True,
+            self.last_result = {**self.last_result, "source": "none", "simulated": False,
                                 "note": "speedtest-cli not installed or failed; simulation disabled"}
             return self.last_result
 
-    def get_passive_estimate(self, current_rx_mbps: float, current_tx_mbps: float) -> Dict[str, Any]:
-        """Continuous passive health metrics based on live wire consumption."""
+    def get_passive_estimate(self, current_rx_mbps: Optional[float], current_tx_mbps: Optional[float]) -> Dict[str, Any]:
+        """Continuous passive health metrics based on live wire consumption (null without router data)."""
+        if current_rx_mbps is None or current_tx_mbps is None:
+            return {"current_rx_mbps": current_rx_mbps, "current_tx_mbps": current_tx_mbps,
+                    "committed_capacity_mbps": self.committed_dl + self.committed_ul,
+                    "rx_utilization_pct": None, "tx_utilization_pct": None}
         return {
             "current_rx_mbps": current_rx_mbps,
             "current_tx_mbps": current_tx_mbps,

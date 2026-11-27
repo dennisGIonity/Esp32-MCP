@@ -88,6 +88,8 @@ const FIELD_OF: Partial<Record<SetFieldName, FormField>> = {
   site: 'site',
   group: 'group',
   label: 'label',
+  dns_mode: 'dnsMode',
+  dns_upstream: 'dnsUpstream',
 };
 
 class Stopped extends Error {

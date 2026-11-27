@@ -18,8 +18,8 @@
  */
 import { EMPTY_FORM, type FieldErrors, type FormField, type ProvisionForm as Form, type SetPlan, type ValidForm } from '@ionity/prov';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { defaultHostApi } from '../../lib/host/verify.ts';
-import { prefs } from '../../lib/store.ts';
+import { defaultsToForm } from '../../lib/api/client.ts';
+import { useHost } from '../fleet/HostContext.tsx';
 import { useAnnounce } from '../../ui/announcer.tsx';
 import { TerminalPanel } from '../console/TerminalPanel.tsx';
 import { FlashPanel } from '../flash/FlashPanel.tsx';
@@ -49,8 +49,11 @@ export function DeviceConsole({ serial, simulated = false }: Props) {
   // ---- form state (lifted: the console needs the secrets to mask them) -------------
   const [form, setForm] = useState<Form>(EMPTY_FORM);
   const touched = useRef(new Set<FormField>());
-  // The simulated board is unknown to any real fleet host: no default host check there.
-  const [hostApi, setHostApi] = useState(() => prefs.get('hostApi') ?? (simulated ? '' : defaultHostApi()));
+  // One host setting for the whole portal (HostContext). The simulated board is
+  // unknown to any real fleet host: HostProvider starts with no host there.
+  const host = useHost();
+  const hostApi = host.base;
+  const hostDefaults = useRef<ReturnType<typeof defaultsToForm>>({});
 
   const setField = useCallback<SetField>((field, value) => {
     touched.current.add(field);
@@ -67,17 +70,45 @@ export function DeviceConsole({ serial, simulated = false }: Props) {
       const fill = <K extends FormField>(k: K, v: Form[K]) => {
         if (!touched.current.has(k)) next[k] = v;
       };
+      const d = hostDefaults.current;
       fill('ssid', board.ssid ?? '');
       fill('keepPass', board.hasPass);
-      fill('hostUrl', board.hostUrl);
+      fill('hostUrl', board.hostUrl || d.hostUrl || '');
       fill('deviceUuid', board.deviceUuid ?? '');
       fill('role', board.role === 'standalone' ? 'standalone' : 'node');
-      fill('site', board.site ?? '');
-      fill('group', board.group ?? '');
+      fill('site', board.site || d.site || '');
+      fill('group', board.group || d.group || '');
       fill('label', board.label ?? '');
       return next;
     });
   }, [board]);
+
+  // Pre-fill from the fleet host (GET /api/v1/provisioning/defaults): where boards
+  // report, site/group, and - only with the admin token - the enrolment token.
+  // Fills untouched, empty fields only.
+  useEffect(() => {
+    if (simulated || !host.configured || host.blocked) return;
+    let cancelled = false;
+    host.api.provisioningDefaults().then(
+      (d) => {
+        if (cancelled) return;
+        const f = defaultsToForm(d);
+        hostDefaults.current = f;
+        setForm((prev) => {
+          const next: Form = { ...prev };
+          for (const [k, v] of Object.entries(f) as [keyof typeof f, string][]) {
+            if (!touched.current.has(k) && next[k] === '') next[k] = v;
+          }
+          return next;
+        });
+        if (d.warning) device.note(`Fleet host: ${d.warning}`, 'warn');
+      },
+      () => undefined, // an older host or no host: the form works without defaults
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [host.api, host.configured, host.blocked, simulated]);
 
   // A different board (or none): forget which fields were typed for the old one.
   useEffect(() => {
@@ -98,10 +129,7 @@ export function DeviceConsole({ serial, simulated = false }: Props) {
     if (!flow.state.running) void identify();
   }, [snapshot.status, snapshot.reconnects, flow.state.running, identify]);
 
-  const onHostApiChange = useCallback((v: string) => {
-    setHostApi(v);
-    prefs.set('hostApi', v);
-  }, []);
+  const onHostApiChange = host.setBase;
 
   const onSubmit = useCallback(
     (valid: ValidForm, plan: SetPlan, warnings: readonly string[]) => {
@@ -146,7 +174,7 @@ export function DeviceConsole({ serial, simulated = false }: Props) {
           onSubmit={onSubmit}
         />
         <PairingChecklist flow={flow.state} onStop={flow.stop} />
-        <FlashPanel device={device} busy={busy} onBusyChange={setFlashing} simulated={simulated} />
+        <FlashPanel device={device} busy={busy} onBusyChange={setFlashing} simulated={simulated} hostManifestUrl={host.configured && !host.blocked ? host.api.firmwareManifestUrl() : null} />
       </div>
       <div className="min-w-0 lg:sticky lg:top-4">
         <TerminalPanel device={device} secrets={secrets} />

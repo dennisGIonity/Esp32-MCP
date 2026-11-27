@@ -57,6 +57,8 @@ include_directories(
     "${FW_ROOT}/components/mcp_server/include"
     "${FW_ROOT}/components/tools/include"
     "${FW_ROOT}/components/provisioning/include"
+    "${FW_ROOT}/components/netobserve/include"
+    "${FW_ROOT}/components/net/include"
     "${CJSON_DIR}"
     "${EWP_PROTOCOL_DIR}")
 
@@ -72,6 +74,16 @@ set(PORTABLE_SRCS
     "${FW_ROOT}/components/tools/src/Telemetry.cpp"
     "${FW_ROOT}/components/tools/src/Identity.cpp"
     "${FW_ROOT}/components/tools/src/EdgeTools.cpp"
+    "${FW_ROOT}/components/tools/src/Actuators.cpp"
+    "${FW_ROOT}/components/tools/src/SystemTools.cpp"
+    "${FW_ROOT}/components/netobserve/src/DnsWire.cpp"
+    "${FW_ROOT}/components/netobserve/src/Watchlist.cpp"
+    "${FW_ROOT}/components/netobserve/src/DnsCache.cpp"
+    "${FW_ROOT}/components/netobserve/src/QueryLog.cpp"
+    "${FW_ROOT}/components/netobserve/src/ClientTable.cpp"
+    "${FW_ROOT}/components/netobserve/src/Discovery.cpp"
+    "${FW_ROOT}/components/netobserve/src/NetObserve.cpp"
+    "${FW_ROOT}/components/netobserve/src/NetTools.cpp"
     "${FW_ROOT}/components/provisioning/src/Json.cpp"
     "${FW_ROOT}/components/provisioning/src/Validate.cpp"
     "${FW_ROOT}/components/provisioning/src/Config.cpp"
@@ -85,7 +97,10 @@ add_library(fw_portable STATIC ${PORTABLE_SRCS})
 target_link_libraries(fw_portable PUBLIC Threads::Threads cjson)
 target_compile_options(fw_portable PRIVATE ${STRICT_FLAGS} ${SAN_FLAGS})
 
-add_executable(fw_tests main.cpp test_ewp.cpp test_mcp.cpp test_tools.cpp test_prov.cpp)
+add_executable(fw_tests main.cpp test_ewp.cpp test_mcp.cpp test_tools.cpp test_prov.cpp test_netobs.cpp test_backoff.cpp)
+# GCC -O1 + TSan reports copies of std::vector<uint8_t> as possibly null when the test pokes
+# single bytes of a DNS message; production sources keep -Wnull-dereference.
+set_source_files_properties(test_netobs.cpp PROPERTIES COMPILE_OPTIONS -Wno-null-dereference)
 target_compile_options(fw_tests PRIVATE ${STRICT_FLAGS} ${SAN_FLAGS})
 target_link_libraries(fw_tests PRIVATE fw_portable ${SAN_FLAGS})
 

@@ -33,8 +33,8 @@ import { useAnnounce } from '../../ui/announcer.tsx';
 import { controlProps, Field, useFieldIds } from './Field.tsx';
 
 /** DOM order - the first invalid one in this order gets focus. */
-const FIELD_ORDER: readonly FormField[] = ['ssid', 'pass', 'hostUrl', 'deviceUuid', 'role', 'site', 'group', 'label', 'mqttUser', 'mqttPass', 'mcpToken', 'fleetToken', 'caPem'];
-const ADVANCED: ReadonlySet<FormField> = new Set<FormField>(['role', 'site', 'group', 'label', 'mqttUser', 'mqttPass', 'mcpToken', 'fleetToken', 'caPem']);
+const FIELD_ORDER: readonly FormField[] = ['ssid', 'pass', 'hostUrl', 'deviceUuid', 'role', 'dnsMode', 'dnsUpstream', 'site', 'group', 'label', 'mqttUser', 'mqttPass', 'mcpToken', 'fleetToken', 'caPem'];
+const ADVANCED: ReadonlySet<FormField> = new Set<FormField>(['role', 'dnsMode', 'dnsUpstream', 'site', 'group', 'label', 'mqttUser', 'mqttPass', 'mcpToken', 'fleetToken', 'caPem']);
 
 export type SetField = <K extends FormField>(field: K, value: Form[K]) => void;
 
@@ -64,6 +64,7 @@ export function ProvisionForm(props: Props) {
   const [scanState, setScanState] = useState<{ busy: boolean; text: string }>({ busy: false, text: '' });
   const [hostApiDraft, setHostApiDraft] = useState(props.hostApi);
   const [hostApiError, setHostApiError] = useState<string | undefined>(undefined);
+  useEffect(() => setHostApiDraft(props.hostApi), [props.hostApi]);
   const controls = useRef(new Map<FormField, HTMLElement>());
   const formErrorRef = useRef<HTMLParagraphElement>(null);
 
@@ -190,10 +191,12 @@ export function ProvisionForm(props: Props) {
     mcpToken: useFieldIds(),
     fleetToken: useFieldIds(),
     caPem: useFieldIds(),
+    dnsMode: useFieldIds(),
+    dnsUpstream: useFieldIds(),
     hostApi: useFieldIds(),
   };
   const err = (f: FormField) => errors[f];
-  const text = (f: Exclude<FormField, 'openNetwork' | 'keepPass' | 'role'>, hint: boolean, extra: Record<string, unknown> = {}) => ({
+  const text = (f: Exclude<FormField, 'openNetwork' | 'keepPass' | 'role' | 'dnsMode'>, hint: boolean, extra: Record<string, unknown> = {}) => ({
     ...controlProps(ids[f], err(f), hint),
     ref: reg(f),
     value: form[f],
@@ -324,6 +327,32 @@ export function ProvisionForm(props: Props) {
               <option value="standalone">Standalone</option>
             </select>
           </Field>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field
+              ids={ids.dnsMode}
+              label="LAN DNS forwarder"
+              hint="Forward: the board answers DNS for the LAN and reports who looked up what (firmware 3.1+). Point the router's DHCP DNS at the board's reserved IP."
+              error={err('dnsMode')}
+            >
+              <select
+                {...controlProps(ids.dnsMode, err('dnsMode'), true)}
+                ref={reg('dnsMode')}
+                className="field-input"
+                value={form.dnsMode}
+                onChange={(e) => {
+                  const v = e.currentTarget.value;
+                  update('dnsMode', v === 'off' || v === 'forward' ? v : '');
+                }}
+              >
+                <option value="">Keep the board&rsquo;s setting</option>
+                <option value="off">Off</option>
+                <option value="forward">Forward (LAN DNS visibility)</option>
+              </select>
+            </Field>
+            <Field ids={ids.dnsUpstream} label="DNS upstream" optional hint="1-2 IPv4 resolvers, e.g. 1.1.1.1,8.8.8.8. Empty keeps the board's setting." error={err('dnsUpstream')}>
+              <input {...text('dnsUpstream', true, { autoComplete: 'off', inputMode: 'decimal', placeholder: '1.1.1.1,8.8.8.8', maxLength: 40 })} />
+            </Field>
+          </div>
           <div className="grid gap-4 sm:grid-cols-2">
             <Field ids={ids.site} label="Site" optional hint="Lowercase letters, digits and -." error={err('site')}>
               <input {...text('site', true, { autoComplete: 'off', maxLength: 32 })} />

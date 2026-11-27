@@ -22,7 +22,9 @@
  *   server         server       str    fw 2.x (prov/1 tools); kept for downgrades
  *   mqtt_port      mqtt_port    u16    fw 2.x  (Preferences putUShort)
  *   http_port      http_port    u16    fw 2.x
- *   pins{...}      pin_pwm0 ..  i32    fw 2.x  (Preferences putInt)
+ *   pins{...}      pin_pwm0 ..  i32    fw 2.x  (Preferences putInt); absent = Kconfig default pin
+ *   dns_mode       dns_mode     str    fw 3.1: "off" | "forward" (LAN DNS forwarder, NetObserve)
+ *   dns_upstream   dns_upstream str    fw 3.1: "" = 1.1.1.1,8.8.8.8 | 1-2 IPv4 resolvers
  *   -              mode         u8     StateMode (fw 2.x putUChar)
  *   -              boot_count   u32    fw 3
  *
@@ -62,6 +64,9 @@ enum class Field : uint8_t {
     MqttPort,
     HttpPort,
     Pins,
+    // fw 3.1 NetObserve (prov/2, advertised)
+    DnsMode,
+    DnsUpstream,
     Count
 };
 
@@ -76,6 +81,10 @@ const FieldInfo& fieldInfo(Field f);
 Field fieldByName(const char* name, size_t n);
 
 constexpr uint32_t fieldBit(Field f) { return 1u << static_cast<uint8_t>(f); }
+static_assert(static_cast<uint8_t>(Field::Count) <= 32, "fieldBit() is a 32-bit mask");
+
+/** NodeConfig pin value when the NVS key is absent: use the board default (Kconfig). -1 = unused. */
+constexpr int32_t kPinUnset = -2;
 
 struct NodeConfig {
     char ssid[Limits::kSsid + 1] = {};
@@ -97,13 +106,16 @@ struct NodeConfig {
     uint16_t mqttPort = 1883;
     uint16_t httpPort = 8099;
     uint8_t mode = 0;  // StateMode
-    int32_t pinPwm0 = -1;
-    int32_t pinPwm1 = -1;
-    int32_t pinRelay0 = -1;
+    int32_t pinPwm0 = kPinUnset;
+    int32_t pinPwm1 = kPinUnset;
+    int32_t pinRelay0 = kPinUnset;
     uint32_t bootCount = 0;
+    char dnsMode[8] = "off";
+    char dnsUpstream[Limits::kDnsUpstream + 1] = {};  // "" = firmware default resolvers
 
     bool provisioned() const { return ssid[0] != '\0'; }
     bool standalone() const;
+    bool dnsForward() const;
 };
 
 /** NVS namespace access (ESP: nvs_* on namespace "ionity"; host tests: a map). */

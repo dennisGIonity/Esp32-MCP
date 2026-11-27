@@ -1,0 +1,32 @@
+[
+ {
+  ".id": "*A1",
+  "time": "2026-11-27 11:58:01",
+  "topics": "firewall,info",
+  "message": "DROP-WAN input: in:vlan11 out:(unknown 0), connection-state:new src-mac 00:0c:42:aa:bb:cc, proto TCP (SYN), 185.220.101.44:51234->102.33.102.218:23, len 60"
+ },
+ {
+  ".id": "*A2",
+  "time": "2026-11-27 11:58:03",
+  "topics": "firewall,info",
+  "message": "input: in:ether9 out:(unknown 0), connection-state:new proto TCP (SYN), 45.33.32.156:40022->41.169.150.194:22, len 44"
+ },
+ {
+  ".id": "*A3",
+  "time": "2026-11-27 11:58:05",
+  "topics": "firewall,info",
+  "message": "input: in:vlan11 out:(unknown 0), proto UDP, 203.0.113.9:5353->102.33.102.218:161, len 80"
+ },
+ {
+  ".id": "*A4",
+  "time": "2026-11-27 11:58:06",
+  "topics": "system,info",
+  "message": "user admin logged in from 10.53.20.5 via winbox"
+ },
+ {
+  ".id": "*A5",
+  "time": "2026-11-27 11:58:07",
+  "topics": "firewall,info",
+  "message": "something RouterOS printed that we do not understand"
+ }
+]

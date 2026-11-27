@@ -21,6 +21,7 @@ const FieldInfo kFields[static_cast<size_t>(Field::Count)] = {
     {"ota_pass", true, true},     {"role", false, true},        {"site", false, true},
     {"group", false, true},       {"label", false, true},       {"server", false, false},
     {"mqtt_port", false, false},  {"http_port", false, false},  {"pins", false, false},
+    {"dns_mode", false, true},    {"dns_upstream", false, true},
 };
 
 constexpr uint8_t kModeActive = 0;
@@ -71,6 +72,7 @@ Field fieldByName(const char* name, size_t n) {
 }
 
 bool NodeConfig::standalone() const { return strcmp(role, "standalone") == 0; }
+bool NodeConfig::dnsForward() const { return strcmp(dnsMode, "forward") == 0; }
 
 const char* modeName(uint8_t mode) {
     switch (mode) {
@@ -177,6 +179,16 @@ bool ConfigStore::load(LoadReport& rep) {
     kv_->getI32("pin_pwm0", c.pinPwm0);
     kv_->getI32("pin_pwm1", c.pinPwm1);
     kv_->getI32("pin_relay0", c.pinRelay0);
+
+    char dm[12] = {};
+    if (str("dns_mode", dm, sizeof dm) == Get::Ok && validDnsMode(dm, strlen(dm))) strcpy(c.dnsMode, dm);
+    char du[Limits::kDnsUpstream + 1] = {};
+    if (str("dns_upstream", du, sizeof du) == Get::Ok) {
+        uint32_t ips[Limits::kDnsUpstreams];
+        size_t cnt = 0;
+        const char* err = nullptr;
+        if (parseDnsUpstream(du, strlen(du), ips, &cnt, &err)) strcpy(c.dnsUpstream, du);
+    }
 
     uint32_t boots = 0;
     kv_->getU32("boot_count", boots);
@@ -334,6 +346,18 @@ bool ConfigStore::validate(const SetItem& it, NodeConfig& s, const char** err, b
             if (it.pins[1] != -2) s.pinPwm1 = it.pins[1];
             if (it.pins[2] != -2) s.pinRelay0 = it.pins[2];
             return true;
+        case Field::DnsMode:
+            if (!validDnsMode(p, n)) {
+                *err = "dns_mode must be off|forward";
+                return false;
+            }
+            return copyStr(s.dnsMode, p, n);
+        case Field::DnsUpstream: {
+            uint32_t ips[Limits::kDnsUpstreams];
+            size_t cnt = 0;
+            if (!parseDnsUpstream(p, n, ips, &cnt, err)) return false;
+            return copyStr(s.dnsUpstream, p, n);
+        }
         default:
             *err = "unknown field";
             return false;
@@ -409,9 +433,13 @@ SetResult ConfigStore::apply(const SetItem* items, size_t n) {
             case Field::MqttPort: ok = kv_->setU16("mqtt_port", s.mqttPort); break;
             case Field::HttpPort: ok = kv_->setU16("http_port", s.httpPort); break;
             case Field::Pins:
-                ok = kv_->setI32("pin_pwm0", s.pinPwm0) && kv_->setI32("pin_pwm1", s.pinPwm1) &&
-                     kv_->setI32("pin_relay0", s.pinRelay0);
+                // Only the pins given: an absent key keeps meaning "board default".
+                if (items[i].pins[0] != -2) ok = kv_->setI32("pin_pwm0", s.pinPwm0);
+                if (ok && items[i].pins[1] != -2) ok = kv_->setI32("pin_pwm1", s.pinPwm1);
+                if (ok && items[i].pins[2] != -2) ok = kv_->setI32("pin_relay0", s.pinRelay0);
                 break;
+            case Field::DnsMode: ok = kv_->setStr("dns_mode", s.dnsMode); break;
+            case Field::DnsUpstream: ok = kv_->setStr("dns_upstream", s.dnsUpstream); break;
             default: break;
         }
     }

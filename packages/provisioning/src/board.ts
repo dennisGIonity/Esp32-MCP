@@ -50,6 +50,12 @@ export interface BoardInfo {
   /** the board's own LAN MCP endpoint (prov/1 "mcp_url") */
   readonly boardMcpUrl?: string;
   readonly knownNetworks?: readonly string[];
+  /** fw >= 3.1: LAN DNS forwarder setting ("off" | "forward") */
+  readonly dnsMode?: string;
+  /** fw >= 3.1: provisioned upstreams ("" = firmware default) */
+  readonly dnsUpstream?: string;
+  /** fw >= 3.1: the forwarder right now */
+  readonly dns?: { readonly mode: string; readonly port: number; readonly queries: number };
 }
 
 export interface TestResult {
@@ -80,6 +86,14 @@ const obj = (j: J, k: string): J | undefined => {
 /** Spread helper for exactOptionalPropertyTypes: omit the key instead of writing undefined. */
 function opt<K extends string, V>(key: K, value: V | undefined): { [P in K]?: V } {
   return (value === undefined ? {} : { [key]: value }) as { [P in K]?: V };
+}
+
+function dnsLive(d: J | undefined): BoardInfo['dns'] {
+  if (!d) return undefined;
+  const mode = str(d, 'mode');
+  const port = num(d, 'port');
+  const queries = num(d, 'queries');
+  return mode !== undefined && port !== undefined && queries !== undefined ? { mode, port, queries } : undefined;
 }
 
 export function provVersionOf(j: J): ProvVersion {
@@ -127,6 +141,9 @@ export function normalizeBoard(j: J): BoardInfo {
     ...opt('mqtt', bool(j, 'mqtt')),
     ...opt('boardMcpUrl', str(j, 'mcp_url') || undefined),
     ...opt('knownNetworks', known),
+    ...opt('dnsMode', str(j, 'dns_mode')),
+    ...opt('dnsUpstream', str(j, 'dns_upstream')),
+    ...opt('dns', dnsLive(obj(j, 'dns'))),
   };
 }
 

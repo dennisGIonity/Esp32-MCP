@@ -79,6 +79,22 @@ struct SensorStats {
     uint16_t adcMv[kMaxAdc] = {};
 };
 
+/** NetObserve forwarder counters (DnsCounters in netobserve.ts) - monotonic since boot. */
+struct DnsCountersSnap {
+    uint8_t mode = EWP_DNS_MODE_OFF;
+    uint32_t queries = 0;
+    uint32_t forwarded = 0;
+    uint32_t cacheHits = 0;
+    uint32_t upstreamFail = 0;
+    uint32_t dropped = 0;
+    uint32_t flagged = 0;
+    uint16_t clients = 0;
+    uint16_t lanDevices = 0;
+};
+
+/** DnsCounters map (TELEMETRY.dns, get_network_stats.dns). */
+void encodeDnsCounters(ewp::CborWriter& w, const DnsCountersSnap& d);
+
 struct TelemetrySnapshot {
     uint32_t seq = 0;
     uint32_t uptimeS = 0;
@@ -93,6 +109,9 @@ struct TelemetrySnapshot {
     SensorStats sensors;
     float actuators[kMaxActuators] = {};
     uint8_t actuatorCount = 0;
+    /** NetObserve: present on nodes with the forwarder component, sent with every sample */
+    bool hasDns = false;
+    DnsCountersSnap dns;
 };
 
 /**

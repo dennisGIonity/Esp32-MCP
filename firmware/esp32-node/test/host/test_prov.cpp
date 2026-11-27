@@ -104,7 +104,10 @@ TEST(prov_hello_is_v2_with_crc_and_no_secrets) {
     CHECK_STR(j.str("group").c_str(), "bench");
     CHECK_STR(j.str("mode").c_str(), "ACTIVE");
     CHECK_STR(j.str("wifi").c_str(), "down");
-    CHECK(cJSON_GetArraySize(j.get("set_fields")) == 14);
+    CHECK(cJSON_GetArraySize(j.get("set_fields")) == 16);
+    CHECK_STR(j.str("dns_mode").c_str(), "off");
+    CHECK_STR(j.str("dns_upstream").c_str(), "");
+    CHECK(j.get("dns") != nullptr);
     CHECK(j.get("pass") == nullptr && j.get("mqtt_pass") == nullptr && j.get("mcp_token") == nullptr);
 }
 
@@ -503,4 +506,98 @@ TEST(prov_field_validators) {
     CHECK_STR(site, "head-office--1");
     prov::sanitizeTopicLevel("###", site, sizeof site, "lab");
     CHECK_STR(site, "lab");
+}
+
+TEST(prov_dns_fields_round_trip_and_reject) {
+    ProvRig rig;
+    rig.send("{\"ionity\":\"prov\",\"op\":\"set\",\"v\":2,\"id\":1,\"dns_mode\":\"forward\",\"dns_upstream\":\"9.9.9.9,1.1.1.1\"}");
+    Json j(rig.last());
+    CHECK(j.is("ok", true));
+    CHECK_EQ(cJSON_GetArraySize(j.get("changed")), 2);
+    CHECK_STR(j.str("dns_mode").c_str(), "forward");
+    CHECK_STR(j.str("dns_upstream").c_str(), "9.9.9.9,1.1.1.1");
+    CHECK_STR(rig.kv.str("dns_mode").c_str(), "forward");
+    CHECK_STR(rig.kv.str("dns_upstream").c_str(), "9.9.9.9,1.1.1.1");
+    CHECK(rig.be.lastChanged & prov::fieldBit(prov::Field::DnsMode));
+
+    struct {
+        const char* body;
+        const char* field;
+    } bad[] = {
+        {"\"dns_mode\":\"block\"", "dns_mode"},
+        {"\"dns_mode\":1", "dns_mode"},
+        {"\"dns_upstream\":\"1.1.1.1,8.8.8.8,9.9.9.9\"", "dns_upstream"},
+        {"\"dns_upstream\":\"1.1.1\"", "dns_upstream"},
+        {"\"dns_upstream\":\"256.1.1.1\"", "dns_upstream"},
+        {"\"dns_upstream\":\"01.1.1.1\"", "dns_upstream"},
+        {"\"dns_upstream\":\"127.0.0.1\"", "dns_upstream"},
+        {"\"dns_upstream\":\"224.0.0.251\"", "dns_upstream"},
+        {"\"dns_upstream\":\"0.0.0.0\"", "dns_upstream"},
+        {"\"dns_upstream\":\"1.1.1.1, 8.8.8.8\"", "dns_upstream"},
+        {"\"dns_upstream\":\"1.1.1.1,\"", "dns_upstream"},
+        {"\"dns_upstream\":\"8.8.8.8,8.8.8.8\"", "dns_upstream"},
+    };
+    int id = 2;
+    for (const auto& b : bad) {
+        rig.send(std::string("{\"ionity\":\"prov\",\"op\":\"set\",\"v\":2,\"id\":") + std::to_string(id++) + "," + b.body + "}");
+        Json r(rig.last());
+        CHECK(r.is("ok", false));
+        CHECK_STR(r.str("field").c_str(), b.field);
+    }
+    CHECK_STR(rig.kv.str("dns_upstream").c_str(), "9.9.9.9,1.1.1.1");  // untouched by the rejects
+
+    // "" resets to the firmware default resolvers
+    rig.send("{\"ionity\":\"prov\",\"op\":\"set\",\"v\":2,\"id\":40,\"dns_upstream\":\"\"}");
+    Json e(rig.last());
+    CHECK(e.is("ok", true));
+    CHECK_STR(e.str("dns_upstream").c_str(), "");
+
+    // survives a reboot (load from NVS)
+    prov::ConfigStore again;
+    CHECK(again.begin(rig.kv));
+    prov::LoadReport rep;
+    again.load(rep);
+    prov::NodeConfig c;
+    again.snapshot(c);
+    CHECK(c.dnsForward());
+    CHECK_STR(c.dnsUpstream, "");
+}
+
+TEST(prov_v1_ignores_dns_fields_and_garbage_in_nvs_is_ignored) {
+    ProvRig rig;
+    // prov/1 (fw 2.x tools): unknown-to-them fields are ignored, never an error
+    rig.send("{\"ionity\":\"prov\",\"op\":\"set\",\"ssid\":\"Lab\",\"bogus\":\"x\"}", false);
+    Json j(rig.last());
+    CHECK(j.is("ok", true));
+    // a foreign writer put junk in NVS: defaults win
+    rig.kv.setStr("dns_mode", "sinkhole");
+    rig.kv.setStr("dns_upstream", "127.0.0.1");
+    prov::ConfigStore again;
+    CHECK(again.begin(rig.kv));
+    prov::LoadReport rep;
+    again.load(rep);
+    prov::NodeConfig c;
+    again.snapshot(c);
+    CHECK(!c.dnsForward());
+    CHECK_STR(c.dnsUpstream, "");
+    CHECK_EQ(c.pinPwm0, prov::kPinUnset);
+}
+
+TEST(prov_validate_ipv4_and_upstreams) {
+    uint32_t ip = 0;
+    CHECK(prov::parseIpv4("192.168.0.3", 11, &ip));
+    CHECK_EQ(ip, 0xC0A80003u);
+    CHECK(prov::parseIpv4("0.0.0.0", 7, &ip));
+    CHECK(!prov::parseIpv4("1.2.3", 5, &ip));
+    CHECK(!prov::parseIpv4("1.2.3.4.5", 9, &ip));
+    CHECK(!prov::parseIpv4("1.2.3.1000", 10, &ip));
+    CHECK(!prov::parseIpv4("1..3.4", 6, &ip));
+    uint32_t ips[2];
+    size_t n = 0;
+    const char* err = nullptr;
+    CHECK(prov::parseDnsUpstream("1.1.1.1,8.8.4.4", 15, ips, &n, &err));
+    CHECK_EQ(n, 2u);
+    CHECK_EQ(ips[1], 0x08080404u);
+    CHECK(prov::parseDnsUpstream("", 0, ips, &n, &err));
+    CHECK_EQ(n, 0u);
 }

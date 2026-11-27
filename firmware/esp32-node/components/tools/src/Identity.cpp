@@ -69,8 +69,12 @@ void encodeHelloBody(ewp::CborWriter& w, const Identity& id, uint8_t mode, const
         w.uint(t->version);
         w.uint(t->flags);
     }
-    m.key(EWP_K_HELLO_BODY_MODELS).array(0);     // run_inference: later phase
-    m.key(EWP_K_HELLO_BODY_ACTUATORS).array(0);  // set_actuator: later phase
+    m.key(EWP_K_HELLO_BODY_MODELS).array(0);  // run_inference: later phase
+    if (id.actuators != nullptr && id.actuators->present()) {
+        id.actuators->encode(m.key(EWP_K_HELLO_BODY_ACTUATORS));
+    } else {
+        m.key(EWP_K_HELLO_BODY_ACTUATORS).array(0);
+    }
     m.key(EWP_K_HELLO_BODY_METRICS).array(0);
     m.key(EWP_K_HELLO_BODY_TASKS).array(id.taskCount);
     for (uint8_t i = 0; i < id.taskCount && i < kMaxTasks; ++i) {
@@ -87,6 +91,7 @@ void encodeHelloBody(ewp::CborWriter& w, const Identity& id, uint8_t mode, const
     if (id.label[0] != '\0') textField(m.key(EWP_K_HELLO_BODY_LABEL), id.label, 48);
     m.key(EWP_K_HELLO_BODY_RESET_REASON).uint(id.resetReason);
     m.key(EWP_K_HELLO_BODY_BOOT_COUNT).uint(id.bootCount);
+    if (id.net != nullptr && id.net->present()) id.net->encode(m.key(EWP_K_HELLO_BODY_NET));
 }
 
 void encodeStatusBody(ewp::CborWriter& w, uint8_t state, int mode, const uint8_t* ip, size_t ipLen, uint32_t wakeAtS) {

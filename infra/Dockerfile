@@ -1,11 +1,14 @@
 # AEDI - IONITY GLOBAL | ESP32-MCP fleet server image | Policy 986 AED
-# --- flasher build stage -----------------------------------------------------
-FROM node:22-alpine AS flasher
-WORKDIR /flasher
-COPY apps/flasher-legacy/package.json apps/flasher-legacy/package-lock.json ./
+# --- portal build stage (npm workspaces: packages/* + apps/portal) ----------
+FROM node:22-alpine AS portal
+ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
+WORKDIR /src
+COPY package.json package-lock.json ./
+COPY packages/ packages/
+COPY apps/portal/package.json apps/portal/
 RUN npm ci --no-audit --no-fund
-COPY apps/flasher-legacy/ .
-RUN npm run build
+COPY apps/portal/ apps/portal/
+RUN npm run build -w @ionity/portal
 
 # --- runtime -----------------------------------------------------------------
 FROM python:3.12-slim
@@ -19,7 +22,8 @@ RUN pip install --no-cache-dir -r /app/requirements.txt \
  && mkdir -p /data /app/firmware/dist && chown -R ionity:ionity /data /app
 COPY --chown=ionity:ionity services/fleet-host/server    /app/server
 COPY --chown=ionity:ionity services/fleet-host/dashboard /app/dashboard
-COPY --chown=ionity:ionity --from=flasher /flasher/dist /app/flasher/dist
+# The board portal at /portal/ (the 2.x flasher is retired; /flasher/ redirects here)
+COPY --chown=ionity:ionity --from=portal /src/apps/portal/dist /app/portal/dist
 USER ionity
 EXPOSE 8099
 # The LAN DNS resolver binds :53, which a non-root process cannot: run it on

@@ -8,7 +8,7 @@ REST + WebSocket surface.
 /api/v1/fleet/summary      GET   rollup
 /api/v1/telemetry/query    GET   time-series query
 /api/v1/alerts             GET   alerts
-/api/v1/mcp/rpc            POST  MCP JSON-RPC over HTTP
+/api/v1/mcp/rpc            POST  MCP JSON-RPC over HTTP (app/mcp/http_transport.py; /mcp = Streamable HTTP)
 /api/v1/devices/{id}/mcp   POST  relay JSON-RPC to the board's own MCP server (fw >= 2.0)
 /api/v1/firmware/manifest  GET   flasher images (firmware/build.py)
 /api/v1/firmware/{file}    GET   one merged image
@@ -25,21 +25,21 @@ import json
 import re
 import time
 from pathlib import Path
-from typing import Any
 
 from fastapi import APIRouter, Request, HTTPException, Header, WebSocket, WebSocketDisconnect, Query
-from fastapi.responses import Response, FileResponse
+from fastapi.responses import FileResponse
 
 from app.config import settings
 from app.models import TelemetryIn, CommandIn
 from app.mcp import protocol as mcp_protocol
-from app.mcp.tools import MCP_TOOLS
+from app.security import ingest_limiter, is_admin, rate_limit
 
 router = APIRouter()
 ws_clients: set[WebSocket] = set()
 
 
 def _check_token(token: str | None) -> None:
+    """Legacy JSON ingest: X-Fleet-Token header (fw 2.x boards, Pico bridge)."""
     if settings.require_token and not hmac.compare_digest(token or "", settings.fleet_token):
         raise HTTPException(status_code=401, detail="invalid or missing X-Fleet-Token")
 
@@ -59,12 +59,7 @@ async def _json_body(request: Request):
 def _is_admin(request: Request) -> bool:
     """True when no admin token is configured, or the caller presented it as
     'Authorization: Bearer <t>' or 'X-Ionity-Token: <t>'."""
-    want = settings.admin_token
-    if not want:
-        return True
-    auth = request.headers.get("authorization", "")
-    got = auth[7:].strip() if auth.lower().startswith("bearer ") else request.headers.get("x-ionity-token", "")
-    return hmac.compare_digest(got or "", want)
+    return is_admin(request)
 
 
 # --------------------------------------------------------------------------
@@ -72,6 +67,7 @@ def _is_admin(request: Request) -> bool:
 # --------------------------------------------------------------------------
 @router.post("/api/v1/telemetry")
 async def ingest(request: Request, x_fleet_token: str | None = Header(default=None)):
+    rate_limit(request, ingest_limiter)
     _check_token(x_fleet_token)
     body = await _json_body(request)
     registry = request.app.state.registry
@@ -101,6 +97,7 @@ async def ingest(request: Request, x_fleet_token: str | None = Header(default=No
 async def register(request: Request, x_fleet_token: str | None = Header(default=None)):
     """Optional first-boot handshake. Returns the effective config a node
     should adopt, so a batch can be re-tagged centrally."""
+    rate_limit(request, ingest_limiter)
     _check_token(x_fleet_token)
     body = await _json_body(request)
     return {
@@ -291,27 +288,6 @@ async def network_watch(request: Request):
 
 
 # --------------------------------------------------------------------------
-# MCP over HTTP
-# --------------------------------------------------------------------------
-@router.post("/api/v1/mcp/rpc")
-async def mcp_rpc(request: Request) -> Any:
-    try:
-        body = await _json_body(request)
-    except Exception:
-        return {"jsonrpc": "2.0", "id": None, "error": {"code": -32700, "message": "Parse error"}}
-    server = request.app.state.mcp
-    admin = _is_admin(request)
-    if isinstance(body, list):
-        if not body:
-            return {"jsonrpc": "2.0", "id": None, "error": {"code": -32600, "message": "empty batch"}}
-        out = [r for r in [await server.handle(b, authorized=admin) for b in body] if r is not None]
-        return out if out else Response(status_code=202)
-    resp = await server.handle(body, authorized=admin)
-    # A notification gets no JSON-RPC response: 202 Accepted, empty body.
-    return resp if resp is not None else Response(status_code=202)
-
-
-# --------------------------------------------------------------------------
 # Flasher support: firmware images + provisioning defaults
 # --------------------------------------------------------------------------
 _FW_NAME = re.compile(r"^[a-z0-9_]+\.bin$")
@@ -400,8 +376,12 @@ async def health(request: Request):
     app = request.app
     reg = app.state.registry
     bridge = getattr(app.state, "mqtt", None)
+    # ok = the host itself is serving; degraded lists links that are enabled but down.
+    degraded = ["mqtt"] if bridge is not None and not bridge.connected else []
     return {
         "ok": True,
+        "status": "degraded" if degraded else "ok",
+        "degraded": degraded,
         "fleet": settings.fleet_name,
         "uptime_s": round(time.time() - reg.started_at, 1),
         "devices_known": len(reg.devices),
@@ -415,8 +395,10 @@ async def health(request: Request):
                       if getattr(app.state, "discovery", None) else {"enabled": False}),
         "ws_clients": len(ws_clients),
         "admin_token_required": bool(settings.admin_token),
-        "mcp": {"protocol": mcp_protocol.LATEST_VERSION, "server": mcp_protocol.SERVER_VERSION,
-                "tools": len(MCP_TOOLS)},
+        "mcp": {"protocol": mcp_protocol.LATEST_VERSION, "server": mcp_protocol.SERVER_VERSION},
+        "ewp": app.state.ewp.stats if getattr(app.state, "ewp", None) else None,
+        "dns_pipeline": app.state.pipeline.stats if getattr(app.state, "pipeline", None) else None,
+        "watchlist_version": app.state.rules.version if getattr(app.state, "rules", None) else None,
         "datadog": (app.state.datadog.stats() if getattr(app.state, "datadog", None)
                     else {"enabled": False}),
     }

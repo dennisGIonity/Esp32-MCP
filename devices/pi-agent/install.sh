@@ -5,7 +5,8 @@
 # ---------------------------------------------------------------------------
 #   sudo bash install.sh                    # install / upgrade, keep existing config
 #   sudo bash install.sh --site lab --group bench --label "pi-zero-01"
-#   sudo bash install.sh --server 192.168.124.4
+#   sudo bash install.sh --server 192.168.0.3
+#   sudo bash install.sh --dns-forward [--dns-upstream 1.1.1.1,8.8.8.8]   # Pi = LAN DNS forwarder
 #   sudo bash install.sh --uninstall
 # Idempotent. Needs: Raspberry Pi OS (Bullseye/Bookworm) or any systemd Linux, python3.
 # ===========================================================================
@@ -25,13 +26,16 @@ if [ "${1:-}" = "--uninstall" ]; then
   exit 0
 fi
 
-SITE="" GROUP="" LABEL="" SERVER=""
+SITE="" GROUP="" LABEL="" SERVER="" DNSMODE="" DNSUP=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --site) SITE="$2"; shift 2 ;;
     --group) GROUP="$2"; shift 2 ;;
     --label) LABEL="$2"; shift 2 ;;
     --server) SERVER="$2"; shift 2 ;;
+    --dns-forward) DNSMODE="forward"; shift ;;
+    --dns-off) DNSMODE="off"; shift ;;
+    --dns-upstream) DNSUP="$2"; shift 2 ;;
     *) echo "unknown option $1"; exit 2 ;;
   esac
 done
@@ -48,21 +52,29 @@ if ! getent hosts ionity-fleet.local >/dev/null 2>&1; then
 fi
 
 install -d -m 755 "$DEST"
-install -m 755 "$HERE/ionity_agent.py" "$DEST/ionity_agent.py"
+for f in ionity_agent.py ewp_protocol.py ewp_cbor.py netobserve.py pinger.py; do
+  install -m 755 "$HERE/$f" "$DEST/$f"
+done
 if [ ! -f "$CONF" ]; then
   install -m 640 "$HERE/ionity-agent.conf.example" "$CONF"
   say "created $CONF"
 fi
 setkey() { [ -n "$2" ] && sed -i "s|^$1 *=.*|$1 = $2|" "$CONF"; return 0; }
+# configs from agent 1.x have no NetObserve keys yet: append them once
+grep -q '^dns_mode' "$CONF" || sed -n '/^# ---- NetObserve/,$p' "$HERE/ionity-agent.conf.example" >> "$CONF"
 setkey site "$SITE"; setkey group "$GROUP"; setkey label "$LABEL"; setkey server "$SERVER"
+setkey dns_mode "$DNSMODE"; setkey dns_upstream "$DNSUP"
 
 install -m 644 "$HERE/ionity-agent.service" "$UNIT"
 systemctl daemon-reload
 systemctl enable ionity-agent.service >/dev/null
 systemctl restart ionity-agent.service
 
-say "installed. One reading from this Pi:"
-python3 "$DEST/ionity_agent.py" --config "$CONF" --once | head -40
+if grep -q '^dns_mode *= *forward' "$CONF"; then
+  say "DNS forwarder ON: set the router's DHCP 'DNS server' to $(hostname -I | awk '{print $1}') (no secondary)"
+fi
+say "installed. HELLO + one reading from this Pi:"
+python3 "$DEST/ionity_agent.py" --config "$CONF" --once | head -60
 sleep 3
 systemctl --no-pager --lines=8 status ionity-agent.service || true
 say "logs: journalctl -u ionity-agent -f"

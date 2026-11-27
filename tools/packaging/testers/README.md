@@ -36,7 +36,7 @@ full illustrated manual.
 | `STATUS.cmd` | Health, MQTT link, MCP version/tool count, device counts, URLs |
 | `STOP.cmd` | Stops only the processes this package started |
 | `OPEN-DASHBOARD.cmd` | Opens the dashboard |
-| `FLASH-BOARD.cmd` | Opens the web flasher (`/flasher/`) |
+| `FLASH-BOARD.cmd` | Opens the board portal (`/portal/`: flash, provision, fleet, live DNS) |
 | `RUN-TESTS.cmd` | Unit suite (pytest) + live A-Z smoke of the running stack (REST, MCP, WebSocket, MQTT round-trip); evidence in `logs\smoke_live.json` |
 | `DEMO-DEVICE.cmd` / `PURGE-DEMO.cmd` | Add / remove one simulated device |
 

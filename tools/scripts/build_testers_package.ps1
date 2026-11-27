@@ -35,7 +35,7 @@ Copy-Tree 'tools\packaging\testers' '.'
 # application
 Copy-Tree 'services\fleet-host\server' 'server' -excludeFiles @('*.db', '*.log')
 Copy-Tree 'services\fleet-host\dashboard' 'dashboard'
-Copy-Tree 'apps\flasher-legacy\dist' 'flasher\dist' -excludeFiles @('*.map')
+Copy-Tree 'apps\portal\dist' 'portal\dist' -excludeFiles @('*.map')   # board portal -> /portal/ (npm run build -w @ionity/portal)
 Copy-Tree 'firmware\dist' 'firmware\dist'
 Copy-Tree 'devices\pi-agent' 'devices\pi-agent'
 New-Item -ItemType Directory -Force "$Out\scripts", "$Out\broker", "$Out\docs" | Out-Null

@@ -67,15 +67,33 @@ export const ToolId = {
   SET_ACTUATOR: 0x04,
   SET_STATE_MODE: 0x05,
   IDENTIFY: 0x06,
+  // ---- NetObserve (PLAN-v3): LAN DNS forwarder, watchlist, local devices -------
+  /** replace / extend the on-device domain watchlist (suffix rules + categories) */
+  SET_WATCHLIST: 0x40,
+  GET_WATCHLIST: 0x41,
+  /** DNS forwarder counters + per-upstream health */
+  GET_NETWORK_STATS: 0x42,
+  /** the node's table of LAN clients (ARP / DHCP / mDNS / DNS) */
+  GET_LOCAL_DEVICES: 0x43,
+  /** recent queries from the node's ring buffer */
+  QUERY_DNS_LOG: 0x44,
+  /** sweep the node's /24 with ARP requests so silent devices show up */
+  SCAN_LAN: 0x45,
+  FLUSH_DNS_CACHE: 0x46,
+  /** ICMP echo from the node to a LAN or internet host (reachability seen from that board) */
+  PING_HOST: 0x47,
+  // ---- system --------------------------------------------------------------------
+  /** reply first, then restart after delayMs */
+  REBOOT: 0xf0,
 } as const;
 export type ToolId = ValueOf<typeof ToolId>;
 export const NO_TOOL = 0x00;
 
 /**
- * Allocation plan for tool ids (inclusive ranges). NetObserve is PLAN-v3
- * (get_dns_activity, query_dns_log, get_network_stats, get_local_devices,
- * set_flag_rules, get_flag_rules) - ids are reserved here, bodies are defined
- * in that phase so the v3 work never collides with the edge-AI tools.
+ * Allocation plan for tool ids (inclusive ranges). NetObserve is PLAN-v3:
+ * PLAN-v3's set_flag_rules / get_flag_rules shipped as set_watchlist /
+ * get_watchlist, get_dns_activity is the DNS_BATCH event stream plus
+ * query_dns_log, and scan_lan / flush_dns_cache / ping_host were added for the host.
  */
 export const TOOL_ID_RANGE = {
   core: [0x01, 0x3f],
@@ -93,6 +111,15 @@ export const TOOL_NAME = {
   [ToolId.SET_ACTUATOR]: 'set_actuator',
   [ToolId.SET_STATE_MODE]: 'set_state_mode',
   [ToolId.IDENTIFY]: 'identify',
+  [ToolId.SET_WATCHLIST]: 'set_watchlist',
+  [ToolId.GET_WATCHLIST]: 'get_watchlist',
+  [ToolId.GET_NETWORK_STATS]: 'get_network_stats',
+  [ToolId.GET_LOCAL_DEVICES]: 'get_local_devices',
+  [ToolId.QUERY_DNS_LOG]: 'query_dns_log',
+  [ToolId.SCAN_LAN]: 'scan_lan',
+  [ToolId.FLUSH_DNS_CACHE]: 'flush_dns_cache',
+  [ToolId.PING_HOST]: 'ping_host',
+  [ToolId.REBOOT]: 'reboot',
 } as const satisfies Record<ToolId, string>;
 
 /** Bitset carried per tool in HELLO.tools - drives MCP annotations and confirmation gates. */
@@ -257,8 +284,85 @@ export const EventKind = {
   LEASE_EXPIRED: 3,
   FAILSAFE_TRIPPED: 4,
   THRESHOLD: 5,
+  /** periodic batch of LAN DNS queries seen by the node's forwarder (body.dns) */
+  DNS_BATCH: 6,
+  /** a query matched an ALERT watchlist rule - published immediately (body.flag) */
+  DNS_FLAGGED: 7,
 } as const;
 export type EventKind = ValueOf<typeof EventKind>;
+
+/** NetObserve: what the node's DNS forwarder is doing. */
+export const DnsMode = {
+  /** forwarder not running (not provisioned for it, or role=standalone) */
+  OFF: 0,
+  /** listening on UDP 53 and forwarding to the provisioned upstreams */
+  FORWARD: 1,
+} as const;
+export type DnsMode = ValueOf<typeof DnsMode>;
+
+/** DnsQuery flags (bitset). */
+export const DnsQueryFlag = {
+  /** answered from the node's cache */
+  CACHED: 1 << 0,
+  /** matched a watchlist rule (category != 0) */
+  FLAGGED: 1 << 1,
+  /** no upstream answered: the node replied SERVFAIL */
+  UPSTREAM_FAILED: 1 << 2,
+  /** the reply was truncated (TC bit) - the client will retry over TCP */
+  TRUNCATED: 1 << 3,
+} as const;
+export type DnsQueryFlag = ValueOf<typeof DnsQueryFlag>;
+
+/** Watchlist rule flags (bitset). */
+export const RuleFlag = {
+  /** match publishes DNS_FLAGGED immediately and drives the node's alert LED */
+  ALERT: 1 << 0,
+  /** "*.example.com": subdomains only, not example.com itself */
+  SUBDOMAINS_ONLY: 1 << 1,
+} as const;
+export type RuleFlag = ValueOf<typeof RuleFlag>;
+export const RULE_FLAGS_KNOWN_MASK = 0b0000_0011;
+
+/** SET_WATCHLIST op. A watchlist larger than one downlink frame goes as REPLACE + APPENDs. */
+export const WatchlistOp = {
+  REPLACE: 0,
+  APPEND: 1,
+} as const;
+export type WatchlistOp = ValueOf<typeof WatchlistOp>;
+
+/** PING_HOST outcome. NONE with received < sent is partial loss, not an error. */
+export const PingError = {
+  NONE: 0,
+  /** the target name did not resolve */
+  RESOLVE_FAILED: 1,
+  /** no echo reply at all within count x timeout */
+  TIMEOUT: 2,
+  /** the node may not open an ICMP socket (Pi without ping_group_range / CAP_NET_RAW) */
+  NOT_PERMITTED: 3,
+  /** another ping_host is still running on this node (one at a time) */
+  BUSY: 4,
+} as const;
+export type PingError = ValueOf<typeof PingError>;
+
+/** Where the node learned about a LAN device (bitset). */
+export const DiscoverySource = {
+  ARP: 1 << 0,
+  DHCP: 1 << 1,
+  MDNS: 1 << 2,
+  DNS: 1 << 3,
+} as const;
+export type DiscoverySource = ValueOf<typeof DiscoverySource>;
+
+/** NetObserve capabilities advertised in HELLO.net.caps (bitset). */
+export const NetCap = {
+  DNS_FORWARD: 1 << 0,
+  DNS_TCP: 1 << 1,
+  MDNS_LISTEN: 1 << 2,
+  DHCP_SNIFF: 1 << 3,
+  ARP_SCAN: 1 << 4,
+  DNS_CACHE: 1 << 5,
+} as const;
+export type NetCap = ValueOf<typeof NetCap>;
 
 /** READ_TELEMETRY section mask - lets the caller bound the reply size. */
 export const TelemetrySection = {

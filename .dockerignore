@@ -1,0 +1,13 @@
+# AEDI - IONITY GLOBAL | ESP32-MCP | docker build context filter | Policy 986 AED
+.git
+**/node_modules
+**/dist
+**/e2e/out
+**/__pycache__
+**/.pytest_cache
+**/.venv
+firmware/**/build*
+*.db
+*.db-wal
+*.db-shm
+.env

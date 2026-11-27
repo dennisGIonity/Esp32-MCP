@@ -92,6 +92,15 @@ enumBlock('ewp_chip_model_t', 'EWP_CHIP', ewp.ChipModel);
 enumBlock('ewp_device_state_t', 'EWP_STATE', ewp.DeviceState, false);
 enumBlock('ewp_event_kind_t', 'EWP_EVENT', ewp.EventKind, false);
 enumBlock('ewp_telemetry_section_t', 'EWP_TM', ewp.TelemetrySection);
+enumBlock('ewp_dns_mode_t', 'EWP_DNS_MODE', ewp.DnsMode, false);
+enumBlock('ewp_dns_query_flag_t', 'EWP_DNSQ', ewp.DnsQueryFlag);
+enumBlock('ewp_rule_flag_t', 'EWP_RULE', ewp.RuleFlag);
+enumBlock('ewp_watchlist_op_t', 'EWP_WATCH_OP', ewp.WatchlistOp, false);
+enumBlock('ewp_ping_error_t', 'EWP_PING', ewp.PingError, false);
+enumBlock('ewp_discovery_source_t', 'EWP_DISC', ewp.DiscoverySource);
+enumBlock('ewp_net_cap_t', 'EWP_NETCAP', ewp.NetCap);
+line(`#define EWP_RULE_FLAGS_KNOWN      ${hex(ewp.RULE_FLAGS_KNOWN_MASK)}u`);
+line();
 
 line('/* LLM-facing names, for the optional on-device HTTP MCP front-end. */');
 for (const [k, id] of Object.entries(ewp.ToolId)) {
@@ -109,6 +118,23 @@ for (const [name, table] of tables) {
     line(`#define EWP_K_${`${base}_${snake(field)}`.padEnd(40)} ${String(key)}u`);
   }
 }
+line();
+line('/* ---- built-in watchlist (src/watchlist.ts): a node flags these before the host');
+line(' * has ever sent it a list. [suffix, category id, ewp_rule_flag_t bitset] ------- */');
+line(`#define EWP_DEFAULT_WATCHLIST_VERSION ${ewp.DEFAULT_WATCHLIST_VERSION}u`);
+line(`#define EWP_DEFAULT_RULE_COUNT        ${ewp.DEFAULT_RULES.length}u`);
+line(`#define EWP_DEFAULT_CATEGORY_COUNT    ${ewp.DEFAULT_CATEGORIES.length}u`);
+line('typedef struct { const char* suffix; uint8_t category; uint8_t flags; } ewp_default_rule_t;');
+line('typedef struct { uint8_t id; const char* name; } ewp_default_category_t;');
+line('static const ewp_default_rule_t EWP_DEFAULT_RULES[EWP_DEFAULT_RULE_COUNT] = {');
+for (const r of ewp.DEFAULT_RULES) {
+  const s = ewp.patternToSuffix(r.pattern);
+  line(`    {"${s.suffix}", ${r.category}u, ${hex(r.flags | s.flags)}u},`);
+}
+line('};');
+line('static const ewp_default_category_t EWP_DEFAULT_CATEGORIES[EWP_DEFAULT_CATEGORY_COUNT] = {');
+for (const c of ewp.DEFAULT_CATEGORIES) line(`    {${c.id}u, "${c.name}"},`);
+line('};');
 line();
 line('/* ---- fixed header --------------------------------------------------------');
 line(' * memcpy() the first EWP_HEADER_LEN bytes of a payload into this struct;');

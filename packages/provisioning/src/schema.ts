@@ -12,6 +12,7 @@
  */
 // zod/mini: same validation, a fraction of the browser bundle (the portal ships this file).
 import * as z from 'zod/mini';
+import { parseDnsUpstream } from './dns.ts';
 import { LIMITS } from './fields.ts';
 import { parseHostUrl, type HostUrl } from './host-url.ts';
 import { hasControlChars, isPrintableAscii, utf8ByteLength } from './text.ts';
@@ -42,6 +43,10 @@ export const ProvisionFormSchema = z.object({
   mqttPass: z.string(),
   mcpToken: z.string(),
   fleetToken: z.string(),
+  /** "" = leave the board's setting unchanged */
+  dnsMode: z.enum(['', 'off', 'forward']),
+  /** "" = leave unchanged; otherwise 1-2 IPv4 resolvers (canonicalised on validation) */
+  dnsUpstream: z.string(),
 });
 
 export type ProvisionForm = z.infer<typeof ProvisionFormSchema>;
@@ -64,6 +69,8 @@ export const EMPTY_FORM: ProvisionForm = {
   mqttPass: '',
   mcpToken: '',
   fleetToken: '',
+  dnsMode: '',
+  dnsUpstream: '',
 };
 
 export interface ValidForm extends ProvisionForm {
@@ -154,6 +161,17 @@ export function validateForm(input: unknown): ValidationResult {
     warnings.push(`${host.scheme}:// is not encrypted: the MQTT password and tokens cross the network in clear text. Use mqtts:// or wss:// outside the lab.`);
   }
 
+  // LAN DNS forwarder ----------------------------------------------------------
+  let dnsUpstream = f.dnsUpstream;
+  if (f.dnsUpstream.trim() !== '') {
+    const r = parseDnsUpstream(f.dnsUpstream);
+    if (r.ok) dnsUpstream = r.value;
+    else errors.dnsUpstream = `DNS upstream: ${r.error}.`;
+  }
+  if (f.dnsMode === 'forward') {
+    warnings.push("LAN DNS forwarder on: reserve this board's IP on the router and set the router's DHCP DNS to it, or no device will use it.");
+  }
+
   if (Object.keys(errors).length > 0) return { ok: false, errors, warnings };
-  return { ok: true, value: { ...f, host, uuid, rawPsk }, warnings };
+  return { ok: true, value: { ...f, dnsUpstream, host, uuid, rawPsk }, warnings };
 }

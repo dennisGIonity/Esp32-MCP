@@ -29,6 +29,21 @@ namespace tools {
 
 constexpr size_t kMaxTasks = EWP_LIMIT_TASK_STATS;
 
+/**
+ * A HELLO part owned by another component (actuator channels, NetObserve).
+ * encode() writes exactly ONE CBOR item; it may be called from net_task (HELLO
+ * on connect) and from the MCP worker (get_device_info), so it must be
+ * thread-safe on its own.
+ */
+class HelloSection {
+public:
+    virtual bool present() const = 0;
+    virtual void encode(ewp::CborWriter& w) const = 0;
+
+protected:
+    ~HelloSection() = default;
+};
+
 /** [task id, FreeRTOS task name, core (0, 1, 0xFF = unpinned), stack bytes] */
 struct TaskInfo {
     uint8_t id;
@@ -58,6 +73,10 @@ struct Identity {
     uint32_t bootCount = 0;
     TaskInfo tasks[kMaxTasks] = {};
     uint8_t taskCount = 0;
+    /** HELLO.actuators (an array) - nullptr: none */
+    const HelloSection* actuators = nullptr;
+    /** HELLO.net (NetObserveInfo map) - nullptr: no DNS forwarder component */
+    const HelloSection* net = nullptr;
 
     /** Register a task for HELLO.tasks / TELEMETRY.tasks. Boot only. False when full. */
     bool addTask(uint8_t id, const char* name, int core, uint32_t stackBytes);

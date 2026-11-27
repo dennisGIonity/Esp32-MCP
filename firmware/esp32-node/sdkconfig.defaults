@@ -53,3 +53,12 @@ CONFIG_LWIP_DNS_SUPPORT_MDNS_QUERIES=y
 
 # ---- logging ----------------------------------------------------------------------
 CONFIG_LOG_DEFAULT_LEVEL_INFO=y
+
+# ---- NetObserve: UDP 53 forwarder + upstream + mDNS + DHCP sockets beside MQTT/SNTP --
+CONFIG_LWIP_MAX_SOCKETS=16
+# SO_REUSEADDR for the passive mDNS listener on 5353, multicast copied to every match
+CONFIG_LWIP_SO_REUSE=y
+CONFIG_LWIP_SO_REUSE_RXTOALL=y
+# the node's own lookups may be addressed to itself (router DHCP DNS = this node)
+CONFIG_LWIP_NETIF_LOOPBACK=y
+CONFIG_VFS_SUPPORT_SELECT=y

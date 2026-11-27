@@ -23,9 +23,12 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json",
-    "test": "node --experimental-strip-types --no-warnings --test test/scalars.test.ts",
+    "test": "node --experimental-strip-types --no-warnings --test test/scalars.test.ts test/netobserve.test.ts",
     "gen:c": "node --experimental-strip-types --no-warnings scripts/gen-c-header.ts generated/ewp_protocol.h",
-    "check:c": "printf '#include \"ewp_protocol.h\"\\nint main(void){return EWP_HEADER_LEN==16?0:1;}\\n' > generated/.check.c && gcc -std=c11 -Wall -Wextra -Werror -pedantic -Igenerated -fsyntax-only generated/.check.c && g++ -std=c++17 -Wall -Wextra -Werror -pedantic -Igenerated -fsyntax-only -x c++ generated/.check.c && rm generated/.check.c"
+    "check:c": "printf '#include \"ewp_protocol.h\"\\nint main(void){return EWP_HEADER_LEN==16?0:1;}\\n' > generated/.check.c && gcc -std=c11 -Wall -Wextra -Werror -pedantic -Igenerated -fsyntax-only generated/.check.c && g++ -std=c++17 -Wall -Wextra -Werror -pedantic -Igenerated -fsyntax-only -x c++ generated/.check.c && rm generated/.check.c",
+    "gen:py": "node --experimental-strip-types --no-warnings scripts/gen-py-module.ts generated/ewp_protocol.py ../../services/fleet-host/server/app/ewp/ewp_protocol.py ../../devices/pi-agent/ewp_protocol.py",
+    "gen": "npm run gen:c && npm run gen:py",
+    "check:gen": "npm run gen && git diff --exit-code -- generated ../../services/fleet-host/server/app/ewp/ewp_protocol.py ../../devices/pi-agent/ewp_protocol.py"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

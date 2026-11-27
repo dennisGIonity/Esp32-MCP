@@ -30,6 +30,10 @@ Methods: `initialize` (protocol 2025-06-18 / 2025-03-26 / 2024-11-05), `notifica
 | `set_state_mode` | `mode`, `duration_s` (sleep), `model_id` (for INFERENCE_ACTIVE) | new mode; LOW_POWER_SLEEP answers first, then sleeps |
 | `identify` | – | blinks LED, flashes OLED |
 
+This table is the fw 2.x JSON board. Firmware 3.x boards speak EWP/1 (binary, `packages/protocol`) and add the
+NetObserve tools 0x40-0x47 - including `ping_host` (0x47, ICMP from the board) in 3.2 - reached through the fleet
+host's MCP tools `trigger_node_action`, `ping_from_node` and `device_call_tool`.
+
 ## Edge models
 
 Live input: 64-sample rings filled every 250 ms (ADC volts, RSSI dBm).

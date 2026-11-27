@@ -10,6 +10,8 @@
  *   frames   random and mutated EWP frames through MCPServer + the real tools
  *   prov     random and mutated prov/2 lines through ProvHandler (+ CRC suffix)
  *   url      random strings into parseHostUrl / validators
+ *   dns      mutated DNS queries/answers, mDNS and DHCP into the NetObserve parsers,
+ *            the cache rewrite path, and watchlist blobs into deserialize()
  *
  *   ./fw_fuzz [iterations] [seed]
  * Deterministic for a given seed (xorshift64*), so a failure is reproducible.
@@ -33,6 +35,11 @@
 #include "prov/Validate.h"
 #include "prov_fakes.h"
 #include "tools/EdgeTools.h"
+#include "netobs_fakes.h"
+#include "netobserve/Discovery.h"
+#include "netobserve/DnsCache.h"
+#include "netobserve/DnsWire.h"
+#include "netobserve/Watchlist.h"
 
 namespace {
 
@@ -276,6 +283,63 @@ void fuzzUrl(long iterations) {
 
 }  // namespace
 
+void fuzzDns(long iterations) {
+    std::vector<std::vector<uint8_t>> seeds;
+    const nf::Bytes q = nf::query(0x1234, "www.youtube.com", 1, true);
+    seeds.push_back(q);
+    seeds.push_back(nf::answer(q.data(), q.size(), 300));
+    seeds.push_back(nf::query(7, "r4---sn.googlevideo.com", 28));
+    nf::Bytes dhcp(240, 0);
+    dhcp[0] = 1;
+    dhcp[1] = 1;
+    dhcp[2] = 6;
+    dhcp[236] = 0x63;
+    dhcp[237] = 0x82;
+    dhcp[238] = 0x53;
+    dhcp[239] = 0x63;
+    dhcp.insert(dhcp.end(), {53, 1, 3, 12, 4, 'p', 'h', 'o', 'n', 50, 4, 192, 168, 0, 9, 255});
+    seeds.push_back(dhcp);
+    static netobs::Watchlist wl;
+    wl.loadDefaults();
+    uint8_t blob[netobs::Watchlist::kBlobMax];
+    const size_t bn = wl.serialize(blob, sizeof blob);
+    seeds.emplace_back(blob, blob + bn);
+    netobs::DnsCache cache;
+    netobs::DnsCache::Config cc;
+    cc.entries = 4;
+    cc.preferPsram = false;
+    cache.begin(cc);
+    static netobs::DnsQuestion dq;
+    static netobs::DnsQuestion seedQ;
+    netobs::parseQuery(q.data(), q.size(), seedQ);
+    uint8_t out[1500];
+    for (long i = 0; i < iterations; ++i) {
+        std::vector<uint8_t> v = seeds[below(seeds.size())];
+        mutate(v);
+        if (netobs::parseQuery(v.data(), v.size(), dq)) {
+            cache.lookup(v.data(), dq, static_cast<int64_t>(i), out, sizeof out);
+        }
+        netobs::DnsAnswerInfo info{};
+        if (netobs::parseResponse(v.data(), v.size(), seedQ, info)) {
+            cache.store(seedQ, v.data(), v.size(), info, static_cast<int64_t>(i));
+            if (v.size() <= sizeof out) {
+                memcpy(out, v.data(), v.size());
+                netobs::ageTtls(out, v.size(), 5);
+            }
+        }
+        netobs::parseMdns(v.data(), v.size(), [](void*, uint32_t, const char*, size_t) {}, nullptr);
+        netobs::DhcpInfo di;
+        netobs::parseDhcpRequest(v.data(), v.size(), di);
+        if (wl.deserialize(v.data(), v.size())) {
+            netobs::Watchlist::Match m;
+            wl.match("www.youtube.com", 15, m);
+        }
+        wl.loadDefaults();
+        const nf::Bytes sq = netobs::parseQuery(q.data(), q.size(), dq) ? q : q;
+        cache.lookup(sq.data(), dq, static_cast<int64_t>(i), out, sizeof out);
+    }
+}
+
 int main(int argc, char** argv) {
     const long n = argc > 1 ? atol(argv[1]) : 20000;
     if (argc > 2) g_state = strtoull(argv[2], nullptr, 0) | 1;
@@ -288,5 +352,7 @@ int main(int argc, char** argv) {
     printf("  prov   ok\n");
     fuzzUrl(n);
     printf("  url    ok\n");
+    fuzzDns(n);
+    printf("  dns    ok\n");
     return 0;
 }

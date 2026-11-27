@@ -41,6 +41,8 @@ switch ($Action) {
   'setup' {
     & $Tester setup
     if (-not (Test-Path (Join-Path $Root '.venv\Scripts\python.exe'))) { exit 1 }
+    SetEnv 'IONITY_DNS_ENABLED' 'true'        # host resolver is off by default since fleet host 3.0
+    SetEnv 'IONITY_LAN_SWEEP_ENABLED' 'true'  # whole-network view for the boardroom demo
     SetEnv 'IONITY_DNS_PORT' '53'
     SetEnv 'IONITY_ADMIN_TOKEN' (Secret) -OnlyIfEmpty
     SetEnv 'IONITY_MCPO_API_KEY' (Secret) -OnlyIfEmpty

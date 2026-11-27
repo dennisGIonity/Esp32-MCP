@@ -111,6 +111,31 @@ void superviseLink(void*) {
     }
 }
 
+/* ---- NetObserve settings ----------------------------------------------------------- */
+
+void dnsSettings(const prov::NodeConfig& c, bool& forward, uint32_t upstreams[2], uint8_t& count) {
+    forward = c.dnsForward();
+    size_t n = 0;
+    const char* err = nullptr;
+    if (c.dnsUpstream[0] != '\0' && prov::parseDnsUpstream(c.dnsUpstream, strlen(c.dnsUpstream), upstreams, &n, &err) && n > 0) {
+        count = static_cast<uint8_t>(n);
+        return;
+    }
+    upstreams[0] = 0x01010101u;  // 1.1.1.1
+    upstreams[1] = 0x08080808u;  // 8.8.8.8
+    count = 2;
+}
+
+void applyDnsConfig(const prov::NodeConfig& c) {
+    if (g.netobs == nullptr) return;
+    bool forward = false;
+    uint32_t ups[2] = {};
+    uint8_t n = 0;
+    dnsSettings(c, forward, ups, n);
+    g.netobs->reconfigure(forward, ups, n);
+    ESP_LOGI(TAG, "LAN DNS forwarder %s", forward ? "on" : "off");
+}
+
 /* ---- telemetry hooks ---------------------------------------------------------- */
 
 void netStats(void*, tools::NetStats& o) {
@@ -136,6 +161,7 @@ uint32_t taskRunUsMax(void*, uint8_t id) {
         case kTaskWorker: return g.server->workerRunUsMax();
         case kTaskConsole: return prov::Console::instance().runUsMax();
         case kTaskProv: return s_backend != nullptr ? s_backend->runUsMax() : 0;
+        case kTaskNetObs: return g.netobs != nullptr ? g.netobs->runUsMax() : 0;
         default: return 0;  // tasks we do not own: stack high-water mark only
     }
 }
@@ -178,6 +204,13 @@ void EspProvBackend::live(prov::LiveState& o) {
     }
     o.mqttUp = net::MqttLink::instance().connected();
     o.mode = g.edge->mode();
+    if (g.netobs != nullptr) {
+        tools::DnsCountersSnap d;
+        g.netobs->counters(d);
+        o.dnsActive = g.netobs->forwarding();
+        o.dnsPort = 53;
+        o.dnsQueries = d.queries;
+    }
 }
 
 bool EspProvBackend::startScan() {
@@ -206,6 +239,9 @@ void EspProvBackend::configChanged(uint32_t changed) {
     prov::Console::instance().setSecrets(c);  // new secrets are scrubbed from logs from now on
     if (changed & (prov::fieldBit(prov::Field::Ssid) | prov::fieldBit(prov::Field::Pass))) {
         connectWifi(c);  // Wi-Fi applies live; MQTT settings apply on `test` or at the next boot
+    }
+    if (changed & (prov::fieldBit(prov::Field::DnsMode) | prov::fieldBit(prov::Field::DnsUpstream))) {
+        applyDnsConfig(c);  // the forwarder follows at once
     }
 }
 

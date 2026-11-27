@@ -97,6 +97,8 @@ async def test_forget_device_drops_registry_and_store(stack):
     assert res["isError"]
     # the real thing
     res = await call(mcp, "forget_device", {"device_id": did})
+    assert res["isError"] and "confirm" in res["content"][0]["text"]     # D10: ask the user first
+    res = await call(mcp, "forget_device", {"device_id": did, "confirm": True})
     assert not res["isError"] and res["structuredContent"]["ok"] is True
     assert did not in reg.devices
     assert await store.query_telemetry(device_id=did, limit=5) == []
@@ -135,6 +137,9 @@ async def test_device_call_tool_write_needs_admin(stack):
     assert not board.seen                                   # nothing reached the board
     res = await call(mcp, "device_call_tool", {"device_id": "esp32-aabbccddeeff", "tool": "set_actuator",
                                                "arguments": {"channel": "pwm0", "value": 0.5}})
+    assert res["isError"] and "confirm" in res["content"][0]["text"] and not board.seen
+    res = await call(mcp, "device_call_tool", {"device_id": "esp32-aabbccddeeff", "tool": "set_actuator",
+                                               "arguments": {"channel": "pwm0", "value": 0.5}, "confirm": True})
     assert not res["isError"] and res["structuredContent"]["result"]["channel"] == "pwm0"
 
 
@@ -163,7 +168,7 @@ async def test_set_state_mode_command_validation(stack):
     res = await call(mcp, "send_command", {"device_id": "esp32-aabbccddeeff", "action": "set_state_mode"})
     assert res["isError"]
     res = await call(mcp, "send_command", {"device_id": "esp32-aabbccddeeff", "action": "set_state_mode",
-                                           "mode": "FAILSAFE"})
+                                           "mode": "FAILSAFE", "confirm": True})
     assert not res["isError"] and board.seen[-1]["mode"] == "FAILSAFE"
 
 
@@ -317,7 +322,7 @@ async def test_set_wifi_command_redacts_password(stack):
     res = await call(mcp, "send_command", {"device_id": "esp32-aabbccddeeff", "action": "set_wifi"})
     assert res["isError"]
     res = await call(mcp, "send_command", {"device_id": "esp32-aabbccddeeff", "action": "set_wifi",
-                                           "ssid": "Ionity-LAB_2.4G", "pass": "s3cretpass"})
+                                           "ssid": "Ionity-LAB_2.4G", "pass": "s3cretpass", "confirm": True})
     assert not res["isError"]
     assert board.seen[-1]["ssid"] == "Ionity-LAB_2.4G" and board.seen[-1]["pass"] == "s3cretpass"
     async with store.db.execute("SELECT payload FROM commands ORDER BY id DESC LIMIT 1") as cur:

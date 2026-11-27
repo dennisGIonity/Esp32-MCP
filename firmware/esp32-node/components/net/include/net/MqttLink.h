@@ -16,6 +16,10 @@
  *               tells the broker not to send anything bigger; a fragmented message is refused
  *               with ERR TOO_LARGE instead of being reassembled on the heap
  *
+ * reconnect   auto-reconnect is OFF in esp-mqtt; on every lost or failed connection the
+ *             MQTT task arms a deadline from Backoff (1 s doubling to 60 s, +/- 20 %
+ *             jitter, reset on CONNECTED) and net_task calls esp_mqtt_client_reconnect()
+ *             under clientMu_ when it passes - paused (not advanced) while Wi-Fi is down
  * THREADS: client_ is created/destroyed under clientMu_, which net_task also
  * holds while it enqueues - the provisioning worker can restart the link
  * (`test` with new settings) without a use-after-free in the publisher.
@@ -33,6 +37,7 @@
 #include "mcp/Uplink.h"
 #include "mcp/os.h"
 #include "mqtt_client.h"
+#include "net/Backoff.h"
 #include "tools/EdgeTools.h"
 
 namespace net {
@@ -62,6 +67,9 @@ public:
     bool connected() const { return connected_.load(std::memory_order_acquire); }
     uint32_t txFail() const { return txFail_.load(std::memory_order_relaxed); }
     uint16_t reconnects() const { return static_cast<uint16_t>(reconnects_.load(std::memory_order_relaxed)); }
+    /** Current back-off step (0 = connected or first try) and the delay last armed, ms. */
+    uint8_t backoffAttempt() const { return backoffAttempt_.load(std::memory_order_relaxed); }
+    uint32_t lastBackoffMs() const { return lastBackoffMs_.load(std::memory_order_relaxed); }
     uint32_t droppedOffline() const { return droppedOffline_.load(std::memory_order_relaxed); }
 
     /**
@@ -90,6 +98,8 @@ private:
     static void taskEntry(void* self);
     void taskLoop();
     void publishPresence();
+    void armReconnect();      // MQTT task
+    void serviceReconnect();  // net_task
     bool publishFrame(const uint8_t* frame, size_t len, ewp::Channel ch);  // clientMu_ held
     const char* topicFor(ewp::Channel ch) const;
 
@@ -118,6 +128,10 @@ private:
     std::atomic<bool> everConnected_{false};
     std::atomic<uint32_t> txFail_{0};
     std::atomic<uint32_t> reconnects_{0};
+    Backoff backoff_;                         // MQTT task only
+    std::atomic<int64_t> reconnectAtUs_{0};   // 0 = nothing armed
+    std::atomic<uint8_t> backoffAttempt_{0};
+    std::atomic<uint32_t> lastBackoffMs_{0};
     std::atomic<uint32_t> droppedOffline_{0};
     std::atomic<uint32_t> runUsMax_{0};
     Supervisor supervisor_ = nullptr;

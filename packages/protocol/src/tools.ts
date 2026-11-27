@@ -17,6 +17,22 @@ import { ToolId } from './ids.ts';
 import type { Bytes, F32, FixedBytes, I32, U16, U32, U8, Unit, Utf8 } from './scalars.ts';
 import type { HelloBody } from './hello.ts';
 import type { TelemetryBody } from './telemetry.ts';
+import type {
+  DnsLogResult,
+  FlushDnsCacheResult,
+  GetLocalDevicesArgs,
+  GetWatchlistResult,
+  LocalDevicesResult,
+  NetworkStatsResult,
+  PingHostArgs,
+  PingHostResult,
+  QueryDnsLogArgs,
+  RebootArgs,
+  RebootResult,
+  ScanLanResult,
+  SetWatchlistArgs,
+  WatchlistResult,
+} from './netobserve.ts';
 
 /** Object with no fields - encodes as an empty CBOR map (1 byte: 0xA0). */
 export type EmptyBody = Readonly<Record<never, never>>;
@@ -290,6 +306,15 @@ export interface ToolContract {
   readonly [ToolId.SET_ACTUATOR]: { readonly args: SetActuatorArgs; readonly result: SetActuatorResult };
   readonly [ToolId.SET_STATE_MODE]: { readonly args: SetStateModeArgs; readonly result: SetStateModeResult };
   readonly [ToolId.IDENTIFY]: { readonly args: IdentifyArgs; readonly result: EmptyBody };
+  readonly [ToolId.SET_WATCHLIST]: { readonly args: SetWatchlistArgs; readonly result: WatchlistResult };
+  readonly [ToolId.GET_WATCHLIST]: { readonly args: EmptyBody; readonly result: GetWatchlistResult };
+  readonly [ToolId.GET_NETWORK_STATS]: { readonly args: EmptyBody; readonly result: NetworkStatsResult };
+  readonly [ToolId.GET_LOCAL_DEVICES]: { readonly args: GetLocalDevicesArgs; readonly result: LocalDevicesResult };
+  readonly [ToolId.QUERY_DNS_LOG]: { readonly args: QueryDnsLogArgs; readonly result: DnsLogResult };
+  readonly [ToolId.SCAN_LAN]: { readonly args: EmptyBody; readonly result: ScanLanResult };
+  readonly [ToolId.FLUSH_DNS_CACHE]: { readonly args: EmptyBody; readonly result: FlushDnsCacheResult };
+  readonly [ToolId.PING_HOST]: { readonly args: PingHostArgs; readonly result: PingHostResult };
+  readonly [ToolId.REBOOT]: { readonly args: RebootArgs; readonly result: RebootResult };
 }
 
 export type ToolArgs<T extends ToolId> = ToolContract[T]['args'];

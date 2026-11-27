@@ -7,6 +7,10 @@ from core.speedtest_engine import SpeedtestEngine
 from core.security_analyzer import SecurityAnalyzer
 from core.traffic_analyzer import TrafficAnalyzer
 
+
+async def fake_prober(ip, method, timeout):
+    return None          # offline test: no network, a failed probe is a failure
+
 class TestTrafficAnalyzer(unittest.TestCase):
     def setUp(self):
         self.config = {
@@ -20,10 +24,10 @@ class TestTrafficAnalyzer(unittest.TestCase):
             "sentinel": {
                 "ping_targets": [{"name": "DNS", "ip": "8.8.8.8"}]
             },
-            "loadshedding": {"mock_if_no_key": True}
+            "loadshedding": {}
         }
         self.collector = MikroTikCollector(self.config)
-        self.probe_engine = ProbeEngine(self.config)
+        self.probe_engine = ProbeEngine(self.config, prober=fake_prober)
         self.ls_engine = LoadSheddingEngine(self.config)
         self.speedtest = SpeedtestEngine(self.config)
         self.sec = SecurityAnalyzer(self.config)
@@ -58,6 +62,11 @@ class TestTrafficAnalyzer(unittest.TestCase):
         self.assertLess(result["score"], 70.0)
         self.assertIn(result["status_label"], ["DEGRADED", "CRITICAL"])
 
+    def test_stability_score_no_data(self):
+        r = self.analyzer.compute_stability_score(None, None, None, None, None)
+        self.assertIsNone(r["score"])
+        self.assertEqual(r["status_label"], "NO_DATA")
+
     def test_stability_score_total_outage(self):
         result = self.analyzer.compute_stability_score(
             packet_loss_pct=100.0,
@@ -78,8 +87,17 @@ class TestTrafficAnalyzer(unittest.TestCase):
         self.assertIn("wan_interfaces", telemetry)
         self.assertIn("stability", telemetry)
         self.assertIn("floors", telemetry)
-        self.assertEqual(len(telemetry["wan_interfaces"]), 2)
-        self.assertEqual(len(telemetry["floors"]), 4)
+        # no router configured, nothing answered: unknown, never invented
+        self.assertEqual(telemetry["wan_interfaces"], [])
+        self.assertEqual(telemetry["floors"], [])
+        self.assertIsNone(telemetry["total_rx_mbps"])
+        # every probe failed: that IS a measurement (100 % loss), latency stays unknown
+        self.assertEqual(telemetry["stability"]["packet_loss_avg_pct"], 100.0)
+        self.assertIsNone(telemetry["stability"]["latency_avg_ms"])
+        self.assertEqual(telemetry["stability"]["status_label"], "CRITICAL")
+        self.assertEqual(telemetry["data_sources"]["router"]["status"], "UNCONFIGURED")
+        self.assertEqual(telemetry["recent_threats"], [])
+        self.assertIsNone(telemetry["hardware_sentinel"]["mains_power_ok"])
 
 if __name__ == "__main__":
     unittest.main()

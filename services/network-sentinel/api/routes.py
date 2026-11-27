@@ -67,7 +67,7 @@ async def get_loadshedding(request: Request):
     correlation = ls_engine.correlate_link_issue(
         wan_status="ONLINE",
         packet_loss_pct=0.0,
-        mains_power_ok=analyzer.hardware_mains_ok
+        mains_power_ok=analyzer.hardware_mains_ok is not False   # None = no hardware report yet
     )
     return {
         "status": status,

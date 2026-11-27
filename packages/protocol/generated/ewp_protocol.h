@@ -44,6 +44,19 @@ EWP_STATIC_ASSERT(__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__, "EWP wire format is
 #define EWP_LIMIT_SLEEP_MIN_S          5u
 #define EWP_LIMIT_SLEEP_MAX_S          86400u
 #define EWP_LIMIT_LEASE_MAX_MS         86400000u
+#define EWP_LIMIT_WATCH_RULES          128u
+#define EWP_LIMIT_WATCH_SUFFIX_BYTES   96u
+#define EWP_LIMIT_WATCH_CATEGORIES     32u
+#define EWP_LIMIT_QNAME_BYTES          253u
+#define EWP_LIMIT_HOSTNAME_BYTES       63u
+#define EWP_LIMIT_LOCAL_DEVICES        128u
+#define EWP_LIMIT_DNS_UPSTREAMS        2u
+#define EWP_LIMIT_DNS_LOG_QUERY        32u
+#define EWP_LIMIT_PING_COUNT_MAX       10u
+#define EWP_LIMIT_PING_TIMEOUT_MIN_MS  100u
+#define EWP_LIMIT_PING_TIMEOUT_MAX_MS  5000u
+#define EWP_LIMIT_PING_INTERVAL_MIN_MS 200u
+#define EWP_LIMIT_PING_INTERVAL_MAX_MS 5000u
 
 /* ---- topics: ionity/ewp1/<site>/<hwid>/<channel> ----------------------- */
 #define EWP_TOPIC_ROOT            "ionity/ewp1"
@@ -97,6 +110,15 @@ typedef enum {
     EWP_TOOL_SET_ACTUATOR = 0x04,
     EWP_TOOL_SET_STATE_MODE = 0x05,
     EWP_TOOL_IDENTIFY = 0x06,
+    EWP_TOOL_SET_WATCHLIST = 0x40,
+    EWP_TOOL_GET_WATCHLIST = 0x41,
+    EWP_TOOL_GET_NETWORK_STATS = 0x42,
+    EWP_TOOL_GET_LOCAL_DEVICES = 0x43,
+    EWP_TOOL_QUERY_DNS_LOG = 0x44,
+    EWP_TOOL_SCAN_LAN = 0x45,
+    EWP_TOOL_FLUSH_DNS_CACHE = 0x46,
+    EWP_TOOL_PING_HOST = 0x47,
+    EWP_TOOL_REBOOT = 0xF0,
 } ewp_tool_id_t;
 
 typedef enum {
@@ -220,6 +242,8 @@ typedef enum {
     EWP_EVENT_LEASE_EXPIRED = 3,
     EWP_EVENT_FAILSAFE_TRIPPED = 4,
     EWP_EVENT_THRESHOLD = 5,
+    EWP_EVENT_DNS_BATCH = 6,
+    EWP_EVENT_DNS_FLAGGED = 7,
 } ewp_event_kind_t;
 
 typedef enum {
@@ -233,6 +257,54 @@ typedef enum {
     EWP_TM_EXT = 0x80,
 } ewp_telemetry_section_t;
 
+typedef enum {
+    EWP_DNS_MODE_OFF = 0,
+    EWP_DNS_MODE_FORWARD = 1,
+} ewp_dns_mode_t;
+
+typedef enum {
+    EWP_DNSQ_CACHED = 0x01,
+    EWP_DNSQ_FLAGGED = 0x02,
+    EWP_DNSQ_UPSTREAM_FAILED = 0x04,
+    EWP_DNSQ_TRUNCATED = 0x08,
+} ewp_dns_query_flag_t;
+
+typedef enum {
+    EWP_RULE_ALERT = 0x01,
+    EWP_RULE_SUBDOMAINS_ONLY = 0x02,
+} ewp_rule_flag_t;
+
+typedef enum {
+    EWP_WATCH_OP_REPLACE = 0,
+    EWP_WATCH_OP_APPEND = 1,
+} ewp_watchlist_op_t;
+
+typedef enum {
+    EWP_PING_NONE = 0,
+    EWP_PING_RESOLVE_FAILED = 1,
+    EWP_PING_TIMEOUT = 2,
+    EWP_PING_NOT_PERMITTED = 3,
+    EWP_PING_BUSY = 4,
+} ewp_ping_error_t;
+
+typedef enum {
+    EWP_DISC_ARP = 0x01,
+    EWP_DISC_DHCP = 0x02,
+    EWP_DISC_MDNS = 0x04,
+    EWP_DISC_DNS = 0x08,
+} ewp_discovery_source_t;
+
+typedef enum {
+    EWP_NETCAP_DNS_FORWARD = 0x01,
+    EWP_NETCAP_DNS_TCP = 0x02,
+    EWP_NETCAP_MDNS_LISTEN = 0x04,
+    EWP_NETCAP_DHCP_SNIFF = 0x08,
+    EWP_NETCAP_ARP_SCAN = 0x10,
+    EWP_NETCAP_DNS_CACHE = 0x20,
+} ewp_net_cap_t;
+
+#define EWP_RULE_FLAGS_KNOWN      0x03u
+
 /* LLM-facing names, for the optional on-device HTTP MCP front-end. */
 #define EWP_TOOL_NAME_GET_DEVICE_INFO      "get_device_info"
 #define EWP_TOOL_NAME_READ_TELEMETRY       "read_telemetry"
@@ -240,6 +312,15 @@ typedef enum {
 #define EWP_TOOL_NAME_SET_ACTUATOR         "set_actuator"
 #define EWP_TOOL_NAME_SET_STATE_MODE       "set_state_mode"
 #define EWP_TOOL_NAME_IDENTIFY             "identify"
+#define EWP_TOOL_NAME_SET_WATCHLIST        "set_watchlist"
+#define EWP_TOOL_NAME_GET_WATCHLIST        "get_watchlist"
+#define EWP_TOOL_NAME_GET_NETWORK_STATS    "get_network_stats"
+#define EWP_TOOL_NAME_GET_LOCAL_DEVICES    "get_local_devices"
+#define EWP_TOOL_NAME_QUERY_DNS_LOG        "query_dns_log"
+#define EWP_TOOL_NAME_SCAN_LAN             "scan_lan"
+#define EWP_TOOL_NAME_FLUSH_DNS_CACHE      "flush_dns_cache"
+#define EWP_TOOL_NAME_PING_HOST            "ping_host"
+#define EWP_TOOL_NAME_REBOOT               "reboot"
 
 /* ---- CBOR map keys (all 0..23 => one byte on the wire) ----------------- */
 /* AckBody */
@@ -271,6 +352,34 @@ typedef enum {
 #define EWP_K_CRASH_BODY_CAUSE                         7u
 #define EWP_K_CRASH_BODY_VADDR                         8u
 #define EWP_K_CRASH_BODY_MSG                           9u
+/* DnsBatch */
+#define EWP_K_DNS_BATCH_SEQ                            1u
+#define EWP_K_DNS_BATCH_WINDOW_MS                      2u
+#define EWP_K_DNS_BATCH_CLIENTS                        3u
+#define EWP_K_DNS_BATCH_QUERIES                        4u
+#define EWP_K_DNS_BATCH_DROPPED                        5u
+#define EWP_K_DNS_BATCH_MORE                           6u
+/* DnsCounters */
+#define EWP_K_DNS_COUNTERS_MODE                        1u
+#define EWP_K_DNS_COUNTERS_QUERIES                     2u
+#define EWP_K_DNS_COUNTERS_FORWARDED                   3u
+#define EWP_K_DNS_COUNTERS_CACHE_HITS                  4u
+#define EWP_K_DNS_COUNTERS_UPSTREAM_FAIL               5u
+#define EWP_K_DNS_COUNTERS_DROPPED                     6u
+#define EWP_K_DNS_COUNTERS_FLAGGED                     7u
+#define EWP_K_DNS_COUNTERS_CLIENTS                     8u
+#define EWP_K_DNS_COUNTERS_LAN_DEVICES                 9u
+/* DnsFlag */
+#define EWP_K_DNS_FLAG_CLIENT                          1u
+#define EWP_K_DNS_FLAG_QNAME                           2u
+#define EWP_K_DNS_FLAG_QTYPE                           3u
+#define EWP_K_DNS_FLAG_CATEGORY                        4u
+#define EWP_K_DNS_FLAG_RULE                            5u
+#define EWP_K_DNS_FLAG_AGE_MS                          6u
+#define EWP_K_DNS_FLAG_WATCH_VER                       7u
+/* DnsLogResult */
+#define EWP_K_DNS_LOG_RESULT_CLIENTS                   1u
+#define EWP_K_DNS_LOG_RESULT_QUERIES                   2u
 /* ErrorBody */
 #define EWP_K_ERROR_BODY_DETAIL                        1u
 #define EWP_K_ERROR_BODY_ARG_KEY                       2u
@@ -290,6 +399,8 @@ typedef enum {
 #define EWP_K_EVENT_BODY_REASON                        11u
 #define EWP_K_EVENT_BODY_METRIC                        12u
 #define EWP_K_EVENT_BODY_VALUE                         13u
+#define EWP_K_EVENT_BODY_DNS                           14u
+#define EWP_K_EVENT_BODY_FLAG                          15u
 /* ExecTiming */
 #define EWP_K_EXEC_TIMING_QUEUE_US                     1u
 #define EWP_K_EXEC_TIMING_EXEC_US                      2u
@@ -298,6 +409,14 @@ typedef enum {
 #define EWP_K_FIRMWARE_INFO_VERSION                    1u
 #define EWP_K_FIRMWARE_INFO_ELF_SHA                    2u
 #define EWP_K_FIRMWARE_INFO_IDF                        3u
+/* FlushDnsCacheResult */
+#define EWP_K_FLUSH_DNS_CACHE_RESULT_FLUSHED           1u
+/* GetLocalDevicesArgs */
+#define EWP_K_GET_LOCAL_DEVICES_ARGS_LIMIT             1u
+/* GetWatchlistResult */
+#define EWP_K_GET_WATCHLIST_RESULT_VERSION             1u
+#define EWP_K_GET_WATCHLIST_RESULT_RULES               2u
+#define EWP_K_GET_WATCHLIST_RESULT_CATEGORIES          3u
 /* HeapStats */
 #define EWP_K_HEAP_STATS_INTERNAL_FREE                 1u
 #define EWP_K_HEAP_STATS_INTERNAL_MIN_FREE             2u
@@ -324,6 +443,7 @@ typedef enum {
 #define EWP_K_HELLO_BODY_LABEL                         15u
 #define EWP_K_HELLO_BODY_RESET_REASON                  16u
 #define EWP_K_HELLO_BODY_BOOT_COUNT                    17u
+#define EWP_K_HELLO_BODY_NET                           18u
 /* IdentifyArgs */
 #define EWP_K_IDENTIFY_ARGS_DURATION_MS                1u
 /* InferenceInput */
@@ -351,6 +471,9 @@ typedef enum {
 #define EWP_K_LINK_LIMITS_MAX_DOWNLINK                 1u
 #define EWP_K_LINK_LIMITS_MAX_UPLINK                   2u
 #define EWP_K_LINK_LIMITS_MAX_INFLIGHT                 3u
+/* LocalDevicesResult */
+#define EWP_K_LOCAL_DEVICES_RESULT_DEVICES             1u
+#define EWP_K_LOCAL_DEVICES_RESULT_TOTAL               2u
 /* LogBody */
 #define EWP_K_LOG_BODY_LEVEL                           1u
 #define EWP_K_LOG_BODY_TAG                             2u
@@ -367,14 +490,48 @@ typedef enum {
 #define EWP_K_MODEL_DESCRIPTOR_CLASSES                 7u
 #define EWP_K_MODEL_DESCRIPTOR_LABELS                  8u
 #define EWP_K_MODEL_DESCRIPTOR_ARENA_BYTES             9u
+/* NetObserveInfo */
+#define EWP_K_NET_OBSERVE_INFO_MODE                    1u
+#define EWP_K_NET_OBSERVE_INFO_PORT                    2u
+#define EWP_K_NET_OBSERVE_INFO_UPSTREAMS               3u
+#define EWP_K_NET_OBSERVE_INFO_CAPS                    4u
+#define EWP_K_NET_OBSERVE_INFO_WATCH_VER               5u
+#define EWP_K_NET_OBSERVE_INFO_WATCH_RULES             6u
 /* NetStats */
 #define EWP_K_NET_STATS_RSSI_DBM                       1u
 #define EWP_K_NET_STATS_CHANNEL                        2u
 #define EWP_K_NET_STATS_TX_FAIL                        3u
 #define EWP_K_NET_STATS_RECONNECTS                     4u
 #define EWP_K_NET_STATS_UPLINK_QUEUED                  5u
+/* NetworkStatsResult */
+#define EWP_K_NETWORK_STATS_RESULT_DNS                 1u
+#define EWP_K_NETWORK_STATS_RESULT_UPSTREAMS           2u
+#define EWP_K_NETWORK_STATS_RESULT_CACHE_ENTRIES       3u
+#define EWP_K_NETWORK_STATS_RESULT_PENDING             4u
+#define EWP_K_NETWORK_STATS_RESULT_LAST_CLIENT_QUERY_AGO_MS 5u
+/* PingHostArgs */
+#define EWP_K_PING_HOST_ARGS_TARGET                    1u
+#define EWP_K_PING_HOST_ARGS_COUNT                     2u
+#define EWP_K_PING_HOST_ARGS_TIMEOUT_MS                3u
+#define EWP_K_PING_HOST_ARGS_INTERVAL_MS               4u
+/* PingHostResult */
+#define EWP_K_PING_HOST_RESULT_ERROR                   1u
+#define EWP_K_PING_HOST_RESULT_RESOLVED_IP             2u
+#define EWP_K_PING_HOST_RESULT_SENT                    3u
+#define EWP_K_PING_HOST_RESULT_RECEIVED                4u
+#define EWP_K_PING_HOST_RESULT_RTT_MIN_MS              5u
+#define EWP_K_PING_HOST_RESULT_RTT_AVG_MS              6u
+#define EWP_K_PING_HOST_RESULT_RTT_MAX_MS              7u
+/* QueryDnsLogArgs */
+#define EWP_K_QUERY_DNS_LOG_ARGS_LIMIT                 1u
+#define EWP_K_QUERY_DNS_LOG_ARGS_CLIENT                2u
+#define EWP_K_QUERY_DNS_LOG_ARGS_FLAGGED_ONLY          3u
 /* ReadTelemetryArgs */
 #define EWP_K_READ_TELEMETRY_ARGS_SECTIONS             1u
+/* RebootArgs */
+#define EWP_K_REBOOT_ARGS_DELAY_MS                     1u
+/* RebootResult */
+#define EWP_K_REBOOT_RESULT_IN_MS                      1u
 /* ResultBody */
 #define EWP_K_RESULT_BODY_TIMING                       1u
 #define EWP_K_RESULT_BODY_RESULT                       2u
@@ -383,6 +540,9 @@ typedef enum {
 #define EWP_K_RUN_INFERENCE_ARGS_INPUT                 2u
 #define EWP_K_RUN_INFERENCE_ARGS_TOP_K                 3u
 #define EWP_K_RUN_INFERENCE_ARGS_THRESHOLD             4u
+/* ScanLanResult */
+#define EWP_K_SCAN_LAN_RESULT_TARGETS                  1u
+#define EWP_K_SCAN_LAN_RESULT_ETA_MS                   2u
 /* SensorStats */
 #define EWP_K_SENSOR_STATS_DIE_TEMP_C                  1u
 #define EWP_K_SENSOR_STATS_ADC_MV                      2u
@@ -407,6 +567,11 @@ typedef enum {
 #define EWP_K_SET_STATE_MODE_RESULT_CURRENT            2u
 #define EWP_K_SET_STATE_MODE_RESULT_EFFECTIVE_IN_MS    3u
 #define EWP_K_SET_STATE_MODE_RESULT_LATCHED            4u
+/* SetWatchlistArgs */
+#define EWP_K_SET_WATCHLIST_ARGS_OP                    1u
+#define EWP_K_SET_WATCHLIST_ARGS_VERSION               2u
+#define EWP_K_SET_WATCHLIST_ARGS_RULES                 3u
+#define EWP_K_SET_WATCHLIST_ARGS_CATEGORIES            4u
 /* StatusBody */
 #define EWP_K_STATUS_BODY_STATE                        1u
 #define EWP_K_STATUS_BODY_MODE                         2u
@@ -426,6 +591,38 @@ typedef enum {
 #define EWP_K_TELEMETRY_BODY_ACTUATORS                 11u
 #define EWP_K_TELEMETRY_BODY_INFERENCE                 12u
 #define EWP_K_TELEMETRY_BODY_EXT                       13u
+#define EWP_K_TELEMETRY_BODY_DNS                       14u
+/* WatchlistResult */
+#define EWP_K_WATCHLIST_RESULT_VERSION                 1u
+#define EWP_K_WATCHLIST_RESULT_RULES                   2u
+#define EWP_K_WATCHLIST_RESULT_CATEGORIES              3u
+
+/* ---- built-in watchlist (src/watchlist.ts): a node flags these before the host
+ * has ever sent it a list. [suffix, category id, ewp_rule_flag_t bitset] ------- */
+#define EWP_DEFAULT_WATCHLIST_VERSION 1u
+#define EWP_DEFAULT_RULE_COUNT        13u
+#define EWP_DEFAULT_CATEGORY_COUNT    2u
+typedef struct { const char* suffix; uint8_t category; uint8_t flags; } ewp_default_rule_t;
+typedef struct { uint8_t id; const char* name; } ewp_default_category_t;
+static const ewp_default_rule_t EWP_DEFAULT_RULES[EWP_DEFAULT_RULE_COUNT] = {
+    {"youtube.com", 1u, 0x01u},
+    {"youtu.be", 1u, 0x01u},
+    {"googlevideo.com", 1u, 0x03u},
+    {"ytimg.com", 1u, 0x03u},
+    {"youtubei.googleapis.com", 1u, 0x01u},
+    {"youtube.googleapis.com", 1u, 0x01u},
+    {"youtube-nocookie.com", 1u, 0x01u},
+    {"youtubekids.com", 1u, 0x01u},
+    {"yt3.ggpht.com", 1u, 0x01u},
+    {"tiktok.com", 2u, 0x01u},
+    {"tiktokv.com", 2u, 0x01u},
+    {"tiktokcdn.com", 2u, 0x01u},
+    {"tiktokcdn-us.com", 2u, 0x01u},
+};
+static const ewp_default_category_t EWP_DEFAULT_CATEGORIES[EWP_DEFAULT_CATEGORY_COUNT] = {
+    {1u, "video_streaming:youtube"},
+    {2u, "video_streaming:tiktok"},
+};
 
 /* ---- fixed header --------------------------------------------------------
  * memcpy() the first EWP_HEADER_LEN bytes of a payload into this struct;

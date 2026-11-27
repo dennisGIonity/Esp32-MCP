@@ -6,6 +6,7 @@ server change:
     ionity/+/+/telemetry
     ionity/+/+/status
     ionity/+/+/cmd/result
+    ionity/ewp1/+/+/{hello,st,tm,ev,rs}   EWP/1 nodes (firmware 3, Pi agent 2) -> app/ewp/hub.py
 Publishes commands to:
     ionity/<site>/<device_id>/cmd      (or ionity/broadcast/cmd)
 
@@ -21,6 +22,11 @@ asyncio subprocesses (the DNS service's ARP refresh needs those on Windows).
 So the MQTT client runs on paho's own network thread and hands messages to the
 asyncio loop with call_soon_threadsafe. It is independent of whichever event
 loop uvicorn chose, on every platform.
+
+Start-up never depends on the broker: connect_async + loop_start return at
+once, paho retries with back-off (1 s doubling to 30 s) until the broker is
+there, /api/v1/health reports the link as degraded meanwhile, and EWP/1 tool
+calls answer "MQTT broker not connected" instead of hanging.
 """
 from __future__ import annotations
 
@@ -39,14 +45,19 @@ log = logging.getLogger("ionity.mqtt")
 
 
 class MqttBridge:
-    def __init__(self, registry: FleetRegistry):
+    def __init__(self, registry: FleetRegistry, ewp_hub=None):
         self.registry = registry
+        self.ewp = ewp_hub
         self.loop: asyncio.AbstractEventLoop | None = None
         self.client: paho.Client | None = None
         self.connected = False
         self.received = 0
         self.errors = 0
         self.cmd_results = 0
+        self.ewp_frames = 0
+        self.connects = 0
+        self.disconnects = 0
+        self.last_error: str | None = None
         self._lock = threading.Lock()
 
     # -- lifecycle ---------------------------------------------------------
@@ -65,6 +76,8 @@ class MqttBridge:
         c.reconnect_delay_set(min_delay=1, max_delay=30)
         self.client = c
         self.registry.command_publisher = self.publish_command
+        if self.ewp is not None:
+            self.ewp.publisher = self.publish_raw
 
         # connect_async + loop_start: never blocks startup, and paho keeps
         # retrying on its own thread until the broker appears.
@@ -84,25 +97,51 @@ class MqttBridge:
     def _on_connect(self, client, userdata, flags, reason_code, properties=None):
         ok = (reason_code == 0) if isinstance(reason_code, int) else not reason_code.is_failure
         if not ok:
+            self.last_error = f"connect refused: {reason_code}"
             log.warning("MQTT connect refused: %s", reason_code)
             return
         self.connected = True
+        self.connects += 1
+        self.last_error = None
         root = settings.mqtt_root
-        client.subscribe([(f"{root}/+/+/telemetry", 0),
-                          (f"{root}/+/+/status", 1),
-                          (f"{root}/+/+/cmd/result", 1)])
+        subs = [(f"{root}/+/+/telemetry", 0), (f"{root}/+/+/status", 1), (f"{root}/+/+/cmd/result", 1)]
+        if self.ewp is not None:
+            from app.ewp import ewp_protocol as P
+            subs += [(f"{P.TOPIC_ROOT}/+/+/{ch}", pol["qos"]) for ch, pol in P.CHANNEL_POLICY.items()
+                     if pol["dir"] == "up"]
+        client.subscribe(subs)
         log.info("MQTT connected to %s:%s", settings.mqtt_host, settings.mqtt_port)
 
     def _on_disconnect(self, client, userdata, *args):
         if self.connected:
+            self.disconnects += 1
+            self.last_error = "disconnected"
             log.warning("MQTT disconnected - paho will reconnect; "
                         "devices fall back to HTTP in the meantime")
         self.connected = False
 
     def _on_message(self, client, userdata, msg):
-        # Hand off to the asyncio loop; registry methods are not thread-safe.
-        if self.loop:
+        # Hand off to the asyncio loop; registry and hub methods are not thread-safe.
+        if not self.loop:
+            return
+        if self.ewp is not None and msg.topic.startswith(self._ewp_prefix):
+            self.loop.call_soon_threadsafe(self._handle_ewp, msg.topic, bytes(msg.payload))
+        else:
             self.loop.call_soon_threadsafe(self._handle, msg.topic, msg.payload)
+
+    @property
+    def _ewp_prefix(self) -> str:
+        from app.ewp import ewp_protocol as P
+        return P.TOPIC_ROOT + "/"
+
+    def _handle_ewp(self, topic: str, payload: bytes) -> None:
+        """EWP/1 binary frames (firmware 3, Pi agent 2) -> the hub; never JSON-decoded."""
+        self.ewp_frames += 1
+        try:
+            self.ewp.handle(topic, payload, transport="mqtt")
+        except Exception:
+            self.errors += 1
+            log.warning("EWP frame on %s could not be handled", topic, exc_info=True)
 
     # -- message handling (runs on the asyncio loop) ---------------------
     def _handle(self, topic: str, payload: bytes) -> None:
@@ -152,9 +191,22 @@ class MqttBridge:
         log.info("cmd -> %s : %s (%s)", topic, action, "queued" if ok else f"rc={info.rc}")
         return ok
 
+    def publish_raw(self, topic: str, payload: bytes, qos: int = 1, retain: bool = False) -> bool:
+        """EWP/1 downlink (REQ / CANCEL) for the hub. False while the broker is unreachable."""
+        if not self.client or not self.connected:
+            return False
+        info = self.client.publish(topic, payload, qos=qos, retain=retain)
+        return info.rc == paho.MQTT_ERR_SUCCESS
+
     def stats(self) -> dict:
         return {
+            "enabled": True,
+            "state": "connected" if self.connected else "degraded",
             "connected": self.connected,
+            "connects": self.connects,
+            "disconnects": self.disconnects,
+            "last_error": self.last_error,
+            "ewp_frames": self.ewp_frames,
             "host": f"{settings.mqtt_host}:{settings.mqtt_port}",
             "received": self.received,
             "decode_errors": self.errors,

@@ -64,6 +64,24 @@ Deploys **alongside the router (Out-of-Band)** on a switch management/mirror por
 
 ---
 
+## 📏 Data sources - measured or null, never invented
+
+| Value | Source | Without it |
+|---|---|---|
+| WAN / floor Mbps, link state, router uptime | RouterOS REST `/rest/interface`, `/rest/system/resource` (rates from counter deltas) | `null`, `status: UNCONFIGURED / OFFLINE` |
+| Devices per floor | `/rest/ip/dhcp-server/lease` (bound) in the floor's `subnets` | `null` |
+| Which interface is which floor | `floor_interfaces` in config.yaml (never guessed) | listed in `unmapped_interfaces` |
+| Latency / jitter / loss | ICMP echo (or TCP connect to :53 where ICMP is not permitted) | failed probe = loss, jitter `null` until 2 samples |
+| Blocked-port threats | RouterOS firewall log (rules need `log=yes`) | empty list |
+| Load-shedding stage | EskomSePush (`ESKOM_API_KEY`) | `available: false`, stage `null` |
+| Speed test | speedtest-cli | `source: none` |
+
+`/api/telemetry/live` carries a `data_sources` block that says which of these are live. The only
+code that makes numbers up is `core/simulation.py`, used only when an operator sets
+`mikrotik_connection.simulate_if_offline` or `speedtest.simulate_if_unavailable` to `true` (both
+default `false`); its output is labelled `simulated: true` and the dashboard shows a SIMULATED banner.
+`tests/test_routeros.py` fails if `random` is used anywhere else in `core/`.
+
 ## 🚀 Quick Start Guide
 
 ### 1. Run with Python
@@ -106,16 +124,22 @@ Paste the following into your MikroTik Terminal:
 
 ```routeros
 # Read-Only Telemetry User
-/user group add name=sentinel_group policy=read,api,test,!write,!policy,!password
+/user group add name=sentinel_group policy=read,api,rest-api,test,!write,!policy,!password
 /user add name=sentinel_readonly group=sentinel_group password="CHANGE_ME_in_env" address=10.53.20.0/24 comment="Edge Sentinel Telemetry Service"
 
 # SNMP v2c on Management VLAN 200
 /snmp community add name=public addresses=10.53.20.0/24 read-access=yes
 /snmp set enabled=yes contact="Ops Team (devlin@grayaura.co.za)" location="Kelvin Drive Server Room"
 
-# Firewall Drops for Blocked Services
-/ip firewall filter add chain=input protocol=tcp dst-port=21,23,80,22,8728 action=drop log=yes log-prefix="BLOCKED_SVC_PROBE: " comment="Diagram Blocked Services Filter"
+# REST API for the sentinel (RouterOS v7, HTTPS, management VLAN only)
+/ip service set www-ssl disabled=no address=10.53.20.0/24
+
+# Firewall Drops for Blocked Services - log=yes is what feeds the sentinel's threat list
+/ip firewall filter add chain=input protocol=tcp dst-port=21,23,80,22,8728 action=drop log=yes log-prefix="BLOCKED_SVC_PROBE" comment="Diagram Blocked Services Filter"
 ```
+
+Then on the sentinel host: `MIKROTIK_PASSWORD=<the read-only user's password>` (and optionally
+`MIKROTIK_HOST`, `MIKROTIK_USER`), and fill in `floor_interfaces` in `config/config.yaml`.
 
 ---
 

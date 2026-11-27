@@ -36,6 +36,9 @@ class Settings(BaseSettings):
     host: str = "0.0.0.0"
     port: int = 8099
     cors_origins: str = "*"
+    # Browser origins allowed to call MCP (/mcp). Same-origin pages and localhost are
+    # always allowed; non-browser clients send no Origin. Comma-separated full origins.
+    mcp_allowed_origins: str = ""
 
     # --- Identity ---------------------------------------------------------
     fleet_name: str = "Ionity ESP32-MCP Fleet"
@@ -85,12 +88,15 @@ class Settings(BaseSettings):
     # An ESP32 WiFi client cannot see other devices' DNS (per-client WPA keys
     # + switched unicast). So the resolver runs here instead: point the
     # router's DHCP at this host as LAN DNS and every query arrives by design.
-    dns_enabled: bool = True
+    # v3 (PLAN-v3-ESP-CENTRIC): the ESP node is the resolver; this host resolver
+    # is a lab-only fallback and OFF by default. The POC/tester kits switch it on.
+    dns_enabled: bool = False
     dns_bind: str = "0.0.0.0"
     dns_port: int = 53                   # 5353 is handy for testing unprivileged
     dns_upstreams: str = "1.1.1.1,8.8.8.8"
     dns_timeout_s: float = 3.0
-    dns_retention_days: int = 14
+    dns_retention_days: int = 7          # rolling window for dns_queries + flag_events
+    dns_max_rows: int = 2_000_000        # hard cap on dns_queries rows (oldest go first); 0 = no cap
     # Clients the resolver answers (comma-separated CIDRs). Everything else is
     # dropped silently so this host can never be used as an open resolver.
     dns_allow_from: str = "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,127.0.0.0/8"
@@ -98,12 +104,13 @@ class Settings(BaseSettings):
     # --- Whole-network view + alerts (v2.1) --------------------------------
     # Every LAN subnet this host sits on is swept (one UDP poke per address, so
     # the OS ARPs it) so EVERY device appears, not only the ones using our DNS.
-    lan_sweep_enabled: bool = True
+    # v3: off by default (each ESP reports its own LAN via get_local_devices).
+    lan_sweep_enabled: bool = False
     lan_sweep_interval_s: int = 60
-    # Any device looking up one of these raises a dashboard alert + red light.
-    watch_domains: str = ("youtube.com,youtu.be,googlevideo.com,ytimg.com,youtube-nocookie.com,"
-                          "youtubei.googleapis.com,yt3.ggpht.com,tiktok.com,tiktokv.com,"
-                          "tiktokcdn.com,byteoversea.com")
+    # Watchlist: the rule engine (app/rules, API /api/v1/watchlist, MCP manage_dns_watchlist)
+    # is the source of truth, seeded with the built-in YouTube/TikTok rules. Domains listed
+    # here are ADDED once at start-up as ALERT rules in category "custom:env" (v2.2 compat).
+    watch_domains: str = ""
     watch_ignore: str = ""               # client IPs never alerted on (comma separated)
     watch_hold_s: int = 300              # a watch alert clears after this long quiet
     new_device_hold_s: int = 1800        # "new device joined" alert stays this long
@@ -130,6 +137,17 @@ class Settings(BaseSettings):
     firmware_dist: str = str(ROOT / "firmware" / "dist")
     # The host the flasher tells boards to report to. Empty = this host's LAN IP.
     public_host: str = ""
+
+    # Friendly names for LAN clients and nodes (app/labels.py), hot-reloaded.
+    labels_file: str = str(ROOT / "config" / "device_labels.json")
+
+    # --- Abuse protection for the open endpoints ---------------------------
+    # Per client IP, token bucket: sustained requests/s and burst, for device ingest
+    # (/api/v1/telemetry, /api/v1/ewp/*) and MCP over HTTP. 0 = off.
+    ingest_rate_per_s: float = 50.0
+    ingest_burst: int = 200
+    mcp_rate_per_s: float = 20.0
+    mcp_burst: int = 60
 
     # --- Dashboard broadcast ---------------------------------------------
     ws_broadcast_interval_s: float = 2.0
