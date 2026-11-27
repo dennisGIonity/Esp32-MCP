@@ -20,7 +20,13 @@ ninja -C "$OUT/host"
 
 cmake -S "$HERE/host" -B "$OUT/host-tsan" -G Ninja -DSANITIZER=thread >/dev/null
 ninja -C "$OUT/host-tsan" fw_tests
-TSAN_OPTIONS=halt_on_error=1 "$OUT/host-tsan/fw_tests" mcp_
+# TSan needs a narrow address space: newer kernels (CI runners: vm.mmap_rnd_bits=32) make it
+# abort with "unexpected memory mapping". Run it with ASLR off when the host allows that.
+TSAN_RUN=()
+if command -v setarch >/dev/null 2>&1 && setarch "$(uname -m)" -R true 2>/dev/null; then
+    TSAN_RUN=(setarch "$(uname -m)" -R)
+fi
+TSAN_OPTIONS=halt_on_error=1 ${TSAN_RUN[@]+"${TSAN_RUN[@]}"} "$OUT/host-tsan/fw_tests" mcp_
 
 "$OUT/host/fw_fuzz" "${FUZZ_ITERATIONS:-40000}"
 

@@ -77,7 +77,8 @@ jobs:
   portal-e2e:
     name: portal e2e (Chromium, simulated boards + the real fleet host)
     needs: typescript
-    runs-on: ubuntu-latest
+    # Playwright 1.56 has no browsers for ubuntu-latest = 26.04 yet
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
