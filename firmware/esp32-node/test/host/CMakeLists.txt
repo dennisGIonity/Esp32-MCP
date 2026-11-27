@@ -58,6 +58,7 @@ include_directories(
     "${FW_ROOT}/components/tools/include"
     "${FW_ROOT}/components/provisioning/include"
     "${FW_ROOT}/components/netobserve/include"
+    "${FW_ROOT}/components/net/include"
     "${CJSON_DIR}"
     "${EWP_PROTOCOL_DIR}")
 
@@ -96,7 +97,7 @@ add_library(fw_portable STATIC ${PORTABLE_SRCS})
 target_link_libraries(fw_portable PUBLIC Threads::Threads cjson)
 target_compile_options(fw_portable PRIVATE ${STRICT_FLAGS} ${SAN_FLAGS})
 
-add_executable(fw_tests main.cpp test_ewp.cpp test_mcp.cpp test_tools.cpp test_prov.cpp test_netobs.cpp)
+add_executable(fw_tests main.cpp test_ewp.cpp test_mcp.cpp test_tools.cpp test_prov.cpp test_netobs.cpp test_backoff.cpp)
 # GCC -O1 + TSan reports copies of std::vector<uint8_t> as possibly null when the test pokes
 # single bytes of a DNS message; production sources keep -Wnull-dereference.
 set_source_files_properties(test_netobs.cpp PROPERTIES COMPILE_OPTIONS -Wno-null-dereference)

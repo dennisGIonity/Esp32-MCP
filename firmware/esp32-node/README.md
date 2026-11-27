@@ -37,14 +37,23 @@ Pick the variant by the port the board is plugged in on: `_usb` = the chip's nat
 | `components/ewp` | EWP/1 header, bounded CBOR, CRC-32 (portable) |
 | `components/mcp_server` | `MCPServer` (registry, job pool, worker), `Uplink` (frame pool, single publisher), `os.h` |
 | `components/tools` | `read_telemetry`, `get_device_info`, `identify`, `set_actuator`, `reboot`; actuator bank (LEDC PWM / relay, lease + failsafe); TELEMETRY/HELLO/STATUS encoders; ESP probes |
-| `components/netobserve` | LAN DNS forwarder + cache, query ring log, watchlist, client table (ARP/DHCP/mDNS), `scan_lan`; tools 0x40-0x46; DNS_BATCH / DNS_FLAGGED encoders |
-| `components/net` | Wi-Fi station manager, MQTT 5 link + `net_task` |
+| `components/netobserve` | LAN DNS forwarder + cache, query ring log, watchlist, client table (ARP/DHCP/mDNS), `scan_lan`, `ping_host` (esp_ping); tools 0x40-0x47; DNS_BATCH / DNS_FLAGGED encoders |
+| `components/net` | Wi-Fi station manager, MQTT 5 link + `net_task`; reconnects with `Backoff` (1 s doubling to 60 s, ±20 % jitter, paused while Wi-Fi is down) |
 | `components/provisioning` | `ionity-prov/2` handler, NVS config + fw 2.x migration, console + log hook |
 | `test/host` | unit tests, fuzz loops, interop helpers (ASan/UBSan/TSan) |
 | `test/interop` | TypeScript `ProvClient` and cbor-x against the C++ code |
 
 The wire constants come from `packages/protocol/generated/ewp_protocol.h` (generated from the
 TypeScript contract) - build inside the monorepo or set `EWP_PROTOCOL_DIR`.
+
+## ping_host and reconnect back-off (fw 3.2)
+
+- `ping_host` (EWP tool 0x47): ICMP echo from the board through lwIP `esp_ping`. 1-10 echoes, 100-5000 ms
+  timeout, 200-5000 ms interval; one session at a time; a session that cannot fit the request deadline is
+  refused up front (INVALID_ARGS). Result: resolved address, sent / received, RTT min / avg / max.
+- MQTT: esp-mqtt auto-reconnect is off. A lost or failed connection arms the next attempt from
+  `net/Backoff.h`; `net_task` calls `esp_mqtt_client_reconnect()` when it is due. The back-off resets on
+  CONNECTED and does not grow while Wi-Fi has no address. `reconnects` in telemetry counts lost sessions.
 
 ## NetObserve (fw 3.1)
 

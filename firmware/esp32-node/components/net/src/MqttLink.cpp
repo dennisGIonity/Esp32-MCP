@@ -10,6 +10,7 @@
 
 #include "esp_crt_bundle.h"
 #include "esp_log.h"
+#include "esp_random.h"
 #include "esp_timer.h"
 #include "ewp/frame.h"
 #include "mqtt5_client.h"
@@ -75,6 +76,7 @@ void MqttLink::stop() {
     esp_mqtt_client_destroy(client_);
     client_ = nullptr;
     connected_.store(false, std::memory_order_release);
+    reconnectAtUs_.store(0);
     xEventGroupClearBits(ev_, kConnected | kError | kNeedPresence);
 }
 
@@ -114,7 +116,9 @@ bool MqttLink::start(const LinkConfig& cfg) {
     mc.session.last_will.msg_len = static_cast<int>(willLen_);
     mc.session.last_will.qos = EWP_CH_STATUS_QOS;
     mc.session.last_will.retain = EWP_CH_STATUS_RETAIN;
-    mc.network.reconnect_timeout_ms = 5000;
+    // Reconnects are ours (Backoff, net_task): a fixed esp-mqtt retry period would make every
+    // board in a building hit the broker in the same second after a power cut.
+    mc.network.disable_auto_reconnect = true;
     mc.network.timeout_ms = 10000;
     mc.buffer.size = kRxBuffer;
     mc.buffer.out_size = kTxBuffer;
@@ -133,6 +137,9 @@ bool MqttLink::start(const LinkConfig& cfg) {
     esp_mqtt5_client_set_connect_property(client_, &props);
     esp_mqtt_client_register_event(client_, MQTT_EVENT_ANY, &MqttLink::onEvent, this);
     errKind_.store(0);
+    backoff_.reset();
+    backoffAttempt_.store(0);
+    reconnectAtUs_.store(0);
     xEventGroupClearBits(ev_, kConnected | kError | kNeedPresence);
     if (esp_mqtt_client_start(client_) != ESP_OK) {
         esp_mqtt_client_destroy(client_);
@@ -155,12 +162,16 @@ void MqttLink::onEvent(void* arg, esp_event_base_t, int32_t id, void* data) {
             self->connected_.store(true, std::memory_order_release);
             self->errKind_.store(0);
             self->everConnected_.store(true);
+            self->backoff_.reset();
+            self->backoffAttempt_.store(0);
+            self->reconnectAtUs_.store(0);
             xEventGroupSetBits(self->ev_, kConnected | kNeedPresence);  // net_task publishes HELLO + STATUS
             ESP_LOGI(TAG, "connected; listening on %s", self->tDn_);
             break;
         case MQTT_EVENT_DISCONNECTED:
             if (self->connected_.exchange(false)) self->reconnects_.fetch_add(1, std::memory_order_relaxed);
             xEventGroupClearBits(self->ev_, kConnected);
+            self->armReconnect();  // lost, or a connect attempt failed: try again after the back-off
             break;
         case MQTT_EVENT_DATA: {
             const ewp::Topic t = topicIs(e->topic, e->topic_len, self->tDn_)               ? ewp::Topic::Unicast
@@ -197,6 +208,36 @@ void MqttLink::onEvent(void* arg, esp_event_base_t, int32_t id, void* data) {
             break;
         default: break;
     }
+}
+
+void MqttLink::armReconnect() {
+    // MQTT task only (backoff_ is not shared). One deadline at a time: a DISCONNECTED that follows an ERROR for the
+    // same attempt must not advance the back-off twice.
+    if (reconnectAtUs_.load() != 0) return;
+    const uint32_t ms = backoff_.next(esp_random());
+    backoffAttempt_.store(backoff_.attempt());
+    lastBackoffMs_.store(ms);
+    reconnectAtUs_.store(esp_timer_get_time() + static_cast<int64_t>(ms) * 1000);
+    ESP_LOGI(TAG, "reconnect in %u ms (attempt %u)", static_cast<unsigned>(ms), static_cast<unsigned>(backoff_.attempt()));
+}
+
+void MqttLink::serviceReconnect() {
+    // net_task.
+    const int64_t at = reconnectAtUs_.load();
+    if (at == 0 || connected()) return;
+    const int64_t now = esp_timer_get_time();
+    if (now < at) return;
+    if (!WifiManager::instance().up()) {
+        // No address: pointless to try, and the back-off must not grow while the
+        // station reconnects (WifiManager has its own back-off). Look again in 1 s.
+        reconnectAtUs_.store(now + 1000000);
+        return;
+    }
+    os::Lock lk(clientMu_, 100);
+    if (!lk.owns() || client_ == nullptr) return;  // stop()/start() in progress
+    // A refused call (client mid-teardown) is retried by this loop in a second; a failed
+    // attempt comes back as DISCONNECTED and armReconnect() advances the back-off.
+    reconnectAtUs_.store(esp_mqtt_client_reconnect(client_) == ESP_OK ? 0 : now + 1000000);
 }
 
 bool MqttLink::waitConnected(uint32_t timeoutMs, char* detail, size_t cap) {
@@ -298,6 +339,7 @@ void MqttLink::taskLoop() {
         const int64_t t0 = esp_timer_get_time();
         if (supervisor_ != nullptr) supervisor_(supervisorUser_);
         if (connected() && (xEventGroupClearBits(ev_, kNeedPresence) & kNeedPresence)) publishPresence();
+        serviceReconnect();
 
         mcp::TxItem it;
         if (!uplink_->nextDue(it, 500)) continue;  // <= 500 ms: the TWDT is fed every loop
