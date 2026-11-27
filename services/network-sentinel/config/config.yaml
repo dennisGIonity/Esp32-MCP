@@ -88,7 +88,29 @@ network:
           source_net: "169.239.8.0/24"
           target_ip: "192.168.243.250"
 
+# Which router interfaces carry each floor's traffic, and (optional) which subnets its
+# DHCP clients use. This is CONFIGURATION for the site - the sentinel never guesses it.
+# Interfaces not listed here or under network.wan_interfaces show up as `unmapped_interfaces`
+# in /api/telemetry/live so a missing entry is visible. Fill in from the router's
+# /interface print (names must match exactly, e.g. "vlan610", "bridge-ff", "ether10").
+floor_interfaces:
+  ground_floor:
+    interfaces: []          # e.g. ["vlan610"]
+    subnets: []             # e.g. ["10.53.61.0/24"]
+  first_floor:
+    interfaces: []
+    subnets: []
+  lower_ground:
+    interfaces: []
+    subnets: []
+  management_and_infra:
+    interfaces: []          # e.g. ["vlan200", "ether10"]
+    subnets: []
+
 security:
+  # Drops become alerts only when the RouterOS firewall rules have log=yes:
+  #   /ip firewall filter set [find comment~"block"] log=yes log-prefix=DROP-WAN
+  log_poll_seconds: 10
   blocked_ports:
     - port: 23
       service: "Telnet"
@@ -116,13 +138,17 @@ speedtest:
   committed_upload_mbps: 200
   # With speedtest-cli installed the test is real. Without it, results are
   # only produced when this is true - and every result is labelled simulated.
-  simulate_if_unavailable: true
+  simulate_if_unavailable: false
 
 sentinel:
   mode: "ALONGSIDE_PASSIVE"
   polling_interval_seconds: 2
   passive_ping_interval_seconds: 5
   active_speedtest_interval_minutes: 60
+  # auto = ICMP when this host may send it, else TCP connect to :53; or "icmp" / "tcp:<port>"
+  # (per target too: add `method:` to an entry).
+  probe_method: auto
+  probe_timeout_seconds: 1.0
   ping_targets:
     - name: "Google DNS"
       ip: "8.8.8.8"
@@ -133,17 +159,24 @@ sentinel:
     - name: "Liquid ISP Gateway 2"
       ip: "41.169.150.193"
 
+# RouterOS v7 REST API (www-ssl service), read-only group user. The password is read
+# from MIKROTIK_PASSWORD (also MIKROTIK_HOST / MIKROTIK_USER override); never put it here.
 mikrotik_connection:
   api_host: "10.53.20.1"
+  rest_scheme: https
+  rest_port: 443
+  verify_tls: false         # RouterOS uses a self-signed certificate unless you install one
+  timeout_seconds: 3.0
   api_port: 8728
   api_user: "sentinel_readonly"
   api_password: "CHANGE_ME_in_env"
   snmp_host: "10.53.20.1"
   snmp_community: "public"
   snmp_version: "2c"
-  simulate_if_offline: true
+  # Demo only: invent traffic when the router is unreachable (labelled SIMULATED everywhere).
+  simulate_if_offline: false
 
 loadshedding:
   eskom_api_url: "https://developer.sepush.co.za/business/2.0"
   cache_ttl_seconds: 900
-  mock_if_no_key: true
+  # Needs ESKOM_API_KEY (EskomSePush). Without it the status is "unavailable", never guessed.

@@ -1,0 +1,27 @@
+[
+ {
+  ".id": "*1",
+  "address": "10.53.61.10",
+  "mac-address": "AA:BB:CC:00:00:01",
+  "status": "bound",
+  "host-name": "gf-laptop"
+ },
+ {
+  ".id": "*2",
+  "address": "10.53.61.11",
+  "mac-address": "AA:BB:CC:00:00:02",
+  "status": "bound"
+ },
+ {
+  ".id": "*3",
+  "address": "10.53.61.12",
+  "mac-address": "AA:BB:CC:00:00:03",
+  "status": "waiting"
+ },
+ {
+  ".id": "*4",
+  "address": "10.53.81.5",
+  "mac-address": "AA:BB:CC:00:00:04",
+  "status": "bound"
+ }
+]

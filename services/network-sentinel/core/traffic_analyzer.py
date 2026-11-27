@@ -1,224 +1,172 @@
-import time
+"""
+AEDI - IONITY GLOBAL | Network sentinel | core/traffic_analyzer.py   Policy 986 AED
+(c) 2018-2026 Antwerp Designs | Ionity (Pty) Ltd | Ionity Global (Pty) Ltd
+
+Joins the router counters, the probes, the firewall log, load-shedding and the
+speed test into one live telemetry document. Every number comes from one of
+those sources; when a source is missing the value is null and `data_sources`
+says why - the dashboard and the MCP agent can tell "0 Mbps" from "unknown".
+"""
+from __future__ import annotations
+
 import logging
-from typing import Dict, Any
+import time
 from datetime import datetime, timezone
+from typing import Any
 
 logger = logging.getLogger("sentinel.traffic")
 
+
 class TrafficAnalyzer:
-    """
-    Synthesizes interface statistics, active probes, security alerts, and power status
-    into unified live network telemetry and stability index.
-    """
-    def __init__(self, config: Dict[str, Any], collector, probe_engine, loadshedding_engine, speedtest_engine, security_analyzer):
+    def __init__(self, config: dict[str, Any], collector, probe_engine, loadshedding_engine, speedtest_engine,
+                 security_analyzer):
         self.config = config
         self.collector = collector
         self.probe_engine = probe_engine
         self.loadshedding_engine = loadshedding_engine
         self.speedtest_engine = speedtest_engine
         self.security_analyzer = security_analyzer
-        
-        self.site_id = config.get("site", {}).get("id", "kelvin-drive-site-01")
-        self.site_name = config.get("site", {}).get("name", "Kelvin Drive HQ")
-        self.router_model = config.get("site", {}).get("router_model", "MikroTik CRS326-24G-2S+")
-        self.router_hostname = config.get("site", {}).get("hostname", "Dynamic@KelvinDrive")
-
-        self.hardware_mains_ok = True
-        self.last_hardware_ping_ts = time.time()
+        site = config.get("site", {})
+        self.site_id = site.get("id", "site-01")
+        self.site_name = site.get("name", "site")
+        self.router_model = site.get("router_model")
+        self.router_hostname = site.get("hostname")
+        self.wan_cfg = {w["id"]: w for w in config.get("network", {}).get("wan_interfaces", [])}
+        self.floor_cfg = {f["id"]: f for f in config.get("network", {}).get("floors", [])}
+        self.log_poll_s = float(config.get("security", {}).get("log_poll_seconds", 10))
+        self._last_log_poll = 0.0
+        self.started_at = time.time()
+        # Hardware sentinel (ESP32) feed: unknown until the first report arrives.
+        self.hardware_mains_ok: bool | None = None
+        self.last_hardware_ping_ts: float | None = None
 
     def update_hardware_sentinel_state(self, mains_ok: bool):
         self.hardware_mains_ok = mains_ok
         self.last_hardware_ping_ts = time.time()
 
-    def compute_stability_score(self, packet_loss_pct: float, jitter_ms: float, avg_latency_ms: float, wan1_online: bool, wan2_online: bool) -> Dict[str, Any]:
+    @staticmethod
+    def compute_stability_score(packet_loss_pct: float | None, jitter_ms: float | None, avg_latency_ms: float | None,
+                                wan1_online: bool | None, wan2_online: bool | None) -> dict[str, Any]:
         """
-        Computes weighted Stability Index (0 - 100%):
-        - Packet Loss penalty (50% weight)
-        - Jitter penalty (30% weight)
-        - Latency penalty (20% weight)
+        Stability Index 0-100 from MEASURED probes: loss (50 % weight), jitter (30 %), latency (20 %).
+        Both WANs known-down = 0. No probe data = score null, NO_DATA.
         """
-        if not wan1_online and not wan2_online:
-            return {
-                "score": 0.0,
-                "status_label": "CRITICAL_OUTAGE",
-                "loss_pct": 100.0,
-                "jitter_ms": 999.0,
-                "latency_ms": 999.0
-            }
+        if wan1_online is False and wan2_online is False:
+            return {"score": 0.0, "status_label": "CRITICAL_OUTAGE", "loss_pct": packet_loss_pct,
+                    "jitter_ms": jitter_ms, "latency_ms": avg_latency_ms}
+        if packet_loss_pct is None and avg_latency_ms is None:
+            return {"score": None, "status_label": "NO_DATA", "loss_pct": None, "jitter_ms": None,
+                    "latency_ms": None}
+        loss_penalty = min(50.0, (packet_loss_pct or 0.0) * 5.0)
+        jitter_penalty = min(30.0, max(0.0, ((jitter_ms or 0.0) - 1.5) * 4.0))
+        latency_penalty = 20.0 if avg_latency_ms is None else min(20.0, max(0.0, (avg_latency_ms - 15.0) * 0.5))
+        score = round(max(0.0, 100.0 - (loss_penalty + jitter_penalty + latency_penalty)), 1)
+        label = ("EXCELLENT" if score >= 95.0 else "STABLE" if score >= 85.0 else
+                 "DEGRADED" if score >= 70.0 else "CRITICAL")
+        return {"score": score, "status_label": label, "loss_pct": packet_loss_pct, "jitter_ms": jitter_ms,
+                "latency_ms": avg_latency_ms}
 
-        # Base 100
-        loss_penalty = min(50.0, packet_loss_pct * 5.0) # 10% loss = 50 pt penalty
-        jitter_penalty = min(30.0, max(0.0, (jitter_ms - 1.5) * 4.0)) # >1.5ms jitter incurs penalty
-        latency_penalty = min(20.0, max(0.0, (avg_latency_ms - 15.0) * 0.5))
+    async def _poll_firewall_log(self) -> None:
+        now = time.monotonic()
+        if now - self._last_log_poll < self.log_poll_s:
+            return
+        self._last_log_poll = now
+        rows = await self.collector.fetch_firewall_log()
+        if rows:
+            self.security_analyzer.ingest_firewall_log(rows)
 
-        score = max(0.0, 100.0 - (loss_penalty + jitter_penalty + latency_penalty))
-        score = round(score, 1)
+    @staticmethod
+    def _online(w: dict[str, Any]) -> bool | None:
+        st = w.get("status")
+        return True if st == "ONLINE" else False if st == "OFFLINE" else None
 
-        if score >= 95.0:
-            status_label = "EXCELLENT"
-        elif score >= 85.0:
-            status_label = "STABLE"
-        elif score >= 70.0:
-            status_label = "DEGRADED"
-        else:
-            status_label = "CRITICAL"
+    async def get_live_telemetry(self) -> dict[str, Any]:
+        iface = await self.collector.fetch_interface_stats()
+        probes = await self.probe_engine.run_all_probes()
+        ls = await self.loadshedding_engine.get_loadshedding_status()
+        await self._poll_firewall_log()
 
-        return {
-            "score": score,
-            "status_label": status_label,
-            "loss_pct": packet_loss_pct,
-            "jitter_ms": jitter_ms,
-            "latency_ms": avg_latency_ms
-        }
-
-    async def get_live_telemetry(self) -> Dict[str, Any]:
-        """
-        Gathers real-time telemetry from all sub-engines.
-        """
-        # 1. Interface stats from MikroTik
-        interface_data = await self.collector.fetch_interface_stats()
-        
-        # 2. Probes
-        probe_data = await self.probe_engine.run_all_probes()
-        
-        # 3. Load Shedding & Grid Correlation
-        ls_status = await self.loadshedding_engine.get_loadshedding_status()
-        
-        # 4. Security threats
-        self.security_analyzer.simulate_random_threat()
-        recent_threats = self.security_analyzer.get_recent_alerts(limit=5)
-        
-        # 5. Extract rates
-        wan1_data = interface_data.get("wan1", {})
-        wan2_data = interface_data.get("wan2", {})
-        floors_raw = interface_data.get("floors", {})
-        total_rx = interface_data.get("total_rx_mbps", 0.0)
-        total_tx = interface_data.get("total_tx_mbps", 0.0)
-
-        # 6. Stability calculation
-        loss_pct = probe_data.get("overall_loss_pct", 0.0)
-        jitter_ms = probe_data.get("overall_jitter_ms", 1.5)
-        latency_ms = probe_data.get("overall_latency_ms", 10.0)
-        wan1_online = wan1_data.get("status") == "ONLINE"
-        wan2_online = wan2_data.get("status") == "ONLINE"
-
-        stability = self.compute_stability_score(loss_pct, jitter_ms, latency_ms, wan1_online, wan2_online)
-
-        # 7. Correlation analysis
+        wans = iface.get("wans") or {}
+        total_rx, total_tx = iface.get("total_rx_mbps"), iface.get("total_tx_mbps")
+        loss, jitter, latency = (probes.get("overall_loss_pct"), probes.get("overall_jitter_ms"),
+                                 probes.get("overall_latency_ms"))
+        w1, w2 = self._online(wans.get("wan1", {})), self._online(wans.get("wan2", {}))
+        stability = self.compute_stability_score(loss, jitter, latency, w1, w2)
+        wan_state = ("UNKNOWN" if w1 is None and w2 is None else "ONLINE" if (w1 or w2) else "OFFLINE")
         correlation = self.loadshedding_engine.correlate_link_issue(
-            wan_status="ONLINE" if (wan1_online or wan2_online) else "OFFLINE",
-            packet_loss_pct=loss_pct,
-            mains_power_ok=self.hardware_mains_ok
-        )
+            wan_status=wan_state, packet_loss_pct=loss,
+            mains_power_ok=self.hardware_mains_ok is not False)
 
-        # 8. Floor Breakdown
-        floors = [
-            {
-                "floor_id": "ground_floor",
-                "floor_name": "Ground Floor (Offices 1-19, Co-Working)",
-                "active_devices": floors_raw.get("ground_floor", {}).get("devices", 38),
-                "rx_mbps": floors_raw.get("ground_floor", {}).get("rx_mbps", 0.0),
-                "tx_mbps": floors_raw.get("ground_floor", {}).get("tx_mbps", 0.0),
-                "bandwidth_share_pct": round((floors_raw.get("ground_floor", {}).get("rx_mbps", 0.0) / max(0.1, total_rx)) * 100, 1),
-                "primary_vlans": ["10.53.61.x - 10.53.79.x", "VLAN 610"]
-            },
-            {
-                "floor_id": "first_floor",
-                "floor_name": "First Floor (Offices 1-27, Office 22, Printers)",
-                "active_devices": floors_raw.get("first_floor", {}).get("devices", 54),
-                "rx_mbps": floors_raw.get("first_floor", {}).get("rx_mbps", 0.0),
-                "tx_mbps": floors_raw.get("first_floor", {}).get("tx_mbps", 0.0),
-                "bandwidth_share_pct": round((floors_raw.get("first_floor", {}).get("rx_mbps", 0.0) / max(0.1, total_rx)) * 100, 1),
-                "primary_vlans": ["10.53.81.x - 10.53.107.x", "VLAN 400", "10.53.102.27"]
-            },
-            {
-                "floor_id": "lower_ground",
-                "floor_name": "Lower Ground (Offices 1-10, LG Printer)",
-                "active_devices": floors_raw.get("lower_ground", {}).get("devices", 16),
-                "rx_mbps": floors_raw.get("lower_ground", {}).get("rx_mbps", 0.0),
-                "tx_mbps": floors_raw.get("lower_ground", {}).get("tx_mbps", 0.0),
-                "bandwidth_share_pct": round((floors_raw.get("lower_ground", {}).get("rx_mbps", 0.0) / max(0.1, total_rx)) * 100, 1),
-                "primary_vlans": ["10.53.111.x - 10.53.120.x", "10.53.120.251"]
-            },
-            {
-                "floor_id": "pbx_voip",
-                "floor_name": "PBX Telephony Uplink (UDP/TCP 169.239.8.0/24)",
-                "active_devices": floors_raw.get("pbx", {}).get("devices", 18),
-                "rx_mbps": floors_raw.get("pbx", {}).get("rx_mbps", 0.0),
-                "tx_mbps": floors_raw.get("pbx", {}).get("tx_mbps", 0.0),
-                "bandwidth_share_pct": round((floors_raw.get("pbx", {}).get("rx_mbps", 0.0) / max(0.1, total_rx)) * 100, 1),
-                "primary_vlans": ["ether10 (PBX) -> 192.168.243.250"]
-            }
-        ]
+        wan_rows = []
+        for wid, cfg in self.wan_cfg.items():
+            live = wans.get(wid, {})
+            gw = self.probe_engine.target_for(cfg.get("gateway_ip", "")) if cfg.get("gateway_ip") else None
+            wan_rows.append({
+                "id": wid, "name": cfg.get("name", wid), "interface": cfg.get("interface"),
+                "ip_pool": cfg.get("ip_pool"), "gateway_ip": cfg.get("gateway_ip"),
+                "status": live.get("status", "UNKNOWN"),
+                "rx_mbps": live.get("rx_mbps"), "tx_mbps": live.get("tx_mbps"),
+                # per-WAN quality = probes to that WAN's own gateway (null if it is not a probe target)
+                "latency_ms": gw["avg_rtt_ms"] if gw else None,
+                "packet_loss_pct": gw["packet_loss_pct"] if gw else None,
+                "jitter_ms": gw["jitter_ms"] if gw else None,
+                "priority": cfg.get("priority"), "committed_bandwidth_mbps": cfg.get("committed_bandwidth_mbps"),
+            })
 
-        # 9. Assembled Master Telemetry
+        floors = []
+        for fid, f in (iface.get("floors") or {}).items():
+            rx = f.get("rx_mbps")
+            floors.append({
+                "floor_id": fid, "floor_name": f.get("name", fid), "interfaces": f.get("interfaces", []),
+                "missing_interfaces": f.get("missing_interfaces", []),
+                "active_devices": f.get("devices"), "rx_mbps": rx, "tx_mbps": f.get("tx_mbps"),
+                "bandwidth_share_pct": round(rx / total_rx * 100, 1) if rx is not None and total_rx else None,
+                "primary_vlans": [v.get("name") for v in self.floor_cfg.get(fid, {}).get("vlans", [])],
+            })
+
+        router = iface.get("router") or {}
+        hw_age = time.time() - self.last_hardware_ping_ts if self.last_hardware_ping_ts else None
+        capacity = sum(float(w.get("committed_bandwidth_mbps") or 0) for w in self.wan_cfg.values()) or None
         return {
             "timestamp": datetime.now(timezone.utc).isoformat(),
-            "site_id": self.site_id,
-            "site_name": self.site_name,
-            "router_hostname": self.router_hostname,
-            "router_model": self.router_model,
-            "total_rx_mbps": total_rx,
-            "total_tx_mbps": total_tx,
-            "peak_throughput_capacity_mbps": 400.0,
-            "wan_interfaces": [
-                {
-                    "id": "wan1",
-                    "name": "Liquid Fibre ISP 1 (vlan 11)",
-                    "interface": "vlan11",
-                    "ip_pool": "102.33.102.218/29",
-                    "gateway_ip": "102.33.102.217",
-                    "status": "ONLINE" if wan1_online else "OFFLINE",
-                    "rx_mbps": wan1_data.get("rx_mbps", 0.0),
-                    "tx_mbps": wan1_data.get("tx_mbps", 0.0),
-                    "latency_ms": latency_ms,
-                    "packet_loss_pct": loss_pct,
-                    "jitter_ms": jitter_ms,
-                    "priority": 1,
-                    "committed_bandwidth_mbps": 200.0
-                },
-                {
-                    "id": "wan2",
-                    "name": "Liquid Fibre ISP 2 (ether9)",
-                    "interface": "ether9",
-                    "ip_pool": "41.169.150.194/29",
-                    "gateway_ip": "41.169.150.193",
-                    "status": "ONLINE" if wan2_online else "OFFLINE",
-                    "rx_mbps": wan2_data.get("rx_mbps", 0.0),
-                    "tx_mbps": wan2_data.get("tx_mbps", 0.0),
-                    "latency_ms": round(latency_ms + 1.2, 1),
-                    "packet_loss_pct": loss_pct,
-                    "jitter_ms": round(jitter_ms + 0.4, 1),
-                    "priority": 2,
-                    "committed_bandwidth_mbps": 200.0
-                }
-            ],
+            "site_id": self.site_id, "site_name": self.site_name,
+            "router_hostname": self.router_hostname, "router_model": router.get("board") or self.router_model,
+            "total_rx_mbps": total_rx, "total_tx_mbps": total_tx,
+            "peak_throughput_capacity_mbps": capacity,
+            "wan_interfaces": wan_rows,
             "floors": floors,
+            "unmapped_interfaces": iface.get("unmapped", []),
             "stability": {
-                "stability_score": stability["score"],
-                "status_label": stability["status_label"],
-                "packet_loss_avg_pct": loss_pct,
-                "jitter_avg_ms": jitter_ms,
-                "latency_avg_ms": latency_ms,
-                "uptime_seconds": 864000,
-                "failover_active": not wan1_online and wan2_online,
-                "active_wan_id": "wan1" if wan1_online else "wan2"
+                "stability_score": stability["score"], "status_label": stability["status_label"],
+                "packet_loss_avg_pct": loss, "jitter_avg_ms": jitter, "latency_avg_ms": latency,
+                "router_uptime_seconds": router.get("uptime_s"),
+                "sentinel_uptime_seconds": int(time.time() - self.started_at),
+                "failover_active": (w1 is False and w2 is True),
+                "active_wan_id": "wan1" if w1 else "wan2" if w2 else None,
             },
             "loadshedding": {
-                "area_id": ls_status.get("area_id"),
-                "area_name": ls_status.get("area_name"),
-                "current_stage": ls_status.get("current_stage", 0),
-                "is_currently_loadshedding": ls_status.get("is_currently_loadshedding", False),
-                "next_event": ls_status.get("next_event"),
-                "power_grid_health": ls_status.get("power_grid_health"),
-                "correlation_analysis": correlation
+                "available": ls.get("available", False), "reason": ls.get("reason"),
+                "area_id": ls.get("area_id"), "area_name": ls.get("area_name"),
+                "current_stage": ls.get("current_stage"),
+                "is_currently_loadshedding": ls.get("is_currently_loadshedding"),
+                "next_event": ls.get("next_event"), "power_grid_health": ls.get("power_grid_health"),
+                "correlation_analysis": correlation,
             },
             "speedtest": self.speedtest_engine.last_result,
-            "recent_threats": recent_threats,
-            "probe_targets": probe_data.get("targets", []),
+            "recent_threats": self.security_analyzer.get_recent_alerts(limit=5),
+            "probe_targets": probes.get("targets", []),
             "hardware_sentinel": {
-                "connected": (time.time() - self.last_hardware_ping_ts) < 15.0,
+                "connected": hw_age is not None and hw_age < 15.0,
                 "mains_power_ok": self.hardware_mains_ok,
-                "placement": "ALONGSIDE_ROUTER (Switch Mirror / Mgmt Port VLAN 200)"
-            }
+                "last_report_age_s": round(hw_age, 1) if hw_age is not None else None,
+            },
+            "data_sources": {
+                "router": {"status": iface.get("status"), "simulated": bool(iface.get("simulated")),
+                           "error": iface.get("error")},
+                "probes": {"probed": probes.get("probed"), "answered": probes.get("answered")},
+                "loadshedding": {"available": ls.get("available", False), "source": ls.get("source")},
+                "firewall_log": self.security_analyzer.stats(),
+                "speedtest": {"source": (self.speedtest_engine.last_result or {}).get("source"),
+                              "simulated": bool((self.speedtest_engine.last_result or {}).get("simulated"))},
+            },
         }

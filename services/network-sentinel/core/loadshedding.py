@@ -1,7 +1,8 @@
 import os
+import re
 import time
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Dict, Any, Optional
 import aiohttp
 
@@ -9,8 +10,10 @@ logger = logging.getLogger("sentinel.loadshedding")
 
 class LoadSheddingEngine:
     """
-    South African Eskom Load Shedding intelligence & power grid correlation engine.
-    Integrates with EskomSePush API for Sandton / Kelvin Drive area.
+    South African load-shedding status from the EskomSePush API (ESKOM_API_KEY)
+    and correlation of link problems with power. Without a key - or when the API
+    fails - the status is reported as unavailable (current_stage null), never
+    guessed: there is no built-in stage.
     """
     def __init__(self, config: Dict[str, Any]):
         self.config = config
@@ -22,14 +25,9 @@ class LoadSheddingEngine:
         self.api_key = os.getenv("ESKOM_API_KEY", "")
         self.base_url = self.ls_config.get("eskom_api_url", "https://developer.sepush.co.za/business/2.0")
         self.cache_ttl = self.ls_config.get("cache_ttl_seconds", 900)
-        self.mock_if_no_key = self.ls_config.get("mock_if_no_key", True)
-
         self._cached_data: Optional[Dict[str, Any]] = None
         self._last_fetch_time: float = 0.0
-
-        # Simulated stage state for development
-        self._mock_stage = 1
-        self._mock_active = False
+        self.last_error: Optional[str] = None
 
     async def get_loadshedding_status(self) -> Dict[str, Any]:
         """
@@ -53,13 +51,17 @@ class LoadSheddingEngine:
                             self._cached_data = parsed
                             self._last_fetch_time = now
                             return parsed
+                        self.last_error = f"EskomSePush HTTP {resp.status}"
             except Exception as e:
-                logger.warning(f"Failed to fetch from EskomSePush API: {e}. Using fallback model.")
+                self.last_error = f"EskomSePush: {type(e).__name__}: {e}"[:200]
+                logger.warning(self.last_error)
+            reason = self.last_error or "EskomSePush did not answer"
+        else:
+            reason = "set ESKOM_API_KEY (EskomSePush) to see the area's load-shedding status"
 
-        # Fallback / Mock generator
-        data = self._generate_mock_status()
+        data = self._unavailable(reason)
         self._cached_data = data
-        self._last_fetch_time = now
+        self._last_fetch_time = now - self.cache_ttl + 60     # retry an unavailable API after a minute
         return data
 
     def _parse_api_response(self, raw: Dict[str, Any]) -> Dict[str, Any]:
@@ -85,11 +87,14 @@ class LoadSheddingEngine:
                 now_dt = datetime.now(start_dt.tzinfo)
                 if start_dt <= now_dt <= end_dt:
                     is_active = True
-                    current_stage = int(first_event.get("note", "Stage 1").split()[-1])
-            except Exception:
+                    m = re.search(r"stage\s*(\d+)", str(first_event.get("note", "")), re.I)
+                    current_stage = int(m.group(1)) if m else None   # active, stage not stated
+            except (TypeError, ValueError):
                 pass
 
         return {
+            "available": True,
+            "source": "eskomsepush",
             "area_id": self.area_id,
             "area_name": area_name,
             "current_stage": current_stage,
@@ -99,33 +104,28 @@ class LoadSheddingEngine:
             "last_updated": datetime.now(timezone.utc).isoformat()
         }
 
-    def _generate_mock_status(self) -> Dict[str, Any]:
-        now_dt = datetime.now(timezone.utc)
-        # Schedule next slot 4 hours from now
-        next_start = (now_dt + timedelta(hours=3, minutes=15)).strftime("%Y-%m-%dT%H:00:00+02:00")
-        next_end = (now_dt + timedelta(hours=5, minutes=30)).strftime("%Y-%m-%dT%H:30:00+02:00")
-
+    def _unavailable(self, reason: str) -> Dict[str, Any]:
         return {
+            "available": False,
+            "source": "none",
+            "reason": reason,
             "area_id": self.area_id,
             "area_name": self.area_name,
-            "current_stage": self._mock_stage,
-            "is_currently_loadshedding": self._mock_active,
-            "next_event": {
-                "start": next_start,
-                "end": next_end,
-                "stage": f"Stage {self._mock_stage}"
-            },
-            "power_grid_health": "ALERT_STAGE_1" if self._mock_stage > 0 else "NORMAL",
+            "current_stage": None,
+            "is_currently_loadshedding": None,
+            "next_event": None,
+            "power_grid_health": "UNKNOWN",
             "last_updated": datetime.now(timezone.utc).isoformat()
         }
 
-    def correlate_link_issue(self, wan_status: str, packet_loss_pct: float, mains_power_ok: bool) -> Dict[str, Any]:
+    def correlate_link_issue(self, wan_status: str, packet_loss_pct: Optional[float], mains_power_ok: bool) -> Dict[str, Any]:
         """
         Correlates network stability events with power grid status.
         Distinguishes ISP fibre cuts from municipal power outages.
         """
-        ls_active = self._cached_data.get("is_currently_loadshedding", False) if self._cached_data else False
-        stage = self._cached_data.get("current_stage", 0) if self._cached_data else 0
+        known = bool(self._cached_data and self._cached_data.get("available"))
+        ls_active = bool(known and self._cached_data.get("is_currently_loadshedding"))
+        stage = self._cached_data.get("current_stage") if known else None
 
         if not mains_power_ok:
             return {
@@ -143,6 +143,14 @@ class LoadSheddingEngine:
                     "message": f"WAN offline during active Stage {stage} load shedding in Sandton. Local fibre pop may be on battery/inverter.",
                     "action": "Awaiting substation power restoration according to Eskom timetable."
                 }
+            elif not known:
+                return {
+                    "root_cause": "WAN_DOWN_CAUSE_UNKNOWN",
+                    "severity": "CRITICAL",
+                    "message": "WAN is down and mains power is reported normal; load-shedding status is unknown "
+                               "(no EskomSePush data), so an area outage cannot be ruled out.",
+                    "action": "Check the area's load-shedding schedule, then escalate to the ISP NOC."
+                }
             else:
                 return {
                     "root_cause": "ISP_FIBRE_PHYSICAL_BREAK",
@@ -151,7 +159,15 @@ class LoadSheddingEngine:
                     "action": "Escalate priority ticket to Liquid Intelligent Technologies NOC."
                 }
 
-        if packet_loss_pct > 15.0:
+        if wan_status == "UNKNOWN":
+            return {
+                "root_cause": "NO_ROUTER_DATA",
+                "severity": "INFO",
+                "message": "WAN state unknown: the router's REST API is not configured or not reachable.",
+                "action": "Configure MIKROTIK_HOST / MIKROTIK_USER / MIKROTIK_PASSWORD for a read-only REST user."
+            }
+
+        if packet_loss_pct is not None and packet_loss_pct > 15.0:
             return {
                 "root_cause": "ISP_PEERING_OR_CONGESTION",
                 "severity": "WARNING",
@@ -162,6 +178,7 @@ class LoadSheddingEngine:
         return {
             "root_cause": "ALL_SYSTEMS_OPTIMAL",
             "severity": "NORMAL",
-            "message": "Power grid stable. Both Liquid Fibre uplinks operating within SLA.",
+            "message": "Mains power normal and the WAN links are up." + ("" if known else
+                       " (load-shedding status unknown - no EskomSePush data)"),
             "action": "No action required."
         }

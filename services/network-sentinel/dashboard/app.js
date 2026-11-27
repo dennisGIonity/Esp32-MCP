@@ -96,80 +96,94 @@ function connectWebSocket() {
     };
 }
 
-// Update DOM with Telemetry Data
+// Update DOM with Telemetry Data.
+// Every value can be null (the sentinel never invents numbers): show "—" for unknown.
+// Text from the router (firewall log) is external input: set it with textContent, never innerHTML.
+const num = (v, d = 1) => (typeof v === 'number' && isFinite(v) ? v.toFixed(d) : '—');
+const setText = (id, text) => { const el = document.getElementById(id); if (el) el.textContent = text; };
+function cell(text, style) {
+    const td = document.createElement('td');
+    td.textContent = text;
+    if (style) td.style.cssText = style;
+    return td;
+}
+
 function updateDashboard(data) {
     if (!data) return;
+    const src = data.data_sources || {};
+    const routerSrc = src.router || {};
+
+    // 0. Data-source banner: say plainly when the router is not feeding us, or when data is simulated
+    let banner = document.getElementById('data-source-banner');
+    if (!banner) {
+        banner = document.createElement('div');
+        banner.id = 'data-source-banner';
+        banner.style.cssText = 'padding:.5rem 1rem;font-size:.85rem;font-weight:600;text-align:center;';
+        document.body.prepend(banner);
+    }
+    if (routerSrc.simulated) {
+        banner.textContent = 'SIMULATED router data (mikrotik_connection.simulate_if_offline = true) - not measurements';
+        banner.style.background = 'rgba(255,80,80,.25)';
+        banner.hidden = false;
+    } else if (routerSrc.status && routerSrc.status !== 'LIVE') {
+        banner.textContent = `Router data ${routerSrc.status}: ${routerSrc.error || ''}`;
+        banner.style.background = 'rgba(255,190,60,.22)';
+        banner.hidden = false;
+    } else {
+        banner.hidden = true;
+    }
 
     // 1. Top Metrics
     const stab = data.stability || {};
     const scoreEl = document.getElementById('val-stability-score');
     const statusEl = document.getElementById('val-stability-status');
-    if (scoreEl && stab.stability_score !== undefined) {
-        scoreEl.innerText = stab.stability_score.toFixed(1);
-        statusEl.innerText = `${stab.status_label} (${(stab.packet_loss_avg_pct || 0).toFixed(1)}% Loss)`;
-        
-        // Color coding
-        if (stab.stability_score >= 90) {
-            scoreEl.style.color = 'var(--accent-emerald)';
-            statusEl.style.color = 'var(--accent-emerald)';
-        } else if (stab.stability_score >= 70) {
-            scoreEl.style.color = 'var(--accent-amber)';
-            statusEl.style.color = 'var(--accent-amber)';
-        } else {
-            scoreEl.style.color = 'var(--accent-rose)';
-            statusEl.style.color = 'var(--accent-rose)';
-        }
+    if (scoreEl && statusEl) {
+        const s = stab.stability_score;
+        scoreEl.textContent = num(s);
+        statusEl.textContent = `${stab.status_label || 'NO_DATA'} (${num(stab.packet_loss_avg_pct)}% Loss)`;
+        const color = typeof s !== 'number' ? 'var(--text-dim)'
+            : s >= 90 ? 'var(--accent-emerald)' : s >= 70 ? 'var(--accent-amber)' : 'var(--accent-rose)';
+        scoreEl.style.color = color;
+        statusEl.style.color = color;
     }
+    setText('val-total-rx', num(data.total_rx_mbps));
+    setText('val-total-tx', num(data.total_tx_mbps));
+    setText('val-latency', num(stab.latency_avg_ms));
+    setText('val-jitter', `Jitter: ${num(stab.jitter_avg_ms)} ms | Loss: ${num(stab.packet_loss_avg_pct)}%`);
 
-    document.getElementById('val-total-rx').innerText = (data.total_rx_mbps || 0).toFixed(1);
-    document.getElementById('val-total-tx').innerText = (data.total_tx_mbps || 0).toFixed(1);
-    
-    if (stab.latency_avg_ms) {
-        document.getElementById('val-latency').innerText = stab.latency_avg_ms.toFixed(1);
-    }
-    if (stab.jitter_avg_ms) {
-        document.getElementById('val-jitter').innerText = `Jitter: ${stab.jitter_avg_ms.toFixed(1)} ms | Loss: ${(stab.packet_loss_avg_pct || 0).toFixed(1)}%`;
-    }
-
-    // 2. Hardware / Mains Status
+    // 2. Hardware / Mains Status (null = no ESP32 sentinel report yet)
     const hw = data.hardware_sentinel || {};
     const mainsPill = document.getElementById('mains-power-pill');
-    const mainsText = document.getElementById('mains-status-text');
-    if (mainsPill && hw.mains_power_ok !== undefined) {
-        if (hw.mains_power_ok) {
+    if (mainsPill) {
+        if (hw.mains_power_ok === true) {
             mainsPill.className = 'status-pill';
-            mainsText.innerText = 'MAINS 230V AC OK';
-        } else {
+            setText('mains-status-text', 'MAINS 230V AC OK');
+        } else if (hw.mains_power_ok === false) {
             mainsPill.className = 'status-pill danger';
-            mainsText.innerText = 'GRID POWER LOSS (UPS ACTIVE)';
+            setText('mains-status-text', 'GRID POWER LOSS (UPS ACTIVE)');
+        } else {
+            mainsPill.className = 'status-pill';
+            setText('mains-status-text', 'MAINS: NO SENTINEL REPORT');
         }
     }
 
     // 3. WAN Interfaces
     const wans = data.wan_interfaces || [];
-    const wan1 = wans.find(w => w.id === 'wan1') || {};
-    const wan2 = wans.find(w => w.id === 'wan2') || {};
-
-    if (wan1.rx_mbps !== undefined) {
-        document.getElementById('wan1-rx').innerText = `${wan1.rx_mbps.toFixed(1)} Mbps`;
-        document.getElementById('wan1-tx').innerText = `${wan1.tx_mbps.toFixed(1)} Mbps`;
-        const b1 = document.getElementById('wan1-badge');
-        b1.innerText = wan1.status;
-        b1.className = `wan-badge ${wan1.status === 'ONLINE' ? 'badge-online' : 'badge-offline'}`;
+    for (const id of ['wan1', 'wan2']) {
+        const w = wans.find(x => x.id === id) || {};
+        setText(`${id}-rx`, `${num(w.rx_mbps)} Mbps`);
+        setText(`${id}-tx`, `${num(w.tx_mbps)} Mbps`);
+        const b = document.getElementById(`${id}-badge`);
+        if (b) {
+            b.textContent = w.status || 'UNKNOWN';
+            b.className = `wan-badge ${w.status === 'ONLINE' ? 'badge-online' : 'badge-offline'}`;
+        }
     }
 
-    if (wan2.rx_mbps !== undefined) {
-        document.getElementById('wan2-rx').innerText = `${wan2.rx_mbps.toFixed(1)} Mbps`;
-        document.getElementById('wan2-tx').innerText = `${wan2.tx_mbps.toFixed(1)} Mbps`;
-        const b2 = document.getElementById('wan2-badge');
-        b2.innerText = wan2.status;
-        b2.className = `wan-badge ${wan2.status === 'ONLINE' ? 'badge-online' : 'badge-offline'}`;
-    }
-
-    // 4. Update Chart
-    if (trafficChart && data.total_rx_mbps !== undefined) {
-        rxDataPoints.push(data.total_rx_mbps);
-        txDataPoints.push(data.total_tx_mbps);
+    // 4. Chart: only measured points (a gap, not a fake zero, when the router is silent)
+    if (trafficChart) {
+        rxDataPoints.push(typeof data.total_rx_mbps === 'number' ? data.total_rx_mbps : null);
+        txDataPoints.push(typeof data.total_tx_mbps === 'number' ? data.total_tx_mbps : null);
         if (rxDataPoints.length > maxChartPoints) {
             rxDataPoints.shift();
             txDataPoints.shift();
@@ -180,62 +194,98 @@ function updateDashboard(data) {
     // 5. Floor Breakdown
     const floorsContainer = document.getElementById('floor-list-container');
     if (floorsContainer && data.floors) {
-        floorsContainer.innerHTML = '';
-        data.floors.forEach(f => {
-            const share = f.bandwidth_share_pct || 0;
+        floorsContainer.replaceChildren();
+        if (!data.floors.length) {
+            const p = document.createElement('p');
+            p.style.color = 'var(--text-dim)';
+            p.textContent = 'No floors mapped yet - set floor_interfaces in config.yaml.';
+            floorsContainer.appendChild(p);
+        }
+        for (const f of data.floors) {
+            const share = typeof f.bandwidth_share_pct === 'number' ? f.bandwidth_share_pct : 0;
             const row = document.createElement('div');
             row.className = 'floor-row';
-            row.innerHTML = `
-                <div class="floor-info">
-                    <span style="font-weight: 600;">${f.floor_name} <span style="font-size: 0.75rem; color: var(--text-dim);">(${f.active_devices} hosts)</span></span>
-                    <span style="font-family: var(--font-mono); color: var(--accent-cyan);">${f.rx_mbps.toFixed(1)} Mbps (${share}%)</span>
-                </div>
-                <div class="floor-bar-bg">
-                    <div class="floor-bar-fill" style="width: ${Math.min(100, share)}%;"></div>
-                </div>
-            `;
+            const info = document.createElement('div');
+            info.className = 'floor-info';
+            const name = document.createElement('span');
+            name.style.fontWeight = '600';
+            const hosts = typeof f.active_devices === 'number' ? `${f.active_devices} hosts` :
+                (f.interfaces && f.interfaces.length ? 'hosts: —' : 'not mapped');
+            name.textContent = `${f.floor_name} (${hosts})`;
+            const rate = document.createElement('span');
+            rate.style.cssText = 'font-family: var(--font-mono); color: var(--accent-cyan);';
+            rate.textContent = `${num(f.rx_mbps)} Mbps (${num(f.bandwidth_share_pct)}%)`;
+            info.append(name, rate);
+            const bg = document.createElement('div');
+            bg.className = 'floor-bar-bg';
+            const fill = document.createElement('div');
+            fill.className = 'floor-bar-fill';
+            fill.style.width = `${Math.min(100, share)}%`;
+            bg.appendChild(fill);
+            row.append(info, bg);
             floorsContainer.appendChild(row);
-        });
+        }
     }
 
-    // 6. Eskom Load Shedding
+    // 6. Load shedding (EskomSePush) - "unavailable" without an API key
     const ls = data.loadshedding || {};
     const stageBadge = document.getElementById('ls-stage-badge');
-    if (stageBadge && ls.current_stage !== undefined) {
-        stageBadge.innerText = `STAGE ${ls.current_stage}`;
-        stageBadge.className = ls.current_stage === 0 ? 'stage-badge stage-0' : 'stage-badge';
+    if (stageBadge) {
+        if (!ls.available) {
+            stageBadge.textContent = 'STAGE —';
+            stageBadge.className = 'stage-badge stage-0';
+            stageBadge.title = ls.reason || 'load-shedding data unavailable';
+        } else {
+            stageBadge.textContent = `STAGE ${ls.current_stage === null || ls.current_stage === undefined ? '?' : ls.current_stage}`;
+            stageBadge.className = ls.current_stage === 0 ? 'stage-badge stage-0' : 'stage-badge';
+            stageBadge.title = '';
+        }
     }
-    if (ls.area_name) {
-        document.getElementById('ls-area-label').innerText = ls.area_name;
-    }
-    if (ls.next_event) {
-        document.getElementById('ls-schedule-label').innerText = `Scheduled Slot: ${ls.next_event.start || ''} (${ls.next_event.stage || 'Stage 1'})`;
-    }
+    if (ls.area_name) setText('ls-area-label', ls.area_name);
+    setText('ls-schedule-label', ls.next_event
+        ? `Next slot: ${ls.next_event.start || '?'} - ${ls.next_event.end || '?'} ${ls.next_event.note || ''}`
+        : (ls.available ? 'No upcoming slot' : (ls.reason || 'Load-shedding data unavailable')));
     if (ls.correlation_analysis) {
         const corr = ls.correlation_analysis;
-        document.getElementById('correlation-box-content').innerHTML = `
-            <b>Correlation Engine [${corr.severity}]:</b> ${corr.message} 
-            <br><span style="color: var(--accent-cyan); font-size: 0.8rem;">Action: ${corr.action}</span>
-        `;
+        const box = document.getElementById('correlation-box-content');
+        if (box) {
+            const head = document.createElement('b');
+            head.textContent = `Correlation Engine [${corr.severity}]: `;
+            const action = document.createElement('span');
+            action.style.cssText = 'color: var(--accent-cyan); font-size: 0.8rem;';
+            action.textContent = `Action: ${corr.action}`;
+            box.replaceChildren(head, document.createTextNode(corr.message || ''), document.createElement('br'), action);
+        }
     }
 
-    // 7. Security Threats
+    // 7. Security Threats (from the router's firewall log)
     const threatBody = document.getElementById('threat-table-body');
     if (threatBody && data.recent_threats) {
-        threatBody.innerHTML = '';
-        data.recent_threats.forEach(t => {
+        threatBody.replaceChildren();
+        if (!data.recent_threats.length) {
             const tr = document.createElement('tr');
-            const timeStr = t.timestamp ? new Date(t.timestamp).toLocaleTimeString() : '--:--';
-            const sevClass = t.severity === 'CRITICAL' || t.severity === 'HIGH' ? 'threat-high' : 'threat-med';
-            tr.innerHTML = `
-                <td style="color: var(--text-dim);">${timeStr}</td>
-                <td><b style="color: var(--accent-cyan);">${t.attacker_ip}</b></td>
-                <td>${t.blocked_service} (${t.target_port})</td>
-                <td><span class="threat-badge ${sevClass}">${t.severity}</span></td>
-                <td style="color: var(--accent-rose);">${t.action_taken}</td>
-            `;
+            const td = cell(routerSrc.status === 'LIVE'
+                ? 'No blocked-port drops in the router log (rules need log=yes).'
+                : 'No router log available.', 'color: var(--text-dim);');
+            td.colSpan = 5;
+            tr.appendChild(td);
             threatBody.appendChild(tr);
-        });
+        }
+        for (const t of data.recent_threats) {
+            const tr = document.createElement('tr');
+            const d = t.timestamp ? new Date(t.timestamp) : null;
+            const timeStr = d && !isNaN(d) ? d.toLocaleTimeString() : (t.timestamp || '--:--');
+            const sev = document.createElement('td');
+            const badge = document.createElement('span');
+            badge.className = `threat-badge ${t.severity === 'CRITICAL' || t.severity === 'HIGH' ? 'threat-high' : 'threat-med'}`;
+            badge.textContent = t.severity;
+            sev.appendChild(badge);
+            tr.append(cell(timeStr, 'color: var(--text-dim);'),
+                cell(t.attacker_ip, 'color: var(--accent-cyan); font-weight: 700;'),
+                cell(`${t.blocked_service} (${t.target_port})`), sev,
+                cell(t.action_taken, 'color: var(--accent-rose);'));
+            threatBody.appendChild(tr);
+        }
     }
 }
 

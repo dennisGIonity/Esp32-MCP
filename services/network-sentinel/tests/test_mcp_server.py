@@ -6,6 +6,10 @@ from core.loadshedding import LoadSheddingEngine
 from core.speedtest_engine import SpeedtestEngine
 from core.security_analyzer import SecurityAnalyzer
 from core.traffic_analyzer import TrafficAnalyzer
+
+
+async def fake_prober(ip, method, timeout):
+    return None          # offline test: no network, a failed probe is a failure
 from mcp.mcp_server import SentinelMCPServer
 
 class TestMCPServer(unittest.TestCase):
@@ -14,10 +18,10 @@ class TestMCPServer(unittest.TestCase):
             "site": {"id": "test-site", "name": "Kelvin Drive"},
             "network": {},
             "sentinel": {"ping_targets": [{"name": "DNS", "ip": "8.8.8.8"}]},
-            "loadshedding": {"mock_if_no_key": True}
+            "loadshedding": {}
         }
         self.collector = MikroTikCollector(self.config)
-        self.probe = ProbeEngine(self.config)
+        self.probe = ProbeEngine(self.config, prober=fake_prober)
         self.ls = LoadSheddingEngine(self.config)
         self.st = SpeedtestEngine(self.config)
         self.sec = SecurityAnalyzer(self.config)

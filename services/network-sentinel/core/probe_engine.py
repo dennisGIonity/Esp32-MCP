@@ -1,130 +1,126 @@
+"""
+AEDI - IONITY GLOBAL | Network sentinel | core/probe_engine.py   Policy 986 AED
+(c) 2018-2026 Antwerp Designs | Ionity (Pty) Ltd | Ionity Global (Pty) Ltd
+
+Latency, jitter and loss to the configured targets (WAN gateways, resolvers),
+measured - never invented:
+
+  method icmp     one ICMP echo per round (core/icmp.py)
+  method tcp:<p>  TCP connect time to port p (no privileges needed)
+  method auto     ICMP; if this host may not send ICMP, tcp:53 (default)
+
+A failed probe is a failure (rtt null, counted as loss). Jitter is the standard
+deviation of real samples and is null until there are two of them; overall
+latency is null when nothing answered.
+"""
+from __future__ import annotations
+
 import asyncio
-import time
-import random
-import statistics
 import logging
-from typing import Dict, List, Any
+import statistics
+import time
+from typing import Any, Awaitable, Callable
+
+from core import icmp
 
 logger = logging.getLogger("sentinel.probes")
 
+Prober = Callable[[str, str, float], Awaitable[float | None]]
+
+
+async def _tcp_rtt(ip: str, port: int, timeout: float) -> float | None:
+    t0 = time.perf_counter()
+    try:
+        _r, w = await asyncio.wait_for(asyncio.open_connection(ip, port), timeout=timeout)
+    except (OSError, asyncio.TimeoutError):
+        return None
+    rtt = (time.perf_counter() - t0) * 1000.0
+    w.close()
+    try:
+        await w.wait_closed()
+    except OSError:
+        pass
+    return rtt
+
+
 class ProbeEngine:
-    """
-    Sub-second active and passive latency, jitter, and packet loss prober.
-    Monitors WAN1 gateway, WAN2 gateway, and DNS resolvers.
-    """
-    def __init__(self, config: Dict[str, Any]):
-        self.config = config
-        self.sentinel_cfg = config.get("sentinel", {})
-        self.targets = self.sentinel_cfg.get("ping_targets", [
-            {"name": "Google DNS", "ip": "8.8.8.8"},
-            {"name": "Cloudflare DNS", "ip": "1.1.1.1"},
-            {"name": "Liquid ISP Gateway 1", "ip": "102.33.102.217"},
-            {"name": "Liquid ISP Gateway 2", "ip": "41.169.150.193"},
-        ])
-        
-        # History buffers for calculating rolling jitter & loss
-        self.rtt_history: Dict[str, List[float]] = {t["ip"]: [] for t in self.targets}
-        self.loss_history: Dict[str, List[bool]] = {t["ip"]: [] for t in self.targets}
-        self.max_history_samples = 30
+    def __init__(self, config: dict[str, Any], prober: Prober | None = None):
+        s = config.get("sentinel", {})
+        self.targets: list[dict[str, Any]] = list(s.get("ping_targets") or [])
+        self.default_method = str(s.get("probe_method", "auto"))
+        self.timeout_s = float(s.get("probe_timeout_seconds", 1.0))
+        self.max_history_samples = int(s.get("probe_history", 30))
+        self._icmp_ok: bool | None = None          # learned on the first auto probe
+        self._prober = prober or self._probe
+        self.rtt_history: dict[str, list[float]] = {t["ip"]: [] for t in self.targets}
+        self.loss_history: dict[str, list[bool]] = {t["ip"]: [] for t in self.targets}
+        self.methods: dict[str, str] = {}
 
-    async def probe_target(self, ip: str, port: int = 53, timeout: float = 1.0) -> Dict[str, Any]:
-        """
-        Performs high-speed socket TCP/DNS probe to measure precise round-trip latency.
-        """
-        start = time.perf_counter()
-        success = False
-        rtt_ms = 0.0
+    async def _probe(self, ip: str, method: str, timeout: float) -> float | None:
+        if method.startswith("tcp:"):
+            self.methods[ip] = method
+            return await _tcp_rtt(ip, int(method[4:]), timeout)
+        if method in ("icmp", "auto") and self._icmp_ok is not False:
+            try:
+                rtt = await asyncio.to_thread(icmp.echo, ip, timeout)
+                self._icmp_ok = True
+                self.methods[ip] = "icmp"
+                return rtt
+            except icmp.IcmpNotPermitted:
+                if method == "icmp":
+                    raise
+                self._icmp_ok = False
+                logger.warning("ICMP not permitted on this host - probing with tcp:53 instead")
+        self.methods[ip] = "tcp:53"
+        return await _tcp_rtt(ip, 53, timeout)
 
+    async def probe_target(self, ip: str, method: str | None = None) -> dict[str, Any]:
         try:
-            # Socket connection attempt
-            reader, writer = await asyncio.wait_for(
-                asyncio.open_connection(ip, port),
-                timeout=timeout
-            )
-            rtt_ms = (time.perf_counter() - start) * 1000.0
-            success = True
-            writer.close()
-            await writer.wait_closed()
-        except Exception:
-            # Fallback simulated response with realistic low latency for South African fibre
-            # (8-18ms typical to local Liquid CDN / JINX)
-            success = random.random() > 0.005 # 99.5% success
-            if success:
-                rtt_ms = random.uniform(7.5, 14.5) if "8.8.8.8" in ip or "1.1.1.1" in ip else random.uniform(3.0, 8.0)
-            else:
-                rtt_ms = 999.0
+            rtt = await self._prober(ip, method or self.default_method, self.timeout_s)
+        except icmp.IcmpNotPermitted as e:
+            logger.error("%s: %s", ip, e)
+            rtt = None
+        ok = rtt is not None
+        rh = self.rtt_history.setdefault(ip, [])
+        lh = self.loss_history.setdefault(ip, [])
+        if ok:
+            rh.append(rtt)
+            del rh[:-self.max_history_samples]
+        lh.append(ok)
+        del lh[:-self.max_history_samples]
+        return {"ip": ip, "success": ok, "rtt_ms": round(rtt, 2) if ok else None}
 
-        # Store in rolling buffer
-        if ip not in self.rtt_history:
-            self.rtt_history[ip] = []
-            self.loss_history[ip] = []
+    def _stats(self, ip: str) -> tuple[float | None, float | None, float | None]:
+        rh, lh = self.rtt_history.get(ip, []), self.loss_history.get(ip, [])
+        avg = round(sum(rh) / len(rh), 2) if rh else None
+        jitter = round(statistics.stdev(rh), 2) if len(rh) >= 2 else None
+        loss = round(lh.count(False) / len(lh) * 100.0, 1) if lh else None
+        return avg, jitter, loss
 
-        if success:
-            self.rtt_history[ip].append(rtt_ms)
-        self.loss_history[ip].append(success)
-
-        if len(self.rtt_history[ip]) > self.max_history_samples:
-            self.rtt_history[ip].pop(0)
-        if len(self.loss_history[ip]) > self.max_history_samples:
-            self.loss_history[ip].pop(0)
-
+    async def run_all_probes(self) -> dict[str, Any]:
+        results = await asyncio.gather(*(self.probe_target(t["ip"], t.get("method")) for t in self.targets))
+        rows = []
+        for t, r in zip(self.targets, results):
+            avg, jitter, loss = self._stats(t["ip"])
+            rows.append({"name": t.get("name", t["ip"]), "ip": t["ip"], "method": self.methods.get(t["ip"]),
+                         "rtt_ms": r["rtt_ms"], "avg_rtt_ms": avg, "jitter_ms": jitter, "packet_loss_pct": loss,
+                         "status": "ONLINE" if r["success"] else "OFFLINE"})
+        ok = [r["rtt_ms"] for r in rows if r["rtt_ms"] is not None]
+        losses = [r["packet_loss_pct"] for r in rows if r["packet_loss_pct"] is not None]
+        jitters = [r["jitter_ms"] for r in rows if r["jitter_ms"] is not None]
         return {
-            "ip": ip,
-            "success": success,
-            "rtt_ms": round(rtt_ms, 2)
+            "targets": rows,
+            "overall_latency_ms": round(sum(ok) / len(ok), 2) if ok else None,
+            "overall_jitter_ms": round(sum(jitters) / len(jitters), 2) if jitters else None,
+            "overall_loss_pct": round(sum(losses) / len(losses), 1) if losses else None,
+            "probed": len(rows),
+            "answered": len(ok),
+            "timestamp": time.time(),
         }
 
-    async def run_all_probes(self) -> Dict[str, Any]:
-        """
-        Executes parallel probes to all configured targets and calculates stability metrics.
-        """
-        tasks = [self.probe_target(t["ip"]) for t in self.targets]
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-
-        target_metrics = []
-        all_rtts = []
-        total_probes = 0
-        failed_probes = 0
-
-        for idx, res in enumerate(results):
-            t_info = self.targets[idx]
-            if isinstance(res, dict):
-                ip = res["ip"]
-                rtt = res["rtt_ms"]
-                success = res["success"]
-                
-                # Rolling stats
-                history = self.rtt_history.get(ip, [rtt])
-                avg_rtt = round(sum(history) / len(history), 2) if history else rtt
-                jitter = round(statistics.stdev(history), 2) if len(history) >= 2 else round(random.uniform(0.8, 2.2), 2)
-                
-                l_history = self.loss_history.get(ip, [success])
-                loss_pct = round((l_history.count(False) / len(l_history)) * 100.0, 1) if l_history else 0.0
-
-                target_metrics.append({
-                    "name": t_info["name"],
-                    "ip": ip,
-                    "rtt_ms": rtt if success else None,
-                    "avg_rtt_ms": avg_rtt,
-                    "jitter_ms": jitter,
-                    "packet_loss_pct": loss_pct,
-                    "status": "ONLINE" if success else "OFFLINE"
-                })
-
-                if success:
-                    all_rtts.append(rtt)
-                else:
-                    failed_probes += 1
-                total_probes += 1
-
-        overall_loss_pct = round((failed_probes / total_probes) * 100.0, 1) if total_probes > 0 else 0.0
-        overall_latency = round(sum(all_rtts) / len(all_rtts), 2) if all_rtts else 999.0
-        overall_jitter = round(statistics.stdev(all_rtts), 2) if len(all_rtts) >= 2 else round(random.uniform(1.2, 2.5), 2)
-
-        return {
-            "targets": target_metrics,
-            "overall_latency_ms": overall_latency,
-            "overall_jitter_ms": overall_jitter,
-            "overall_loss_pct": overall_loss_pct,
-            "timestamp": time.time()
-        }
+    def target_for(self, ip: str) -> dict[str, Any] | None:
+        """Latest stats for one target (e.g. a WAN gateway), or None if it is not probed."""
+        if not any(t["ip"] == ip for t in self.targets):
+            return None
+        avg, jitter, loss = self._stats(ip)
+        return {"avg_rtt_ms": avg, "jitter_ms": jitter, "packet_loss_pct": loss}
