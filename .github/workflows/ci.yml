@@ -98,17 +98,21 @@ jobs:
 
   firmware-host:
     name: firmware 3 host tests (ASan/UBSan, TSan, fuzz, TS<->C++ interop)
-    runs-on: ubuntu-latest
-    container: espressif/idf:v5.5.5
+    # On the runner itself, not in the IDF container: ThreadSanitizer needs vm.mmap_rnd_bits <= 28
+    # (it aborts with "unexpected memory mapping" otherwise), and only the host can set that.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
-        with: { node-version: 22 }
-      - run: apt-get update && apt-get install -y --no-install-recommends g++ ninja-build cmake
+        with: { node-version: 22, cache: npm }
+      - run: sudo sysctl -w vm.mmap_rnd_bits=28
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ninja-build
+      # The tests need only ESP-IDF's cJSON: the same release ESP-IDF 5.5 bundles (1.7.18)
+      - run: git clone -q --depth 1 -b v1.7.18 https://github.com/DaveGamble/cJSON "$RUNNER_TEMP/idf/components/json/cJSON"
       - run: npm ci
         env: { PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1" }
       - run: firmware/esp32-node/test/run.sh
-        env: { BUILD_DIR: /tmp/fw-build, FUZZ_ITERATIONS: "20000" }
+        env: { IDF_PATH: "${{ runner.temp }}/idf", BUILD_DIR: /tmp/fw-build, FUZZ_ITERATIONS: "20000" }
 
   firmware-build:
     name: firmware 3 release images (S3 + C6, UART + native USB)
