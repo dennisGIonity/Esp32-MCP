@@ -456,8 +456,18 @@ try {
       check(lap.length >= 1 && lap.every((t) => /laptop|192\.168\.0\.43/.test(t)), `device filter (${lap.length})`);
       await page.getByTestId('filter-device').fill('');
       await page.getByTestId('filter-domain').fill('googlevideo');
-      await page.getByRole('button', { name: 'Search history' }).click();
-      await page.locator('[data-testid=dns-history] [data-testid=dns-row]').first().waitFor({ timeout: 10_000 });
+      // The live feed shows a query before the host's write queue has stored it; history reads the
+      // database, so search again until the rows are there (seen as a ~1-in-3 flake on CI runners).
+      const historyRow = page.locator('[data-testid=dns-history] [data-testid=dns-row]').first();
+      for (let attempt = 1; ; attempt++) {
+        await page.getByRole('button', { name: 'Search history' }).click();
+        try {
+          await historyRow.waitFor({ timeout: 2_500 });
+          break;
+        } catch (e) {
+          if (attempt >= 6) throw e;
+        }
+      }
       await page.getByTestId('filter-domain').fill('');
       await axeCheck(page, 'S6-network');
       await page.screenshot({ path: join(out, 'S6-network.png'), fullPage: true });
