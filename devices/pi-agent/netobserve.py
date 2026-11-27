@@ -570,9 +570,11 @@ class NetObserve:
         if hit is not None:
             resp = data[:2] + hit[2:12] + data[12:q_end] + hit[q_end:] if len(hit) >= q_end else None
             if resp is not None:
-                self._send_client(resp, addr)
+                # Book-keeping BEFORE the reply: a client that asks again, or reads the
+                # counters / log right after the answer, must already see this query.
                 self.stats["cacheHits"] += 1
                 self._record(ip, qname, qtype, 0, 0.0, P.DNSQ_CACHED)
+                self._send_client(resp, addr)
                 return
         if len(self.pending) >= PENDING_MAX:
             self.stats["dropped"] += 1
@@ -618,15 +620,17 @@ class NetObserve:
         st[0] += 1
         st[2] += (latency - st[2]) / min(st[0], 64)
         resp = p.orig_id + data[2:]
-        self._send_client(resp, p.client)
         self.stats["forwarded"] += 1
         try:
             rcode, an, tc, ttl = response_info(data)
         except DnsParseError:
             rcode, an, tc, ttl = 2, 0, False, -1
+        # Cache + log BEFORE the reply: the client's next question (often immediate) must hit
+        # the cache, and the query must already be in the log when the answer arrives.
         if rcode == 0 and an > 0 and not tc and ttl >= 0:
             self._cache_put(p.qname, p.qtype, 1, data, ttl)
         self._record(p.client[0], p.qname, p.qtype, rcode, latency, P.DNSQ_TRUNCATED if tc else 0)
+        self._send_client(resp, p.client)
 
     def _expire(self) -> None:
         now = time.monotonic()
@@ -637,8 +641,8 @@ class NetObserve:
                 self.stats["upstreamFail"] += 1
                 up = self.upstreams[p.up_idx % len(self.upstreams)]
                 self.up_stats[up][1] += 1
-                self._send_client(servfail_for(p.query, p.q_end), p.client)
                 self._record(p.client[0], p.qname, p.qtype, 2, age * 1000.0, P.DNSQ_UPSTREAM_FAILED)
+                self._send_client(servfail_for(p.query, p.q_end), p.client)
             elif p.tries == 1 and now - p.sent >= RETRY_AFTER_S:
                 self.up_stats[self.upstreams[p.up_idx % len(self.upstreams)]][1] += 1
                 p.up_idx += 1                      # second upstream (or the same one again)
