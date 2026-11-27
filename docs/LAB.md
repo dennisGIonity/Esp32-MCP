@@ -136,6 +136,19 @@ These are baked into the code now, but worth knowing:
    once reported success by matching a stale row. It now requires a reading
    that arrived after the reset.
 
+## Live check with real boards (v3)
+
+`tools/scripts/live_check.py` walks the boardroom proof of concept step by step against the running
+fleet host and records PASS / FAIL / SKIP with evidence in `live_check_<time>.json`. It changes nothing by
+itself; the router, phone and broker steps are yours and it waits for Enter (or `s` to skip).
+
+1. Start the lab (`START.cmd`), flash firmware 3.2 (portal `/portal/`), provision the board.
+2. `python tools\scripts\live_check.py --gateway 192.168.0.1` (add `--node <hwid>` with several boards;
+   `IONITY_ADMIN_TOKEN` if one is set).
+3. When asked: set a phone's Wi-Fi DNS to the board's IP (or the router's DHCP DNS, if you have changed it),
+   open YouTube, then say whether the red LED is on.
+4. When asked: stop the broker, wait 20 s, start it; the board must come back by itself (back-off 1-60 s).
+
 ## Still open
 
 | Item | Needs |

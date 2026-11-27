@@ -53,8 +53,9 @@ count live in `/var/lib/ionity-agent/state.json`. If no broker can be reached, t
 | `set_watchlist`, `get_watchlist` | the domain watchlist (persisted, survives restarts) |
 | `get_network_stats`, `get_local_devices`, `query_dns_log` | forwarder counters per upstream, LAN client table, recent queries |
 | `scan_lan`, `flush_dns_cache` | ARP sweep of the /24 (no root needed), empty the answer cache |
+| `ping_host` (2.1) | ICMP echo from the Pi (`pinger.py`): unprivileged ICMP socket, raw socket as fallback, `not_permitted` otherwise - never `subprocess ping`. Raspberry Pi OS allows unprivileged ICMP by default (`net.ipv4.ping_group_range`) |
 
-The DNS tools appear only with `dns_mode = forward`.
+The DNS tools appear only with `dns_mode = forward`; `ping_host` is always offered.
 
 ## The Pi as LAN DNS forwarder
 

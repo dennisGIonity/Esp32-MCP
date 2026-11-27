@@ -114,7 +114,12 @@ void EspTelemetrySource::begin(const Identity& id, const Hooks& hooks, int adcGp
     hooks_ = hooks;
 
     temperature_sensor_handle_t ts = nullptr;
-    const temperature_sensor_config_t tcfg = TEMPERATURE_SENSOR_CONFIG_DEFAULT(-10, 80);
+    // Fields set one by one: TEMPERATURE_SENSOR_CONFIG_DEFAULT leaves `flags` out, which is a
+    // -Werror=missing-field-initializers failure on some ESP-IDF 5.5.x releases.
+    temperature_sensor_config_t tcfg = {};
+    tcfg.range_min = -10;
+    tcfg.range_max = 80;
+    tcfg.clk_src = TEMPERATURE_SENSOR_CLK_SRC_DEFAULT;
     if (temperature_sensor_install(&tcfg, &ts) == ESP_OK && temperature_sensor_enable(ts) == ESP_OK) {
         tsens_ = ts;
     } else {
